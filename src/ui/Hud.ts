@@ -1,8 +1,11 @@
 import type { GameTelemetry } from '../game/types';
 import './manual-controls.css';
 import './cabin.css';
+import './pedestrian-hud.css';
 import { EngineAudio } from './EngineAudio';
 import { notify, type NotifyKind, type NotifyOptions } from './Notify';
+import { pedestrianHud } from './PedestrianHud';
+import type { Exam02Pedestrian } from '../game/exercises/Exam02Pedestrian';
 
 type Bindings = { onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void };
 
@@ -258,6 +261,13 @@ export class Hud {
     }
     flash(text: string, kind: NotifyKind | NotifyOptions = 'info') {
         notify.show(text, typeof kind === 'string' ? { kind } : kind);
+    }
+    /**
+     * Cập nhật widget bài 2 — chỉ hiển thị khi visible=true.
+     * DrivingGame gọi mỗi frame với dữ liệu từ Exam02Pedestrian và front bumper.
+     */
+    updatePedestrianHud(exercise: Exam02Pedestrian | undefined, frontX: number | null, visible: boolean) {
+        pedestrianHud.update(this.host, exercise, frontX, visible);
     }
     clearNotices() {
         this.finishedShown = false;

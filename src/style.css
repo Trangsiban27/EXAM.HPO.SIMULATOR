@@ -144,6 +144,9 @@ button:active {
 .develop-mode #quickCamera {
   display: none;
 }
+.develop-mode .cockpit {
+  display: none;
+}
 .settings {
   position: absolute;
   right: 18px;

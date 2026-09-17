@@ -165,6 +165,92 @@ export const EXAM_02_PEDESTRIAN_RULES: ExamPedestrianRules = {
 };
 
 /**
+ * Pedestrian rules v2 — full implementation aligned with
+ * spec/exam/exam_02_pedestrian_stop.md (HARD_CONSTRAINT từ §12).
+ *
+ * Khoảng cách A: đo từ thanh cản trước xuống vạch dừng.
+ *   A ∈ [0, 0.5 m]    → VALID_STOP
+ *   A > 0.5 m         → STOP_TOO_EARLY  (-5)
+ *   A < 0             → STOP_OVER_LINE  (-5)
+ *   không dừng        → NO_REQUIRED_STOP (-5)
+ */
+export interface ExamPedestrianRulesV2 {
+    id: 'EXAM_02_PEDESTRIAN';
+    /** Khoảng cách tối đa từ thanh cản trước đến vạch dừng (HARD_CONSTRAINT: 0.5 m). */
+    stopPosition: {
+        maxDistanceBeforeLineM: number;
+    };
+    engine: {
+        maxRPM: number;
+        stallPenalty: Record<ExamVehicleClass, number>;
+        rpmExceededPenalty: Record<ExamVehicleClass, number>;
+    };
+    /** Tốc độ giới hạn trong zone 2A (HARD_CONSTRAINT §4.5). */
+    maxSpeedKmh: Record<ExamVehicleClass, number>;
+    penalties: {
+        noRequiredStop: number;
+        stopTooEarly: number;
+        stopOverLine: number;
+    };
+    speeding: {
+        intervalSec: number;
+        penaltyPerInterval: number;
+    };
+    /** Thời gian đến bài vượt quy định. allowedTimeSec = null (REQUIRED_INPUT). */
+    arrivalOvertime: {
+        intervalSec: number;
+        penaltyPerInterval: number;
+        allowedTimeSec: number | null;
+    };
+    disqualify: {
+        driveOnCurb: boolean;
+        accident: boolean;
+    };
+}
+
+export const EXAM_02_PEDESTRIAN_RULES_V2: ExamPedestrianRulesV2 = {
+    id: 'EXAM_02_PEDESTRIAN',
+    stopPosition: {
+        maxDistanceBeforeLineM: 0.5,
+    },
+    engine: {
+        maxRPM: 4000,
+        stallPenalty,
+        rpmExceededPenalty,
+    },
+    maxSpeedKmh: {
+        A1: 40,
+        A2: 50,
+        B: 24,
+        D1: 24,
+        D2: 24,
+        C1: 20,
+        C: 20,
+        D: 20,
+        E: 20,
+        Fc: 20,
+    },
+    penalties: {
+        noRequiredStop: 5,
+        stopTooEarly: 5,
+        stopOverLine: 5,
+    },
+    speeding: {
+        intervalSec: 3,
+        penaltyPerInterval: 1,
+    },
+    arrivalOvertime: {
+        intervalSec: 3,
+        penaltyPerInterval: 1,
+        allowedTimeSec: null, // REQUIRED_INPUT — spec không cung cấp.
+    },
+    disqualify: {
+        driveOnCurb: true,
+        accident: true,
+    },
+};
+
+/**
  * Returns a defensive copy of EXAM_01_START_RULES keyed to the supplied vehicle
  * class. Callers should never mutate the returned object in-place.
  */

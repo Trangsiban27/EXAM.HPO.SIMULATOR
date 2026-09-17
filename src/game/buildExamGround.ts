@@ -16,13 +16,39 @@ export function buildExamGround(objects: TrackObjects) {
     // ZONE_01_START: vạch xuất phát + chữ "XUẤT PHẤT" + marker 1A. Cây đèn
     // tín hiệu bị xoá khỏi bài 1 — chỉ bật khi truyền withSignal: true.
     objects.addStartZone(startPosition.lineX, startPosition.lineZ, 'horizontal', 8);
-    // Road segment BEFORE the start line (negative X side). Extended to 35m so the
-    // vehicle spawn point (15m behind the line, x = lineX - distance = -40) sits
+    // Road segment BEFORE the start line (negative X side). Extended to 65m so the
+    // vehicle spawn point (15m behind the line, x = lineX - distance = -50) sits
     // squarely on asphalt instead of bare ground.
-    objects.addRoad(-35, -2, 8, 50, 'horizontal', 'straight', 'white-dashed');
+    objects.addRoad(-35, -2, 8, 60, 'horizontal', 'straight', 'white-dashed');
     objects.addRoad(8, -2, 8, 20, 'horizontal', 'straight', 'white-dashed');
     // T-junction: this branch ends at the main road's center, opening only its north side.
-    objects.addPedestrianCrossing(-5, -2, 'horizontal', 8, 3);
+
+    // ============================================================
+    // ZONE_02_PEDESTRIAN (2A) — DỪNG XE NHƯỜNG ĐƯỜNG CHO NGƯỜI ĐI BỘ
+    // Trên cùng corridor với 1A (main road, axis along X).
+    // Xe spawn tại X = -50, heading -PI/2 (hướng +X).
+    // Vạch xuất phát 1A tại X = -35.
+    // Crosswalk tại X = -5 (giữ nguyên từ layout sân).
+    // Vạch dừng 2A đặt tại X = -8 (3 m trước crosswalk) — đúng thứ tự
+    // spec §7.1: [xe] → vạch dừng → crosswalk.
+    // Khoảng cách spawn→2A: -8 - (-50) = 42 m.
+    // ============================================================
+    const EX02_CROSSWALK_X = -5;
+    const EX02_STOP_LINE_X = -8;
+    const EX02_STOP_BAR_X = -8.75;   // 8 m trước crosswalk, học viên dễ canh điểm dừng
+
+    // Crosswalk có sẵn (line 35) — addPedestrianZone sẽ attach lại vào zone.
+    objects.addPedestrianCrossing(EX02_CROSSWALK_X, -2, 'horizontal', 8, 3);
+    // Stop-bar cảnh báo thị giác: dừng trước vạch này = không trừ điểm (không có sensor gameplay).
+    objects.addStopBarWarning(EX02_STOP_BAR_X, startPosition.lineZ, 8);
+    const zone2A = objects.addPedestrianZone({
+        stopLineX: EX02_STOP_LINE_X,
+        crosswalkX: EX02_CROSSWALK_X,
+        roadZ: startPosition.lineZ,
+        roadWidth: 8,
+        direction: 'horizontal',
+    });
+
     // The existing road ends at X=18; the bridge connects there and ends at X=44.
     objects.addBridge(31, -2, 'horizontal');
     objects.addRoad(49, -2, 8, 10, 'horizontal', 'straight', 'white-solid');

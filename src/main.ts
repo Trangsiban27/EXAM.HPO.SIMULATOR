@@ -9,7 +9,8 @@ const hudHost=document.querySelector<HTMLDivElement>('#hud');
 
 if(!gameHost||!hudHost)throw new Error('Missing host');
 
-const hud=new Hud(hudHost);
+const develop = new URLSearchParams(window.location.search).get('develop') === 'true';
+const hud = new Hud(hudHost, { develop });
 async function start() {
     try {
         const vehicle = new URLSearchParams(window.location.search).get('vehicle') === '3'

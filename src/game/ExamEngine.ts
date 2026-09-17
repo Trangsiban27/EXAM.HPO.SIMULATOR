@@ -1,12 +1,16 @@
 import * as THREE from 'three';
 import type {PenaltyEvent} from './types';
 import { StartExercise, type StartSignalPhase } from './exercises/StartExercise';
-import { PedestrianExercise, type Exam02Input } from './exercises/PedestrianExercise';
+import { Exam02Pedestrian } from './exercises/Exam02Pedestrian';
 import { startPosition } from './startPosition';
 
-/** 2A stop line: 60 m sau vạch xuất phát, cùng corridor Z = -2 với 1A. */
-const PEDESTRIAN_DISTANCE_FROM_START_M = 60;
-const PEDESTRIAN_STOP_LINE_X = startPosition.lineX + PEDESTRIAN_DISTANCE_FROM_START_M;
+/** 2A stop line: hardcoded tại X = -8 (giữ nguyên vị trí).
+ *  Xe spawn tại X = lineX - distance = -35 - 15 = -50, heading -PI/2 (hướng +X).
+ *  Vạch dừng 2A đặt tại X = -8 — đồng bộ với EX02_STOP_LINE_X
+ *  trong buildExamGround.ts (3 m trước crosswalk tại X=-5, đúng spec §7.1).
+ *  Khoảng cách spawn→2A = -8 - (-50) = 42 m. */
+const PEDESTRIAN_DISTANCE_FROM_START_M = 42;
+const PEDESTRIAN_STOP_LINE_X = -8;   // hardcode, không dùng công thức
 
 export interface ExamVehicleSnapshot {
     position: THREE.Vector3;
@@ -26,10 +30,14 @@ export class ExamEngine{
     activeIndex=0;
     startedAt=performance.now();
     readonly startExercise = new StartExercise();
-    readonly pedestrianExercise = new PedestrianExercise({
+    readonly pedestrianExercise = new Exam02Pedestrian({
         stopLineX: PEDESTRIAN_STOP_LINE_X,
         roadZ: startPosition.lineZ,
-        roadWidth: 8
+        roadWidth: 8,
+        approachZoneM: 15,
+        exitDistanceM: 3,
+        stopSpeedKmh: .6,
+        minStopDwellSec: .3,
     });
     disqualified=false;
     disqualifyReason='';
@@ -69,17 +77,19 @@ export class ExamEngine{
         }
 
         if (this.activeIndex === 1) {
-            const input: Exam02Input = {
+            const input = {
                 position: vehicle.position,
                 frontPosition: vehicle.frontPosition,
                 speedKmh: vehicle.speedKmh,
                 rpm: vehicle.rpm,
                 engineRunning: vehicle.engineRunning,
                 stalled: vehicle.stalled,
+                seatBeltFastened: vehicle.seatBeltFastened,
+                leftSignal: vehicle.leftSignal,
                 clutch: vehicle.clutch ?? 1,
                 dt,
             };
-            const result = this.pedestrianExercise.update(input, this.startedAt);
+            const result = this.pedestrianExercise.update(input);
             for (const evt of result.penalties) this.applyPenaltyEvent(evt);
             if (result.disqualified) {
                 this.disqualified = true;
@@ -117,7 +127,11 @@ export class ExamEngine{
             (this.startExercise.state === 'PRE_START' ||
              this.startExercise.state === 'COUNTDOWN_5S');
     }
-    get startLampOn() { return this.startExercise.startLampOn; }
+    get startLampOn() {
+        if (this.activeIndex === 0) return this.startExercise.startLampOn;
+        if (this.activeIndex === 1) return this.pedestrianExercise.startLampOn;
+        return false;
+    }
     get elapsedSeconds(){
         return(performance.now()-this.startedAt)/1000;
     }

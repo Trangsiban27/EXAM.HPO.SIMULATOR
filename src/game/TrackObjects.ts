@@ -1,9 +1,14 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Bridge } from './Bridge';
 import { TrafficLight } from './TrafficLight';
 import { ExerciseSign } from './ExerciseSign';
 import { WindingCourse } from './WindingCourse';
 import { startPosition } from './startPosition';
+
+/** Cache for the stop sign GLB — loaded once, cloned for each placement. */
+let _stopSignGLB: THREE.Group | null = null;
+let _stopSignLoader = new GLTFLoader();
 
 type ArrowType = 'straight' | 'left' | 'right' | 'none';
 type RoadDirection = 'vertical' | 'horizontal';
@@ -823,4 +828,462 @@ export class TrackObjects{
         return group;
     }
 
+    /**
+     * Route marker cho các bài thi khác 1A. Dùng chung template.
+     */
+    addRouteMarkerFor(label: string, z: number, roadWidth: number, subtitle: string, width = 4.2): THREE.Group {
+        const group = new THREE.Group();
+        const sign = new ExerciseSign({
+            title: label,
+            subtitle,
+            x: 0, z: z - roadWidth / 2 - 1.6, rotation: 0, width
+        });
+        group.add(sign.root);
+        return group;
+    }
+
+    /**
+     * Vạch dừng quy định cho bài 2A (spec/exam/exam_02_pedestrian_stop.md §5.1).
+     * Vạch trắng đơn dày hơn vạch giữa, vuông góc trục di chuyển của xe.
+     * Đặt tại (x, 0, z) — x là tọa độ X của vạch dừng trên corridor.
+     */
+    addPedestrianStopLine(z: number, roadWidth = 8, x = 0): THREE.Mesh {
+        const marking = new THREE.Mesh(
+            new THREE.BoxGeometry(.2, .01, roadWidth),
+            new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .85 })
+        );
+        marking.position.set(x, .085, z);
+        marking.receiveShadow = true;
+        marking.name = 'EX02_STOP_LINE';
+        this.root.add(marking);
+        return marking;
+    }
+
+    /**
+     * Stop-bar cảnh báo cho bài 2A — vạch trắng phụ, đặt giữa vạch dừng sensor và
+     * crosswalk. Học viên dừng TRƯỚC vạch này = không trừ điểm; vượt qua = bị trừ.
+     * Không có sensor gameplay; chỉ mang tính thị giác để cảnh báo ranh giới an
+     * toàn. Vạch kéo dài toàn bộ chiều rộng đường để nổi bật trên mặt đường.
+     */
+    addStopBarWarning(x: number, z: number, roadWidth = 8): THREE.Mesh {
+        const marking = new THREE.Mesh(
+            // Vạch nằm ngang đường (vuông góc hướng xe chạy): 0.5m dày theo trục X,
+            // 8m rộng theo trục Z (curb trái → curb phải).
+            new THREE.BoxGeometry(.2, .01, roadWidth),
+            new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .85 })
+        );
+        marking.position.set(x, .085, z);
+        marking.receiveShadow = true;
+        marking.name = 'EX02_STOP_BAR_WARNING';
+        this.root.add(marking);
+        return marking;
+    }
+
+    /**
+     * Biển "Dừng lại" (STOP sign) — sử dụng model GLB
+     * stop_sign_road_sign.glb trong thư mục public/models/.
+     * Load sync bằng cache, clone cho mỗi placement.
+     * @param x  Tọa độ X của vạch dừng (tâm đường theo trục X).
+     * @param z  Tọa độ Z tâm đường.
+     * @param roadWidth Chiều rộng làn đường.
+     */
+    addStopSignModel(x: number, z: number, roadWidth = 8): THREE.Group {
+        const group = new THREE.Group();
+        group.name = 'EX02_SIGN_STOP';
+        group.position.set(x, 0, z);
+        group.rotation.y = -Math.PI / 2;
+
+        const postX = roadWidth / 2 + 1.5;
+
+        if (_stopSignGLB) {
+            // Clone cached GLB mesh.
+            const signRoot = _stopSignGLB.clone();
+            signRoot.scale.setScalar(.8);
+            signRoot.position.set(postX, 0, 0);
+            group.add(signRoot);
+        } else {
+            // Fallback canvas sign (sync) — GLB sẽ được cache sau khi load xong.
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d')!;
+            ctx.fillStyle = '#cc0000';
+            ctx.fillRect(0, 0, 512, 512);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 28;
+            ctx.strokeRect(20, 20, 472, 472);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 220px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('STOP', 256, 256);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            const signMesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(1.2, 1.2),
+                new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide })
+            );
+            signMesh.position.set(postX, 2.5, 0);
+            signMesh.castShadow = true;
+            group.add(signMesh);
+        }
+
+        // Post.
+        const post = new THREE.Mesh(
+            new THREE.CylinderGeometry(.06, .06, 2.5, 12),
+            new THREE.MeshStandardMaterial({ color: 0xc7d0d5, metalness: .6, roughness: .4 })
+        );
+        post.position.set(postX, 1.25, 0);
+        post.castShadow = true;
+        group.add(post);
+
+        this.root.add(group);
+        return group;
+    }
+
+    /**
+     * Pre-load the stop sign GLB into cache (call once at scene init).
+     * Returns a promise that resolves when the model is ready.
+     */
+    async loadStopSignGLB(): Promise<void> {
+        if (_stopSignGLB) return;
+        try {
+            const gltf = await _stopSignLoader.loadAsync('/models/stop_sign_road_sign.glb');
+            _stopSignGLB = gltf.scene;
+        } catch {
+            // Silently fail — addStopSignModel will use canvas fallback.
+        }
+    }
+
+    /**
+     * Biển "Đường người đi bộ cắt ngang" — tam giác vàng với hình người đi bộ.
+     * Đặt bên trái đường (-X side) của corridor dọc trục X.
+     * @param x  Tọa độ X của vạch dừng (tâm đường theo trục X).
+     * @param z  Tọa độ Z tâm đường.
+     */
+    addPedestrianSignModel(x: number, z: number, roadWidth = 8): THREE.Group {
+        const group = new THREE.Group();
+        group.name = 'EX02_SIGN_PEDESTRIAN';
+        group.position.set(x, 0, z);
+        group.rotation.y = Math.PI / 2; // tam giác hướng vào làn xe
+
+        const postX = -(roadWidth / 2 + 1.5);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d')!;
+
+        // Tam giác vàng nền.
+        ctx.fillStyle = '#ffcc00';
+        ctx.fillRect(0, 0, 512, 512);
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = 20;
+        ctx.strokeRect(20, 20, 472, 472);
+
+        // Hình người đi bộ đơn giản.
+        ctx.fillStyle = '#1a1a1a';
+        ctx.font = 'bold 180px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🚶', 256, 256);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const signMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.2, 1.2),
+            new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide })
+        );
+        signMesh.position.set(postX, 2.5, 0);
+        signMesh.castShadow = true;
+        group.add(signMesh);
+
+        const post = new THREE.Mesh(
+            new THREE.CylinderGeometry(.06, .06, 2.5, 12),
+            new THREE.MeshStandardMaterial({ color: 0xc7d0d5, metalness: .6, roughness: .4 })
+        );
+        post.position.set(postX, 1.25, 0);
+        post.castShadow = true;
+        group.add(post);
+
+        this.root.add(group);
+        return group;
+    }
+
+    /**
+     * ZONE_02_PEDESTRIAN — bundle cho bài 2A (Dừng xe nhường đường người đi bộ).
+     *
+     * Tách **visual geometry** (stop line, crosswalk, biển báo, marker) khỏi
+     **gameplay sensors** theo spec/threejs_exam_yard_specification_v2.md §17.
+     *
+     * Crosswalk được tạo trước (ngoài zone) vì nó có thể chia sẻ với cả bài 02
+     * và các bài khác (đếm người đi bộ, etc.). Hàm này chỉ `attach` crosswalk đó
+     * vào zone và đặt sensor liên quan.
+     *
+     * Tham khảo:
+     * - spec/threejs_exam_yard_specification_v2.md §7.1, §7.2 (EX02_STOP_LINE /
+     *   EX02_CROSSWALK / EX02_SIGN_STOP / EX02_SIGN_PEDESTRIAN / EX02_STOP_SENSOR).
+     * - spec/exam/exam_02_pedestrian_stop.md §5, §9 (các sensor gameplay).
+     */
+    addPedestrianZone(opts: {
+        stopLineX: number;
+        crosswalkX: number;
+        roadZ: number;
+        roadWidth?: number;
+        direction?: RoadDirection;
+    }): THREE.Group {
+        const roadWidth = opts.roadWidth ?? 8;
+        const direction = opts.direction ?? 'horizontal';
+        const stopLineX = opts.stopLineX;
+        const crosswalkX = opts.crosswalkX;
+        const z = opts.roadZ;
+
+        const zone = new THREE.Group();
+        zone.name = 'ZONE_02_PEDESTRIAN';
+        this.root.add(zone);
+
+        // ---- Visual geometry (spec §7.2 object names) ----
+        // Vạch dừng (EX02_STOP_LINE).
+        const stopLine = this.addPedestrianStopLine(z, roadWidth, -8.75);
+        zone.attach(stopLine);
+
+        // Crosswalk (EX02_CROSSWALK). addPedestrianCrossing auto-add this.root và
+        // tạo group riêng; nếu crosswalk chưa tồn tại thì tạo mới đúng vị trí,
+        // nếu đã có (như ở X=-5) thì attach object đã tồn tại vào zone.
+        let crosswalk = this.root.children.find(
+            child => child.name === 'pedestrian-crossing'
+        ) as THREE.Group | undefined;
+        if (!crosswalk) {
+            crosswalk = this.addPedestrianCrossing(crosswalkX, z, direction, roadWidth, 3);
+        }
+        crosswalk.name = 'EX02_CROSSWALK';
+        zone.attach(crosswalk);
+
+        // Biển "Dừng lại" — stop_sign_road_sign.glb (bên phải đường).
+        const signStop = this.addStopSignModel(stopLineX, z, roadWidth);
+        signStop.name = 'EX02_SIGN_STOP';
+        zone.attach(signStop);
+
+        // Biển "Đường người đi bộ cắt ngang" — tam giác vàng (bên trái đường).
+        const signPedestrian = this.addPedestrianSignModel(stopLineX, z, roadWidth);
+        signPedestrian.name = 'EX02_SIGN_PEDESTRIAN';
+        zone.attach(signPedestrian);
+
+        // Marker 2A — bảng tên bài thi.
+        const marker2A = this.addRouteMarkerFor(
+            '2A', z, roadWidth,
+            'DỪNG XE NHƯỜNG ĐƯỜNG NGƯỜI ĐI BỘ',
+            4.2
+        );
+        marker2A.name = 'ROUTE_MARKER_2A';
+        marker2A.position.x = stopLineX;
+        zone.attach(marker2A);
+
+        // Tham chiếu "0.5 m" — vạch nhỏ đánh dấu ngưỡng A tối đa trên mặt đường
+        // (chỉ là visual hint, không ảnh hưởng rule MAX_FRONT_BUMPER_TO_STOP_LINE_M).
+        const halfWidth = roadWidth / 2;
+        const ref05 = new THREE.Mesh(
+            new THREE.BoxGeometry(roadWidth, .008, .05),
+            new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .85 })
+        );
+        ref05.position.set(stopLineX + .5, .07, z);
+        ref05.receiveShadow = true;
+        ref05.name = 'EX02_REFERENCE_0_5M';
+        zone.add(ref05);
+
+        // Chữ "0.5 m" in trên mặt đất bên cạnh vạch tham chiếu (ngoài làn đường).
+        const ref05Label = this.makeGroundLabel('0.5 m', stopLineX + .5, z + roadWidth / 2 + .4, roadWidth, .55);
+        ref05Label.name = 'EX02_REFERENCE_0_5M_TEXT';
+        zone.add(ref05Label);
+
+        // Sprite world-space dùng để hiển thị "A = X.XX m" động phía trước xe.
+        // Ban đầu ẩn; DrivingGame sẽ gọi setStopDistanceLabel() mỗi frame.
+        const labelSprite = this.makeStopDistanceSprite();
+        labelSprite.visible = false;
+        labelSprite.name = 'EX02_LIVE_DISTANCE_LABEL';
+        zone.add(labelSprite);
+
+        // ---- Sensor (logic only, separated from visual per spec §17) ----
+        // Approach zone — vùng tiếp cận trước vạch dừng 15 m.
+        const approachStartX = stopLineX - 15;
+        const approachZone = new THREE.Box3(
+            new THREE.Vector3(z - halfWidth, -1, approachStartX),
+            new THREE.Vector3(z + halfWidth, 3, stopLineX)
+        );
+
+        // Stop line trigger — dải mỏng để chấm vị trí dừng.
+        const stopLineTrigger = new THREE.Box3(
+            new THREE.Vector3(z - halfWidth, -1, stopLineX - .15),
+            new THREE.Vector3(z + halfWidth, 3, stopLineX + .15)
+        );
+
+        // Over-line sensor — phát hiện thanh cản trước đã vượt vạch.
+        const overLineTrigger = new THREE.Box3(
+            new THREE.Vector3(z - halfWidth, -1, stopLineX + .15),
+            new THREE.Vector3(z + halfWidth, 3, stopLineX + 1)
+        );
+
+        // Exit sensor — sau vạch dừng 3 m, báo hoàn thành bài 2.
+        const exitX = stopLineX + 3;
+        const exitSensor = new THREE.Box3(
+            new THREE.Vector3(z - halfWidth, -1, exitX - .4),
+            new THREE.Vector3(z + halfWidth, 3, exitX + .4)
+        );
+
+        // Curb collider — dải rìa làn đường (mỗi bên 0.4 m) từ X spawn đến hết
+        // bài 2 dùng cho DQ "Lái xe lên vỉa hè" (spec §7 Lỗi 04).
+        const curbThickness = .4;
+        const curbHeight = .25;
+        const curbStartX = stopLineX - 16;
+        const curbEndX = stopLineX + 4;
+        const curbZLeft = new THREE.Box3(
+            new THREE.Vector3(z - halfWidth - curbThickness, -1, curbStartX),
+            new THREE.Vector3(z - halfWidth, curbHeight, curbEndX)
+        );
+        const curbZRight = new THREE.Box3(
+            new THREE.Vector3(z + halfWidth, -1, curbStartX),
+            new THREE.Vector3(z + halfWidth + curbThickness, curbHeight, curbEndX)
+        );
+
+        zone.userData = {
+            sensors: {
+                approachZone,
+                stopLine: stopLineTrigger,
+                overLine: overLineTrigger,
+                exitSensor,
+                curbCollider: [curbZLeft, curbZRight],
+            },
+            metadata: {
+                stopLineX,
+                crosswalkX,
+                roadZ: z,
+                roadWidth,
+                direction,
+                markerId: '2A',
+            },
+            // Truy cập nội bộ cho setStopDistanceLabel().
+            handle: {
+                updateLabel: (a: number, status: 'VALID' | 'TOO_EARLY' | 'OVER' | 'APPROACHING' | 'HIDDEN', anchorX: number) =>
+                    this.updateStopDistanceLabel(labelSprite, a, status, anchorX),
+            },
+        };
+        return zone;
+    }
+
+    /** Tạo một Sprite nhãn "A = X.XX m" đặt phía trước xe (hidden mặc định). */
+    private makeStopDistanceSprite(): THREE.Sprite {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 192;
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(canvas),
+            transparent: true,
+            depthTest: false,
+            depthWrite: false,
+        }));
+        sprite.scale.set(4, 1.5, 1);
+        sprite.renderOrder = 999;
+        return sprite;
+    }
+
+    /** Cập nhật texture + vị trí của sprite khoảng cách A. */
+    private updateStopDistanceLabel(
+        sprite: THREE.Sprite,
+        a: number,
+        status: 'VALID' | 'TOO_EARLY' | 'OVER' | 'APPROACHING' | 'HIDDEN',
+        anchorX: number,
+    ): void {
+        if (status === 'HIDDEN') {
+            sprite.visible = false;
+            return;
+        }
+        sprite.visible = true;
+        sprite.position.set(anchorX + 6, 1.8, 0);
+        const material = sprite.material as THREE.SpriteMaterial;
+        const canvas = (material.map as THREE.CanvasTexture).image as HTMLCanvasElement;
+        const ctx = canvas.getContext('2d')!;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const colorMap = {
+            VALID: '#36c66a',
+            TOO_EARLY: '#f6d34c',
+            OVER: '#e15252',
+            APPROACHING: '#5b9bdb',
+        } as const;
+        const statusText = {
+            VALID: 'VỊ TRÍ HỢP LỆ',
+            TOO_EARLY: 'DỪNG QUÁ XA',
+            OVER: 'ĐÃ VƯỢT VẠCH',
+            APPROACHING: 'ĐANG TIẾP CẬN',
+        } as const;
+        ctx.fillStyle = 'rgba(8, 14, 22, .78)';
+        roundRect(ctx, 0, 0, canvas.width, canvas.height, 18);
+        ctx.fill();
+        ctx.strokeStyle = colorMap[status as Exclude<typeof status, 'HIDDEN'>];
+        ctx.lineWidth = 6;
+        roundRect(ctx, 3, 3, canvas.width - 6, canvas.height - 6, 15);
+        ctx.stroke();
+        ctx.fillStyle = colorMap[status as Exclude<typeof status, 'HIDDEN'>];
+        ctx.font = 'bold 60px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`A = ${a.toFixed(2)} m`, canvas.width / 2, canvas.height / 2 - 8);
+        ctx.font = '28px Arial';
+        ctx.fillText(statusText[status as Exclude<typeof status, 'HIDDEN'>], canvas.width / 2, canvas.height / 2 + 50);
+        (material.map as THREE.CanvasTexture).needsUpdate = true;
+    }
+
+    /**
+     * API công khai: DrivingGame gọi mỗi frame để cập nhật nhãn khoảng cách A
+     * trong bài 02. Tự tìm zone 2A đã tạo và gọi handle.updateLabel.
+     * Trả về true nếu có zone hoạt động.
+     */
+    setStopDistanceLabel(a: number, status: 'VALID' | 'TOO_EARLY' | 'OVER' | 'APPROACHING' | 'HIDDEN', anchorX: number): boolean {
+        const zone = this.root.children.find(
+            child => child.name === 'ZONE_02_PEDESTRIAN'
+        ) as THREE.Group | undefined;
+        if (!zone || !zone.userData?.handle) return false;
+        zone.userData.handle.updateLabel(a, status, anchorX);
+        return true;
+    }
+
+    /** Tạo chữ in trên mặt đất dùng canvas texture (dùng cho nhãn "0.5 m"). */
+    private makeGroundLabel(text: string, x: number, z: number, roadWidth: number, heightWorld: number): THREE.Mesh {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d')!;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#f6d34c';
+        ctx.font = 'bold 72px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const aspect = canvas.width / canvas.height;
+        const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(heightWorld * aspect, heightWorld),
+            new THREE.MeshStandardMaterial({
+                map: texture, transparent: true, roughness: .95, depthWrite: false,
+            })
+        );
+        mesh.rotation.x = -Math.PI / 2;
+        // Vạch 0.5 m đặt bên trái so với hướng xe (xe đi theo +X); chữ chạy ngược
+        // để thí sinh đọc được khi tiến đến.
+        mesh.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+        mesh.position.set(x, .012, z + roadWidth / 4);
+        mesh.receiveShadow = true;
+        return mesh;
+    }
+
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
 }
