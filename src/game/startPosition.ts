@@ -2,7 +2,8 @@
 export const startPosition = {
     lineX: -20,
     lineZ: -2,
-    distance: 5,
+    /** Vehicle starts 15m behind the start line (lineX - distance). */
+    distance: 20,
     laneOffset: -2,
     heading: -Math.PI / 2,
 };

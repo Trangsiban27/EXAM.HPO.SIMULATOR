@@ -1,6 +1,7 @@
 import type { InputManager } from './InputManager';
 import { ManualCar } from './drivetrain/ManualCar';
 import { Pedals } from './drivetrain/Pedals';
+import { notify } from '../ui/Notify';
 
 /** Simplified manual drivetrain; clutch release is gradual for keyboard controls. */
 export class ManualTransmission {
@@ -31,7 +32,14 @@ export class ManualTransmission {
 
         if (pressed('Enter')) {
             if (this.running) { this.car.engine.stop(); this.status = 'Máy tắt'; }
-            else if (this.gear === 0 && this.clutch >= 1 - 1e-6) { this.car.engine.start(); this.status = 'Máy đang chạy'; }
+            else if (this.gear === 0 && this.clutch >= 1 - 1e-6) {
+                this.car.engine.start();
+                this.status = 'Máy đang chạy';
+                // notify.show(
+                //     'Chào mừng bạn đến bài thi, hãy đưa xe đến vị trí xuất phát.',
+                //     { kind: 'exam', persist: true }
+                // );
+            }
             else this.status = 'Về số N và đạp hết côn (thanh 0%), rồi nhấn Enter';
         }
         for (const [code, gear] of [['KeyN', 0], ['KeyR', -1], ['Digit1', 1], ['Digit2', 2], ['Digit3', 3], ['Digit4', 4], ['Digit5', 5]] as const) {

@@ -13,8 +13,13 @@ export function buildExamGround(objects: TrackObjects) {
     objects.root.add(ground);
 
     objects.addRoad(0, -2, 8, 20, 'horizontal', 'straight', 'white-dashed');
+    // ZONE_01_START: vạch xuất phát + chữ "XUẤT PHẤT" + marker 1A. Cây đèn
+    // tín hiệu bị xoá khỏi bài 1 — chỉ bật khi truyền withSignal: true.
     objects.addStartZone(startPosition.lineX, startPosition.lineZ, 'horizontal', 8);
-    objects.addRoad(-20, -2, 8, 20, 'horizontal', 'straight', 'white-dashed');
+    // Road segment BEFORE the start line (negative X side). Extended to 35m so the
+    // vehicle spawn point (15m behind the line, x = lineX - distance = -40) sits
+    // squarely on asphalt instead of bare ground.
+    objects.addRoad(-35, -2, 8, 50, 'horizontal', 'straight', 'white-dashed');
     objects.addRoad(8, -2, 8, 20, 'horizontal', 'straight', 'white-dashed');
     // T-junction: this branch ends at the main road's center, opening only its north side.
     objects.addPedestrianCrossing(-5, -2, 'horizontal', 8, 3);

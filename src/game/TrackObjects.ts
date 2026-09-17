@@ -543,7 +543,9 @@ export class TrackObjects{
             direction==='horizontal' ? -Math.PI/2 : 0);
         marking.position.set(x,.095,z);
         marking.receiveShadow=true;
+        marking.name = 'START_LINE';
         this.root.add(marking);
+        return marking;
     }
 
     addWheelTrackCourse({ x = 58, z = -20, direction = 'vertical', entryLength = 13.2 }: {
@@ -683,27 +685,142 @@ export class TrackObjects{
     }
 
     /**
-     * ZONE_01_START: start marking, 1A roadside board, and a GO signal that
-     * begins its cycle as soon as the exam (or a restart) starts.
+     * ZONE_01_START: start marking (EX01_START_LINE), road text "XUẤT PHẤT",
+     * 1A roadside board, optional GO signal, route marker, and a separate set of
+     * gameplay sensors (wait/start/signalOff) stored on `zone.userData`.
+     *
+     * Implements spec/exam/exam_01_start.md §8 (Sensors cần có trong Three.js) and
+     * spec/threejs_exam_yard_specification_v2.md §6.2 + §17 (visual vs sensor).
      */
-    addStartZone(x: number, z: number, direction: RoadDirection = 'horizontal', roadWidth = 8) {
+    addStartZone(x: number, z: number, direction: RoadDirection = 'horizontal', roadWidth = 8, opts: {
+        withSignal?: boolean;
+        signalRotation?: number;
+    } = {}) {
         const zone = new THREE.Group();
         zone.name = 'ZONE_01_START';
         this.root.add(zone);
 
+        // ---- Visual geometry (per spec §6.2 object names) ----
+        const startLine = this.addStartLine(x, z, direction, roadWidth);
+        // addStartLine auto-adds to this.root; rename the most-recent START_LINE marking.
+        const lastStart = this.root.children[this.root.children.length - 1];
+        if (lastStart && lastStart.name === 'START_LINE') {
+            lastStart.name = 'EX01_START_LINE';
+        }
+        zone.attach(startLine);
+
+        const startText = this.addRoadText('XUẤT PHÁT', x, z, direction, roadWidth);
+        startText.name = 'EX01_START_TEXT';
+        zone.attach(startText);
+
+        const marker = this.addRouteMarker('1A', x, z, direction, roadWidth);
+        marker.name = 'ROUTE_MARKER_1A';
+        zone.attach(marker);
+
+        if (opts.withSignal) {
+            const rotation = opts.signalRotation ?? startPosition.heading;
+            const signal = this.addTrafficLight(x, z, roadWidth, rotation);
+            signal.root.name = 'START_SIGNAL';
+            this.startSignal = signal;
+            zone.attach(signal.root);
+        } else {
+            this.startSignal = null;
+        }
+
+        // ---- Sensor (logic only, separated from visual per spec §17) ----
+        const halfWidth = roadWidth / 2;
+        // Wait zone: chassis must rest inside this box before countdown begins.
+        const waitZone = new THREE.Box3(
+            new THREE.Vector3(x - 4, -1, z - halfWidth),
+            new THREE.Vector3(x - .15, 3, z + halfWidth)
+        );
+        // Start line trigger: very thin slab straddling x.
+        const startTrigger = new THREE.Box3(
+            new THREE.Vector3(x - .15, -1, z - halfWidth),
+            new THREE.Vector3(x + .15, 3, z + halfWidth)
+        );
+        // 5 m gate (HARD_CONSTRAINT từ spec §4.4 LEFT_SIGNAL_OFF_GATE).
+        const signalOffX = x + 5;
+        const signalOffGate = new THREE.Box3(
+            new THREE.Vector3(signalOffX - .4, -1, z - halfWidth),
+            new THREE.Vector3(signalOffX + .4, 3, z + halfWidth)
+        );
+
+        zone.userData = {
+            sensors: {
+                waitZone,
+                startTrigger,
+                signalOffGate,
+            },
+            metadata: {
+                lineX: x,
+                lineZ: z,
+                direction,
+                roadWidth,
+                markerId: '1A',
+            },
+        };
+        return zone;
+    }
+
+    /**
+     * Render the road text (spec §6.2 EX01_*_TEXT). The text is painted into a
+     * canvas, sampled as a CanvasTexture, and laid onto a thin plane in the road.
+     * `direction` controls whether the text runs along world +X (horizontal) or +Z.
+     */
+    addRoadText(text: string, x: number, z: number, direction: RoadDirection, roadWidth = 8): THREE.Mesh {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = 'rgba(0,0,0,0)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#f5f5f5';
+        ctx.font = 'bold 168px "Arial", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 4;
+
+        const width = Math.max(2, roadWidth - .4);
+        const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(width, width / 4),
+            new THREE.MeshStandardMaterial({
+                map: texture,
+                transparent: true,
+                roughness: .95,
+                depthWrite: false,
+            })
+        );
+        // Plane mặc định nằm trong mặt phẳng XY; xoay xuống mặt đất.
+        mesh.rotation.x = -Math.PI / 2;
+        // Rotate around world-up so the text reads along the lane direction.
+        mesh.rotateOnWorldAxis(
+            new THREE.Vector3(0, 1, 0),
+            direction === 'horizontal' ? -Math.PI / 2 : 0
+        );
+        // Sit just above the asphalt to avoid z-fighting (spec §22).
+        mesh.position.set(x, .012, z);
+        mesh.receiveShadow = true;
+        return mesh;
+    }
+
+    /**
+     * Mount the 1A route marker (per spec/threejs_exam_yard_specification_v2.md §34:
+     * `MARKER_1A` lives inside the start zone for the Hiệp Phát yard).
+     */
+    private addRouteMarker(label: string, x: number, z: number, direction: RoadDirection, roadWidth: number): THREE.Group {
+        const group = new THREE.Group();
         const sign = new ExerciseSign({
-            title: '1A — XUẤT PHÁT',
-            subtitle: 'Chờ tín hiệu rồi qua vạch',
+            title: label,
+            subtitle: 'XUẤT PHÁT — 1A',
             x, z: z - roadWidth / 2 - 1.6, rotation: 0, width: 4.2
         });
-        sign.root.name = 'ROUTE_MARKER_1A';
-        zone.add(sign.root);
-
-        const signal = this.addTrafficLight(x, z, roadWidth, startPosition.heading);
-        signal.root.name = 'START_SIGNAL';
-        this.startSignal = signal;
-        zone.attach(signal.root);
-        return zone;
+        group.add(sign.root);
+        return group;
     }
 
 }

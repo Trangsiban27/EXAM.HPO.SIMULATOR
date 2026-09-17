@@ -4,8 +4,8 @@ import { StartExercise, type StartSignalPhase } from './exercises/StartExercise'
 import { PedestrianExercise, type Exam02Input } from './exercises/PedestrianExercise';
 import { startPosition } from './startPosition';
 
-/** 2A stop line: 30 m sau vạch xuất phát, cùng corridor Z = -2 với 1A. */
-const PEDESTRIAN_DISTANCE_FROM_START_M = 30;
+/** 2A stop line: 60 m sau vạch xuất phát, cùng corridor Z = -2 với 1A. */
+const PEDESTRIAN_DISTANCE_FROM_START_M = 60;
 const PEDESTRIAN_STOP_LINE_X = startPosition.lineX + PEDESTRIAN_DISTANCE_FROM_START_M;
 
 export interface ExamVehicleSnapshot {
@@ -114,7 +114,7 @@ export class ExamEngine{
     }
     get approaching() {
         return this.activeIndex === 0 &&
-            (this.startExercise.state === 'APPROACHING' ||
+            (this.startExercise.state === 'PRE_START' ||
              this.startExercise.state === 'COUNTDOWN_5S');
     }
     get startLampOn() { return this.startExercise.startLampOn; }
