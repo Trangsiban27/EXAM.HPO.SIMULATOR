@@ -1,0 +1,2 @@
+import type { GearWarning } from './drivetrain/GearFeedback';
+export interface PenaltyEvent{at:number;points:number;reason:string}export interface GameTelemetry{speedKmh:number;gasPedal:number;brakePedal:number;gearWarnings:GearWarning[];engineStatus:string;gear:number;clutch:number;rpm:number;steering:number;steeringWheelAngle:number;score:number;elapsed:number;currentExercise:string;penalties:PenaltyEvent[];cameraMode:number;signals:{left:boolean;right:boolean;hazard:boolean};seatBelt:boolean;startLamp:boolean;disqualified:boolean;disqualifyReason:string}

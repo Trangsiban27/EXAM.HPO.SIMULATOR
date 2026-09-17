@@ -1,0 +1,632 @@
+:root {
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    sans-serif;
+  color: #f5f6fa;
+  background: #091426;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#app,
+#game {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+button,
+summary {
+  cursor: pointer;
+}
+button {
+  font: inherit;
+  color: inherit;
+  border: 1px solid #ffffff30;
+  background: #ffffff09;
+  border-radius: 14px;
+  padding: 10px 14px;
+  font-weight: 750;
+  touch-action: none;
+  user-select: none;
+}
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid #38d5e8;
+  outline-offset: 3px;
+}
+button:hover {
+  background: #ffffff18;
+}
+button.pressed,
+button:active {
+  background: #ffffff30;
+  border-color: #ffffff90;
+}
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  padding: 18px;
+}
+.telemetry {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding-right: 250px;
+}
+.pill,
+.settings {
+  background: #101113ed;
+  border: 1px solid #ffffff25;
+  border-radius: 17px;
+  box-shadow: 0 7px 18px #0003;
+  backdrop-filter: blur(10px);
+}
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 10px 16px;
+  white-space: nowrap;
+}
+.pill strong {
+  font-size: 25px;
+}
+.pill b {
+  font-size: 15px;
+}
+.pill small {
+  font-size: 10px;
+  font-weight: 800;
+}
+.pill i {
+  height: 28px;
+  border-left: 1px solid #ffffff25;
+  margin: 0 5px;
+}
+.mint {
+  color: #24d7aa;
+}
+.blue {
+  color: #85beff;
+}
+.amber {
+  color: #eabc32;
+}
+.icon {
+  font-size: 30px;
+}
+.mono {
+  font-family: ui-monospace, monospace;
+}
+.engine {
+  pointer-events: auto;
+  padding: 5px 10px;
+  border-radius: 9px;
+  border-color: #ad405b;
+  color: #b55a6d;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.engine.running {
+  border-color: #29c99b;
+  color: #29c99b;
+}
+.exercise {
+  max-width: 320px;
+}
+.exercise b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.exercise small {
+  color: #a8b0ba;
+}
+.develop-pill {
+  color: #f0c94a;
+  letter-spacing: .12em;
+  font-weight: 800;
+  font-size: 13px;
+}
+.develop-mode #cameraBtn,
+.develop-mode #quickCamera {
+  display: none;
+}
+.settings {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  pointer-events: auto;
+  z-index: 5;
+  font-size: 12px;
+}
+.settings summary {
+  padding: 15px;
+  list-style: none;
+  font-weight: 800;
+}
+.settings summary::first-letter {
+  color: #27c7e0;
+}
+.settings-body {
+  padding: 0 15px 15px;
+  max-width: 270px;
+}
+.settings-body p {
+  line-height: 1.9;
+  color: #b7bdc8;
+}
+.settings-body button {
+  font-size: 12px;
+  margin-right: 5px;
+}
+.cockpit {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+  pointer-events: none;
+}
+.cockpit button,
+.gear-selector {
+  pointer-events: auto;
+}
+.clutch-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.camera-toggle {
+  background: #282b31ba;
+  color: #edc453;
+  padding: 9px 12px;
+}
+.pedal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  background: #20262abf;
+  padding: 12px 8px;
+  font-size: 11px;
+  box-shadow: 0 4px 10px #0002;
+}
+.clutch {
+  height: 220px;
+  width: 55px;
+  border-color: #a5afe45c;
+  color: #b6bdea;
+  border-radius: 22px;
+}
+.pedal-track {
+  height: 140px;
+  width: 25px;
+  background: #ffffff09;
+  border: 1px solid #ffffff30;
+  border-radius: 10px;
+  position: relative;
+  overflow: hidden;
+}
+.pedal-track span {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: #929ed480;
+  transition: height 0.08s;
+}
+.pedal kbd {
+  font:
+    9px ui-monospace,
+    monospace;
+  opacity: 0.7;
+}
+.steering-panel {
+  width: 285px;
+  background: #1c212bbb;
+  border: 1px solid #ffffff20;
+  border-radius: 23px;
+  padding: 15px 12px;
+  box-shadow: 0 4px 12px #0005;
+  backdrop-filter: blur(6px);
+}
+.steering-caption {
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: #b1b6c2;
+  margin-bottom: 12px;
+}
+.steering-readout {
+  display: flex;
+  justify-content: space-evenly;
+  align-items: center;
+  color: #bdc2cd;
+  margin-bottom: 12px;
+}
+.steering-readout span {
+  border: 2px solid #ffffff25;
+  border-radius: 50%;
+  min-width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+}
+.steering-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.steering-buttons button {
+  height: 70px;
+  width: 72px;
+  font-size: 24px;
+  border: 2px solid #ffffff30;
+  border-radius: 20px;
+}
+.steering-buttons > span {
+  font-size: 12px;
+  color: #b0b6c1;
+  border: 1px solid #ffffff20;
+  border-radius: 20px;
+  padding: 4px 10px;
+}
+.drive-column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+.pedals {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+.brake {
+  width: 65px;
+  height: 110px;
+  border-color: #ba6b6260;
+  color: #d5a397;
+}
+.gas {
+  width: 58px;
+  height: 150px;
+  border-color: #3cba8350;
+  color: #69c798;
+}
+.ridges {
+  font-size: 30px;
+  opacity: 0.45;
+}
+.gear-selector {
+  position: relative;
+  background: #193329bb;
+  border: 1px solid #ffffff30;
+  border-radius: 16px;
+  min-width: 80px;
+  text-align: center;
+}
+.gear-selector summary {
+  list-style: none;
+  padding: 14px;
+  font-weight: 800;
+}
+.gear-options {
+  position: absolute;
+  bottom: 65px;
+  right: 0;
+  background: #11181ff5;
+  padding: 10px;
+  border: 1px solid #ffffff30;
+  border-radius: 15px;
+  width: 180px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.gear-options small {
+  grid-column: 1/-1;
+  font-size: 10px;
+  color: #abb3c1;
+}
+.toast {
+  position: absolute;
+  bottom: 320px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #111a22eb;
+  border: 1px solid #ffffff25;
+  border-radius: 12px;
+  padding: 11px 18px;
+  font-size: 13px;
+  text-align: center;
+  max-width: 90vw;
+}
+.toast[hidden] {
+  display: none;
+}
+.signal-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+  background: #1c212bbb;
+  border: 1px solid #ffffff20;
+  border-radius: 18px;
+  padding: 8px 10px;
+  box-shadow: 0 4px 12px #0005;
+  backdrop-filter: blur(6px);
+}
+.signal-readout {
+  display: flex;
+  gap: 6px;
+  padding: 4px 2px;
+}
+.signal-led {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff10;
+  border: 1px solid #ffffff25;
+  box-shadow: inset 0 0 4px #0006;
+  transition: none;
+}
+.signal-led-left.signal-led-right {
+  position: relative;
+}
+.signal-led-hazard {
+  position: relative;
+}
+.signal-led.led-on {
+  animation: signal-blink 0.55s steps(2, end) infinite;
+}
+.signal-led-left.led-on {
+  background: #ffae08;
+  border-color: #ffd36c;
+  box-shadow:
+    0 0 10px #ffae08cc,
+    inset 0 0 4px #fff8;
+}
+.signal-led-right.led-on {
+  background: #ffae08;
+  border-color: #ffd36c;
+  box-shadow:
+    0 0 10px #ffae08cc,
+    inset 0 0 4px #fff8;
+}
+.signal-led-hazard.led-on {
+  background: #e23b3b;
+  border-color: #ff8a8a;
+  box-shadow:
+    0 0 12px #e23b3bcc,
+    inset 0 0 4px #fff8;
+}
+@keyframes signal-blink {
+  0%,
+  49% {
+    opacity: 1;
+    filter: brightness(1.4);
+  }
+  50%,
+  100% {
+    opacity: 0.18;
+    filter: brightness(0.5);
+  }
+}
+.signal-stalks {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.signal-stalk {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 42px;
+  height: 46px;
+  font-size: 18px;
+  line-height: 1;
+  border-radius: 10px;
+  background: #ffffff09;
+  border: 1px solid #ffffff25;
+  color: #cdd3dd;
+  padding: 0;
+}
+.signal-stalk kbd {
+  font:
+    9px ui-monospace,
+    monospace;
+  font-weight: 700;
+  opacity: 0.55;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.signal-stalk-left .signal-arrow {
+  transform: scaleX(1);
+}
+.signal-stalk-right .signal-arrow {
+  transform: scaleX(1);
+}
+.signal-stalk-hazard .signal-tri {
+  color: #e23b3b;
+}
+.signal-stalk.active {
+  background: #ffae0826;
+  border-color: #ffd36c;
+  color: #ffd36c;
+  box-shadow: 0 0 10px #ffae0866;
+}
+.signal-stalk-hazard.active {
+  background: #e23b3b30;
+  border-color: #ff8a8a;
+  color: #ffb0b0;
+  box-shadow: 0 0 10px #e23b3b80;
+}
+.start-lamp {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: .04em;
+  color: #7d8b78;
+  background: #102018;
+  border: 1px solid #ffffff18;
+}
+.start-lamp.on {
+  color: #102018;
+  background: #24ff78;
+  box-shadow: 0 0 10px #24ff78aa;
+}
+.seat-belt {
+  width: 100%;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: #c5d0c8;
+  background: #2a3330;
+  border: 1px solid #ffffff22;
+  cursor: pointer;
+}
+.seat-belt.active {
+  color: #102018;
+  background: #7dffb0;
+  border-color: #b6ffd4;
+}
+@media (max-width: 1100px) {
+  .telemetry {
+    padding-right: 0;
+    flex-wrap: wrap;
+    max-width: 75%;
+    gap: 6px;
+  }
+  .pill {
+    min-height: 44px;
+    padding: 7px 10px;
+    border-radius: 12px;
+  }
+  .pill strong {
+    font-size: 20px;
+  }
+  .settings summary {
+    font-size: 10px;
+    padding: 12px;
+  }
+  .exercise {
+    max-width: 260px;
+  }
+}
+@media (max-width: 600px) {
+  #hud {
+    padding: 8px;
+  }
+  .telemetry {
+    max-width: 100%;
+    padding-top: 42px;
+  }
+  .settings {
+    top: 8px;
+    right: 8px;
+  }
+  .pill b {
+    font-size: 11px;
+  }
+  .pill {
+    gap: 5px;
+  }
+  .pill strong {
+    font-size: 18px;
+  }
+  .pill i {
+    margin: 0 2px;
+  }
+  .exercise {
+    max-width: 180px;
+  }
+  .cockpit {
+    bottom: 10px;
+    gap: 10px;
+    width: calc(100% - 20px);
+    justify-content: center;
+  }
+  .steering-panel {
+    width: 190px;
+    padding: 12px 8px;
+  }
+  .signal-cluster {
+    padding: 6px 8px;
+  }
+  .signal-stalk {
+    width: 34px;
+    height: 38px;
+    font-size: 15px;
+  }
+  .steering-buttons {
+    gap: 5px;
+  }
+  .steering-buttons button {
+    width: 52px;
+    height: 58px;
+    font-size: 18px;
+  }
+  .steering-buttons > span {
+    padding: 3px;
+    font-size: 10px;
+  }
+  .clutch {
+    width: 42px;
+    height: 185px;
+  }
+  .pedal-track {
+    height: 110px;
+  }
+  .brake {
+    width: 48px;
+  }
+  .gas {
+    width: 45px;
+    height: 140px;
+  }
+  .pedals {
+    gap: 6px;
+  }
+  .toast {
+    bottom: 285px;
+    font-size: 12px;
+  }
+}
+@media (max-height: 550px) {
+  .cockpit {
+    transform: translateX(-50%) scale(0.72);
+    transform-origin: bottom center;
+    bottom: 8px;
+  }
+  .toast {
+    bottom: 235px;
+  }
+  .telemetry {
+    padding-top: 0;
+  }
+}

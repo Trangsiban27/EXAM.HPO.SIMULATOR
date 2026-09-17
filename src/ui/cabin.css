@@ -1,0 +1,88 @@
+.cabin-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.cabin-overlay[hidden] {
+  display: none;
+}
+.cabin-interior{position:absolute;inset:0;pointer-events:none}
+.cabin-interior>svg{display:block;width:100%;height:100%}
+.interior-readout{position:absolute;left:43.7%;top:70%;width:14.8%;display:flex;justify-content:space-between;align-items:center;font:bold clamp(7px,1vw,15px) monospace;color:#e4f5ff}
+.interior-rpm{color:#ff826f;font-size:.75em}.interior-gear{color:#64ddff;background:#102532;border-radius:3px;padding:2px 5px}
+.cabin-roof {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 13%;
+  background: #111315;
+  clip-path: polygon(0 0, 100% 0, 100% 80%, 72% 100%, 20% 90%, 0 100%);
+}
+.cabin-pillar {
+  position: absolute;
+  inset: 0;
+  background: #191d20;
+  clip-path: polygon(12% 8%, 17% 8%, 29% 76%, 25% 85%);
+}
+.cabin-dashboard {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: 24%;
+  background: linear-gradient(#33383c, #15191e 25%, #20252c);
+  border-top: 8px solid #11171b;
+  border-radius: 45% 30% 0 0;
+}
+.mirror-frame {
+  position: absolute;
+  top: 80px;
+  width: clamp(120px, 16vw, 240px);
+  aspect-ratio: 1.6;
+  border: 3px solid #32383f;
+  border-radius: 9px;
+  box-shadow: 0 3px 9px #0008;
+  overflow: hidden;
+}
+.mirror-frame b {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font: 700 9px system-ui;
+  color: #fff;
+  background: #101a26dc;
+  padding: 4px 6px;
+}
+.mirror-left,
+.shoulder-view {
+  left: 12px;
+}
+.mirror-right,
+.passenger-view {
+  right: 12px;
+}
+.shoulder-view,
+.passenger-view {
+  top: calc(90px + clamp(75px, 10vw, 150px));
+}
+.shoulder-view b,
+.passenger-view b {
+  color: #ffdf84;
+}
+#hud {
+  z-index: 2;
+}
+@media (max-width: 600px) {
+  .mirror-frame {
+    top: 145px;
+    width: 110px;
+  }
+  .shoulder-view,
+  .passenger-view {
+    top: 222px;
+  }
+  .cabin-dashboard {
+    height: 20%;
+  }
+}
