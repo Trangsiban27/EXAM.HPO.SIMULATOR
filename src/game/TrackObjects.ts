@@ -1,14 +1,11 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Bridge } from './Bridge';
 import { TrafficLight } from './TrafficLight';
 import { ExerciseSign } from './ExerciseSign';
+import { PedestrianSign, type PedestrianSignOptions } from './PedestrianSign';
+import { StopSign, type StopSignOptions } from './StopSign';
 import { WindingCourse } from './WindingCourse';
 import { startPosition } from './startPosition';
-
-/** Cache for the stop sign GLB — loaded once, cloned for each placement. */
-let _stopSignGLB: THREE.Group | null = null;
-let _stopSignLoader = new GLTFLoader();
 
 type ArrowType = 'straight' | 'left' | 'right' | 'none';
 type RoadDirection = 'vertical' | 'horizontal';
@@ -718,10 +715,6 @@ export class TrackObjects{
         startText.name = 'EX01_START_TEXT';
         zone.attach(startText);
 
-        const marker = this.addRouteMarker('1A', x, z, direction, roadWidth);
-        marker.name = 'ROUTE_MARKER_1A';
-        zone.attach(marker);
-
         if (opts.withSignal) {
             const rotation = opts.signalRotation ?? startPosition.heading;
             const signal = this.addTrafficLight(x, z, roadWidth, rotation);
@@ -814,35 +807,6 @@ export class TrackObjects{
     }
 
     /**
-     * Mount the 1A route marker (per spec/threejs_exam_yard_specification_v2.md §34:
-     * `MARKER_1A` lives inside the start zone for the Hiệp Phát yard).
-     */
-    private addRouteMarker(label: string, x: number, z: number, direction: RoadDirection, roadWidth: number): THREE.Group {
-        const group = new THREE.Group();
-        const sign = new ExerciseSign({
-            title: label,
-            subtitle: 'XUẤT PHÁT — 1A',
-            x, z: z - roadWidth / 2 - 1.6, rotation: 0, width: 4.2
-        });
-        group.add(sign.root);
-        return group;
-    }
-
-    /**
-     * Route marker cho các bài thi khác 1A. Dùng chung template.
-     */
-    addRouteMarkerFor(label: string, z: number, roadWidth: number, subtitle: string, width = 4.2): THREE.Group {
-        const group = new THREE.Group();
-        const sign = new ExerciseSign({
-            title: label,
-            subtitle,
-            x: 0, z: z - roadWidth / 2 - 1.6, rotation: 0, width
-        });
-        group.add(sign.root);
-        return group;
-    }
-
-    /**
      * Vạch dừng quy định cho bài 2A (spec/exam/exam_02_pedestrian_stop.md §5.1).
      * Vạch trắng đơn dày hơn vạch giữa, vuông góc trục di chuyển của xe.
      * Đặt tại (x, 0, z) — x là tọa độ X của vạch dừng trên corridor.
@@ -879,135 +843,16 @@ export class TrackObjects{
         return marking;
     }
 
-    /**
-     * Biển "Dừng lại" (STOP sign) — sử dụng model GLB
-     * stop_sign_road_sign.glb trong thư mục public/models/.
-     * Load sync bằng cache, clone cho mỗi placement.
-     * @param x  Tọa độ X của vạch dừng (tâm đường theo trục X).
-     * @param z  Tọa độ Z tâm đường.
-     * @param roadWidth Chiều rộng làn đường.
-     */
-    addStopSignModel(x: number, z: number, roadWidth = 8): THREE.Group {
-        const group = new THREE.Group();
-        group.name = 'EX02_SIGN_STOP';
-        group.position.set(x, 0, z);
-        group.rotation.y = -Math.PI / 2;
-
-        const postX = roadWidth / 2 + 1.5;
-
-        if (_stopSignGLB) {
-            // Clone cached GLB mesh.
-            const signRoot = _stopSignGLB.clone();
-            signRoot.scale.setScalar(.8);
-            signRoot.position.set(postX, 0, 0);
-            group.add(signRoot);
-        } else {
-            // Fallback canvas sign (sync) — GLB sẽ được cache sau khi load xong.
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 512;
-            const ctx = canvas.getContext('2d')!;
-            ctx.fillStyle = '#cc0000';
-            ctx.fillRect(0, 0, 512, 512);
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 28;
-            ctx.strokeRect(20, 20, 472, 472);
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 220px Arial';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('STOP', 256, 256);
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.colorSpace = THREE.SRGBColorSpace;
-            const signMesh = new THREE.Mesh(
-                new THREE.PlaneGeometry(1.2, 1.2),
-                new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide })
-            );
-            signMesh.position.set(postX, 2.5, 0);
-            signMesh.castShadow = true;
-            group.add(signMesh);
-        }
-
-        // Post.
-        const post = new THREE.Mesh(
-            new THREE.CylinderGeometry(.06, .06, 2.5, 12),
-            new THREE.MeshStandardMaterial({ color: 0xc7d0d5, metalness: .6, roughness: .4 })
-        );
-        post.position.set(postX, 1.25, 0);
-        post.castShadow = true;
-        group.add(post);
-
-        this.root.add(group);
-        return group;
+    addStopSign(opts: StopSignOptions) {
+        this.root.add(new StopSign(opts).root);
     }
 
-    /**
-     * Pre-load the stop sign GLB into cache (call once at scene init).
-     * Returns a promise that resolves when the model is ready.
-     */
+    addPedestrianSign(opts: PedestrianSignOptions) {
+        this.root.add(new PedestrianSign(opts).root);
+    }
+
     async loadStopSignGLB(): Promise<void> {
-        if (_stopSignGLB) return;
-        try {
-            const gltf = await _stopSignLoader.loadAsync('/models/stop_sign_road_sign.glb');
-            _stopSignGLB = gltf.scene;
-        } catch {
-            // Silently fail — addStopSignModel will use canvas fallback.
-        }
-    }
-
-    /**
-     * Biển "Đường người đi bộ cắt ngang" — tam giác vàng với hình người đi bộ.
-     * Đặt bên trái đường (-X side) của corridor dọc trục X.
-     * @param x  Tọa độ X của vạch dừng (tâm đường theo trục X).
-     * @param z  Tọa độ Z tâm đường.
-     */
-    addPedestrianSignModel(x: number, z: number, roadWidth = 8): THREE.Group {
-        const group = new THREE.Group();
-        group.name = 'EX02_SIGN_PEDESTRIAN';
-        group.position.set(x, 0, z);
-        group.rotation.y = Math.PI / 2; // tam giác hướng vào làn xe
-
-        const postX = -(roadWidth / 2 + 1.5);
-
-        const canvas = document.createElement('canvas');
-        canvas.width = 512;
-        canvas.height = 512;
-        const ctx = canvas.getContext('2d')!;
-
-        // Tam giác vàng nền.
-        ctx.fillStyle = '#ffcc00';
-        ctx.fillRect(0, 0, 512, 512);
-        ctx.strokeStyle = '#1a1a1a';
-        ctx.lineWidth = 20;
-        ctx.strokeRect(20, 20, 472, 472);
-
-        // Hình người đi bộ đơn giản.
-        ctx.fillStyle = '#1a1a1a';
-        ctx.font = 'bold 180px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('🚶', 256, 256);
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        const signMesh = new THREE.Mesh(
-            new THREE.PlaneGeometry(1.2, 1.2),
-            new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide })
-        );
-        signMesh.position.set(postX, 2.5, 0);
-        signMesh.castShadow = true;
-        group.add(signMesh);
-
-        const post = new THREE.Mesh(
-            new THREE.CylinderGeometry(.06, .06, 2.5, 12),
-            new THREE.MeshStandardMaterial({ color: 0xc7d0d5, metalness: .6, roughness: .4 })
-        );
-        post.position.set(postX, 1.25, 0);
-        post.castShadow = true;
-        group.add(post);
-
-        this.root.add(group);
-        return group;
+        return StopSign.preload();
     }
 
     /**
@@ -1060,24 +905,19 @@ export class TrackObjects{
         zone.attach(crosswalk);
 
         // Biển "Dừng lại" — stop_sign_road_sign.glb (bên phải đường).
-        const signStop = this.addStopSignModel(stopLineX, z, roadWidth);
-        signStop.name = 'EX02_SIGN_STOP';
-        zone.attach(signStop);
-
-        // Biển "Đường người đi bộ cắt ngang" — tam giác vàng (bên trái đường).
-        const signPedestrian = this.addPedestrianSignModel(stopLineX, z, roadWidth);
-        signPedestrian.name = 'EX02_SIGN_PEDESTRIAN';
-        zone.attach(signPedestrian);
+        const signStop = new StopSign({ x: stopLineX, z, roadWidth, scale: 0.012 });
+        zone.attach(signStop.root);
 
         // Marker 2A — bảng tên bài thi.
-        const marker2A = this.addRouteMarkerFor(
-            '2A', z, roadWidth,
-            'DỪNG XE NHƯỜNG ĐƯỜNG NGƯỜI ĐI BỘ',
-            4.2
-        );
-        marker2A.name = 'ROUTE_MARKER_2A';
-        marker2A.position.x = stopLineX;
-        zone.attach(marker2A);
+        // const marker2A = this.addRouteMarkerFor(
+        //     '2A', z, roadWidth,
+        //     'DỪNG XE NHƯỜNG ĐƯỜNG NGƯỜI ĐI BỘ',
+        //     4.2
+        // );
+        // marker2A.position.x = stopLineX;
+        // marker2A.position.z = z - roadWidth / 2 - 1.6;
+        // // marker2A.rotation.y = Math.PI / 2;   // ← thêm dòng này
+        // zone.attach(marker2A);
 
         // Tham chiếu "0.5 m" — vạch nhỏ đánh dấu ngưỡng A tối đa trên mặt đường
         // (chỉ là visual hint, không ảnh hưởng rule MAX_FRONT_BUMPER_TO_STOP_LINE_M).

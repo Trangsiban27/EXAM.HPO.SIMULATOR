@@ -99,7 +99,6 @@ export class StartExercise {
     private readonly rules = resolveStartRules(EXAM_VEHICLE_CLASS);
     private commandAt = 0;
     private countdownAt = 0;
-    private lastCountdownRemaining = -1;
     private penalty20sApplied = false;
     private crossedChecked = false;
     private timingPenaltyApplied = false;
@@ -109,6 +108,7 @@ export class StartExercise {
     private engineWasRunning = false;
     private stopDwell = 0;
     private waitToastAt = -Infinity;
+    private countdownToastEmitted = false;
     private prevFrontX = 0;
     private signalOffChecked = false;
 
@@ -152,7 +152,6 @@ export class StartExercise {
         this.startLampOn = false;
         this.commandAt = 0;
         this.countdownAt = 0;
-        this.lastCountdownRemaining = -1;
         this.penalty20sApplied = false;
         this.crossedChecked = false;
         this.timingPenaltyApplied = false;
@@ -162,6 +161,7 @@ export class StartExercise {
         this.engineWasRunning = false;
         this.stopDwell = 0;
         this.waitToastAt = -Infinity;
+        this.countdownToastEmitted = false;
         this.signalOffChecked = false;
         this.prevFrontX = this.lineX - startPosition.distance;
     }
@@ -202,6 +202,7 @@ export class StartExercise {
                 this.state = 'PRE_START';
                 this.stopDwell = 0;
                 this.countdownAt = 0;
+                this.countdownToastEmitted = false;
                 return { penalties, completed: false, disqualified: false };
             }
             if (this.countdownAt === 0) this.countdownAt = now;
@@ -213,13 +214,12 @@ export class StartExercise {
                 this.startLampOn = true;
                 return { toast: 'Bắt đầu thi', penalties: [], completed: false, disqualified: false };
             }
-            // Per spec/exam/exam_01_start.md §3: the 5-second soft countdown precedes
-            // the official command. Emit a remaining-second toast each whole second so
-            // the candidate sees "Chuẩn bị xuất phát (5)…(1)" before "Bắt đầu thi".
-            if (remaining !== this.lastCountdownRemaining) {
-                this.lastCountdownRemaining = remaining;
+            // Per spec/exam/exam_01_start.md §3: emit exactly ONE "Chuẩn bị xuất phát"
+            // toast when the soft 5-second countdown begins (no per-second remainder toasts).
+            if (!this.countdownToastEmitted) {
+                this.countdownToastEmitted = true;
                 return {
-                    toast: `Chuẩn bị xuất phát · còn ${remaining} giây`,
+                    toast: 'Chuẩn bị xuất phát',
                     penalties: [],
                     completed: false,
                     disqualified: false,

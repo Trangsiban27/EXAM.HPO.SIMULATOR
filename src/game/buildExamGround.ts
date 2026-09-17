@@ -39,8 +39,8 @@ export function buildExamGround(objects: TrackObjects) {
 
     // Crosswalk có sẵn (line 35) — addPedestrianZone sẽ attach lại vào zone.
     objects.addPedestrianCrossing(EX02_CROSSWALK_X, -2, 'horizontal', 8, 3);
+    
     // Stop-bar cảnh báo thị giác: dừng trước vạch này = không trừ điểm (không có sensor gameplay).
-    objects.addStopBarWarning(EX02_STOP_BAR_X, startPosition.lineZ, 8);
     const zone2A = objects.addPedestrianZone({
         stopLineX: EX02_STOP_LINE_X,
         crosswalkX: EX02_CROSSWALK_X,

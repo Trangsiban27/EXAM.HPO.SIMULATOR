@@ -157,7 +157,7 @@ export const notify = {
         const kind: NotifyKind = options.kind ?? 'info';
         const durationMs = options.persist
             ? 0
-            : Math.max(800, options.durationMs ?? (kind === 'exam' ? 5000 : kind === 'penalty' ? 2400 : 3500));
+            : Math.max(800, options.durationMs ?? (kind === 'exam' ? 1500 : kind === 'penalty' ? 1400 : 500));
 
         const root = ensureRoot();
         const { card, progress } = buildCard(text, kind, options.subtitle, options.action, durationMs);
