@@ -34,8 +34,8 @@ export function buildExamGround(objects: TrackObjects) {
     // Khoảng cách spawn→2A: -8 - (-50) = 42 m.
     // ============================================================
     const EX02_CROSSWALK_X = -5;
-    const EX02_STOP_LINE_X = -8;
-    const EX02_STOP_BAR_X = -8.75;   // 8 m trước crosswalk, học viên dễ canh điểm dừng
+    const EX02_STOP_LINE_X = -7;
+    const EX02_STOP_BAR_X = -7.5;   // 8 m trước crosswalk, học viên dễ canh điểm dừng
 
     // Crosswalk có sẵn (line 35) — addPedestrianZone sẽ attach lại vào zone.
     objects.addPedestrianCrossing(EX02_CROSSWALK_X, -2, 'horizontal', 8, 3);
@@ -83,15 +83,6 @@ export function buildExamGround(objects: TrackObjects) {
         EX03_STOP_LINE_X - 0.5, startPosition.lineZ + 4, 8, .55);
     ex03Ref05Label.name = 'EX03_REFERENCE_0_5M_TEXT';
     objects.root.add(ex03Ref05Label);
-
-    // Marker 3A — bảng tên bài thi (theo vạch dừng, đặt lệch trái theo hướng xe đến)
-    objects.root.add(new ExerciseSign({
-        title: 'DỪNG VÀ KHỞI HÀNH\nXE NGANG DỐC',
-        subtitle: 'Dừng tại vạch, không tụt dốc quá 0.5m, qua vạch trong 30 giây',
-        x: EX03_STOP_LINE_X - 4,
-        z: startPosition.lineZ - 5,
-        rotation: Math.PI / 2
-    }).root);
 
     // Sensor logic cho bài 3 (attach vào userData của một group)
     const zone3A = new THREE.Group();

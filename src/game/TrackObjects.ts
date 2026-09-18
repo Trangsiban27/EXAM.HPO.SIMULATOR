@@ -889,7 +889,7 @@ export class TrackObjects{
 
         // ---- Visual geometry (spec §7.2 object names) ----
         // Vạch dừng (EX02_STOP_LINE).
-        const stopLine = this.addPedestrianStopLine(z, roadWidth, -8.75);
+        const stopLine = this.addPedestrianStopLine(z, roadWidth, -7.5);
         zone.attach(stopLine);
 
         // Crosswalk (EX02_CROSSWALK). addPedestrianCrossing auto-add this.root và
