@@ -79,6 +79,8 @@ export interface Exam03Result {
     timeRemainingSec?: number;
     /** Báo hiệu cần phát tiếng "Tút" (chỉ true 1 lần duy nhất). */
     readyBeep?: boolean;
+    /** Lý do bị đình chỉ (chỉ có khi disqualified = true). */
+    disqualifyReason?: string;
 }
 
 export interface Exam03HillOptions {
@@ -149,6 +151,7 @@ export class Exam03Hill {
 
     /** Đã phát tiếng "Tút" báo hiệu chưa. */
     private readyBeepFired = false;
+    private waitingToastFired = false;
 
     /** Thời điểm bắt đầu timer 30s (sau khi phát beep). */
     private startDeadlineAt = 0;
@@ -229,6 +232,7 @@ export class Exam03Hill {
         this._stopClassification = undefined;
         this._disqualifyReason = '';
         this.readyBeepFired = false;
+        this.waitingToastFired = false;
         this.startDeadlineAt = 0;
     }
 
@@ -250,7 +254,7 @@ export class Exam03Hill {
 
     /** Kiểm tra xe đã vượt qua vạch dừng chưa. */
     hasCrossedStopLine(frontPosition: THREE.Vector3): boolean {
-        return frontPosition.x >= this.stopLineX + 2; // Tạo độ X của stopline công thêm 2m
+        return frontPosition.x >= this.stopLineX; // Vạch dừng quy định (spec §5.3, §14)
     }
 
     /** Kiểm tra bánh xe sau đã vượt qua vạch vàng chưa. */
@@ -338,17 +342,19 @@ export class Exam03Hill {
                 this.state = 'DISQUALIFIED';
                 this._disqualifyReason = 'Không dừng xe ở vạch dừng quy định';
                 return {
-                    toast: `Đình chỉ — ${this._disqualifyReason}`,
                     penalties,
                     completed: false,
                     disqualified: true,
                     stopClassification: this._stopClassification,
+                    disqualifyReason: this._disqualifyReason,
                 };
             }
 
-            // Trigger: bánh xe sau qua vạch vàng VÀ đã dừng
-            const crossedYellow = this.hasCrossedYellowLine(input.rearWheelX);
-            if (crossedYellow && stopped) {
+            // Trigger: xe đã dừng trên dốc (đủ lâu)
+            // Note: crossedYellow (rearWheelX >= yellowLineX) không còn là gate vì spec
+            // chỉ yêu cầu front bumper cách stop line <= 0.5m. Nếu bánh sau chưa qua
+            // vàng mà xe dừng → STOP_TOO_EARLY sẽ được phạt trong evaluateStop(A).
+            if (stopped) {
                 const A = this.signedDistanceToStopLine(input.frontPosition);
                 if (this.stoppedSince === 0) this.stoppedSince = now;
                 const dwell = (now - this.stoppedSince) / 1000;
@@ -357,15 +363,15 @@ export class Exam03Hill {
                     this.vehicleStopped = true;
                     this.evaluateStop(A, add);
                     if (this._stopClassification === 'STOP_OVER_LINE') {
-                        this.state = 'DISQUALIFIED';
-                        this._disqualifyReason = 'Dừng xe quá vạch dừng quy định';
-                        return {
-                            toast: `Đình chỉ — ${this._disqualifyReason}`,
-                            penalties,
-                            completed: false,
-                            disqualified: true,
-                            stopClassification: this._stopClassification,
-                        };
+                    this.state = 'DISQUALIFIED';
+                    this._disqualifyReason = 'Dừng xe quá vạch dừng quy định';
+                    return {
+                        penalties,
+                        completed: false,
+                        disqualified: true,
+                        stopClassification: this._stopClassification,
+                        disqualifyReason: this._disqualifyReason,
+                    };
                     }
                     // VALID_STOP hoặc STOP_TOO_EARLY → chờ 2s rồi phát beep
                     this.state = 'STOP_EVALUATION';
@@ -407,7 +413,9 @@ export class Exam03Hill {
         // === WAITING_TO_START state ===
         if (this.state === 'WAITING_TO_START') {
             const elapsedSec = (now - this.stoppedSince) / 1000;
-
+            // #region agent log — H1 fix verify
+            fetch('http://127.0.0.1:7243/ingest/41ea114a-de22-43e0-a2f5-b772e9ee7100',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a36477'},body:JSON.stringify({sessionId:'a36477',location:'Exam03Hill.ts:410',message:'WAITING_TO_START frame',data:{elapsedSec,waitingToastFired:this.waitingToastFired,readyBeepFired:this.readyBeepFired},runId:'dbg-waitingToast',hypothesisId:'H1fix',timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
             // Sau 2 giây → phát tiếng "Tút" và bắt đầu timer 30s
             if (elapsedSec >= READY_WAIT_SEC && !this.readyBeepFired) {
                 this.readyBeepFired = true;
@@ -424,13 +432,17 @@ export class Exam03Hill {
                 };
             }
 
-            return {
-                toast: 'Giữ chân phanh, chuẩn bị khởi hành',
-                penalties,
-                completed: false,
-                disqualified: false,
-                stopClassification: this._stopClassification,
-            };
+            // Chỉ trả toast lần đầu vào WAITING_TO_START
+            if (!this.waitingToastFired) {
+                this.waitingToastFired = true;
+                return {
+                    toast: 'Giữ chân phanh, chuẩn bị khởi hành',
+                    penalties,
+                    completed: false,
+                    disqualified: false,
+                    stopClassification: this._stopClassification,
+                };
+            }
         }
 
         // === HILL_STARTING state ===
@@ -444,11 +456,11 @@ export class Exam03Hill {
                 this._disqualifyReason = `Tụt dốc quá ${this.maxRollbackM * 1000} mm`;
                 this.timeRemainingSec = undefined;
                 return {
-                    toast: `Đình chỉ — ${this._disqualifyReason}`,
                     penalties,
                     completed: false,
                     disqualified: true,
                     rollbackM: this._rollbackM,
+                    disqualifyReason: this._disqualifyReason,
                 };
             }
 
@@ -476,12 +488,12 @@ export class Exam03Hill {
                 this._disqualifyReason = 'Quá 30 giây từ khi dừng mà chưa khởi hành qua vạch';
                 this.timeRemainingSec = 0;
                 return {
-                    toast: `Đình chỉ — ${this._disqualifyReason}`,
                     penalties,
                     completed: false,
                     disqualified: true,
                     rollbackM: this._rollbackM,
                     timeRemainingSec: 0,
+                    disqualifyReason: this._disqualifyReason,
                 };
             }
 
@@ -506,11 +518,11 @@ export class Exam03Hill {
                 this._disqualifyReason = `Tụt dốc quá ${this.maxRollbackM * 1000} mm`;
                 this.timeRemainingSec = undefined;
                 return {
-                    toast: `Đình chỉ — ${this._disqualifyReason}`,
                     penalties,
                     completed: false,
                     disqualified: true,
                     rollbackM: this._rollbackM,
+                    disqualifyReason: this._disqualifyReason,
                 };
             }
 

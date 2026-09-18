@@ -63,6 +63,8 @@ export interface Exam01Result {
     penalties: PenaltyEvent[];
     completed: boolean;
     disqualified: boolean;
+    /** Lý do bị đình chỉ (chỉ có khi disqualified = true). */
+    disqualifyReason?: string;
 }
 
 const roadWidth = 8;
@@ -245,11 +247,13 @@ export class StartExercise {
             if (elapsed >= this.rules.startTimeout.disqualifyAtSec) {
                 this.state = 'DISQUALIFIED';
                 this.startLampOn = false;
+                const reason = `Quá ${this.rules.startTimeout.disqualifyAtSec}s chưa qua vạch xuất phát`;
                 return {
-                    toast: `Đình chỉ sát hạch — Quá ${this.rules.startTimeout.disqualifyAtSec}s chưa qua vạch xuất phát`,
+                    toast: `Đình chỉ sát hạch — ${reason}`,
                     penalties: [],
                     completed: false,
                     disqualified: true,
+                    disqualifyReason: reason,
                 };
             }
             if (!this.penalty20sApplied && elapsed >= this.rules.startTimeout.penaltyAtSec) {

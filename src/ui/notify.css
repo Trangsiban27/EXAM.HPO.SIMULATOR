@@ -160,3 +160,126 @@
         transform: none;
     }
 }
+
+/* ============================================================
+   Disqualify full-screen overlay
+   ============================================================ */
+#dq-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 6, 20, 0.82);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity .3s ease;
+}
+
+#dq-overlay.dq-show {
+    opacity: 1;
+}
+
+.dq-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 48px 56px 44px;
+    border-radius: 20px;
+    background: rgba(50, 12, 32, 0.92);
+    border: 1px solid rgba(255, 120, 170, 0.4);
+    box-shadow:
+        0 0 0 1px rgba(255, 80, 140, 0.15),
+        0 32px 80px rgba(80, 10, 50, 0.7);
+    max-width: min(480px, 90vw);
+    width: 100%;
+    text-align: center;
+    transform: scale(0.92) translateY(20px);
+    transition: transform .35s cubic-bezier(.2, .7, .2, 1);
+}
+
+#dq-overlay.dq-show .dq-card {
+    transform: scale(1) translateY(0);
+}
+
+.dq-icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: rgba(214, 56, 122, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    color: #fff;
+    box-shadow: 0 0 40px rgba(214, 56, 122, 0.5);
+}
+
+.dq-heading {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    color: #ff8ab5;
+    text-transform: uppercase;
+}
+
+.dq-score {
+    font-size: 40px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+}
+
+.dq-reason-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 138, 181, 0.85);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-top: 8px;
+}
+
+.dq-reason {
+    font-size: 16px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.72);
+    line-height: 1.5;
+    max-width: 360px;
+}
+
+.dq-btn {
+    margin-top: 8px;
+    padding: 14px 48px;
+    border: 0;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 700;
+    color: #0c1320;
+    background: #f4f7fc;
+    cursor: pointer;
+    transition: background .15s ease, transform .15s ease;
+    letter-spacing: .02em;
+}
+
+.dq-btn:hover {
+    background: #ffffff;
+    transform: translateY(-2px);
+}
+
+.dq-btn:active {
+    transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #dq-overlay,
+    .dq-card {
+        transition: opacity .15s linear;
+        transform: none;
+    }
+    #dq-overlay.dq-show .dq-card {
+        transform: none;
+    }
+}

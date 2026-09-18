@@ -50,6 +50,8 @@ export interface Exam02Result {
     completed: boolean;
     disqualified: boolean;
     stopClassification?: 'VALID_STOP' | 'STOP_TOO_EARLY' | 'STOP_OVER_LINE' | 'NO_REQUIRED_STOP';
+    /** Lý do bị đình chỉ (chỉ có khi disqualified = true). */
+    disqualifyReason?: string;
 }
 
 export interface Exam02PedestrianOptions {
@@ -251,6 +253,7 @@ export class Exam02Pedestrian {
                 penalties: [],
                 completed: false,
                 disqualified: true,
+                disqualifyReason: 'Lái xe lên vỉa hè',
             };
         }
 

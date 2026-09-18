@@ -90,7 +90,9 @@ export class ExamEngine{
             if (result.disqualified) {
                 this.disqualified = true;
                 this.finished = true;
-                this.disqualifyReason = result.toast?.replace(/^Đình chỉ sát hạch — /, '') ?? 'Đình chỉ sát hạch';
+                this.disqualifyReason = result.disqualifyReason
+                    ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
+                    ?? 'Đình chỉ sát hạch';
             }
             if (result.completed) {
                 this.activeIndex = 1;
@@ -119,7 +121,9 @@ export class ExamEngine{
             if (result.disqualified) {
                 this.disqualified = true;
                 this.finished = true;
-                this.disqualifyReason = result.toast?.replace(/^Đình chỉ sát hạch — /, '') ?? 'Đình chỉ sát hạch';
+                this.disqualifyReason = result.disqualifyReason
+                    ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
+                    ?? 'Đình chỉ sát hạch';
             }
             if (result.completed) {
                 this.pedestrianCompleted = true;
@@ -151,7 +155,9 @@ export class ExamEngine{
             if (result.disqualified) {
                 this.disqualified = true;
                 this.finished = true;
-                this.disqualifyReason = result.toast?.replace(/^Đình chỉ — /, '') ?? 'Đình chỉ sát hạch';
+                this.disqualifyReason = result.disqualifyReason
+                    ?? result.toast?.replace(/^Đình chỉ — /, '')
+                    ?? 'Đình chỉ sát hạch';
             }
             if (result.completed) {
                 this.activeIndex = 3;

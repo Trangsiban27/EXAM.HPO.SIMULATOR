@@ -188,15 +188,67 @@ export const notify = {
     },
 
     showDisqualify(score: number, reason: string, restart: () => void) {
-        this.show(
-            `Đình chỉ · ${score} điểm · ${reason}`,
-            {
-                kind: 'disqualify',
-                persist: true,
-                subtitle: 'Chạm "Thử lại" để bắt đầu lại bài sát hạch.',
-                action: { label: 'Thử lại', onClick: restart },
-            }
-        );
+        // Clear any existing notifications first
+        notify.clear();
+
+        // Remove any existing disqualify overlay
+        const existing = document.getElementById('dq-overlay');
+        if (existing) existing.remove();
+
+        // Build overlay backdrop
+        const overlay = document.createElement('div');
+        overlay.id = 'dq-overlay';
+
+        // Build dialog card
+        const card = document.createElement('div');
+        card.className = 'dq-card';
+
+        // Icon
+        const icon = document.createElement('div');
+        icon.className = 'dq-icon';
+        icon.textContent = '✕';
+
+        // Heading
+        const heading = document.createElement('div');
+        heading.className = 'dq-heading';
+        heading.textContent = 'ĐÌNH CHỈ THI';
+
+        // Score
+        const scoreEl = document.createElement('div');
+        scoreEl.className = 'dq-score';
+        scoreEl.textContent = `${score} điểm`;
+
+        // Reason
+        const reasonLabel = document.createElement('div');
+        reasonLabel.className = 'dq-reason-label';
+        reasonLabel.textContent = 'Lý do bị đình chỉ';
+
+        const reasonEl = document.createElement('div');
+        reasonEl.className = 'dq-reason';
+        reasonEl.textContent = reason;
+
+        // Restart button
+        const btn = document.createElement('button');
+        btn.className = 'dq-btn';
+        btn.textContent = 'Thi lại';
+        btn.onclick = () => {
+            overlay.remove();
+            restart();
+        };
+
+        card.appendChild(icon);
+        card.appendChild(heading);
+        card.appendChild(scoreEl);
+        card.appendChild(reasonLabel);
+        card.appendChild(reasonEl);
+        card.appendChild(btn);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+
+        // Animate in
+        requestAnimationFrame(() => {
+            overlay.classList.add('dq-show');
+        });
     },
 
     clear() {
