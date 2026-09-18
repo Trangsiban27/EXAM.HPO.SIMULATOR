@@ -142,3 +142,81 @@
 @media (max-width: 640px) {
     #pedestrian-hud { width: 240px; left: 12px; bottom: 210px; }
 }
+
+/* Hill HUD widget — bài sát hạch số 3A. */
+#hill-hud {
+    position: fixed;
+    left: 18px;
+    bottom: 240px;
+    z-index: 950;
+    pointer-events: none;
+    font-family: inherit;
+    color: #f4f7fc;
+    width: 296px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: rgba(20, 26, 38, .78);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, .12);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .42),
+                inset 0 1px 0 rgba(255, 255, 255, .08);
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    animation: ped-card-in .28s cubic-bezier(.2, .7, .2, 1);
+}
+
+    .hill-card-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+    .hill-rollback,
+    .hill-timer {
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid rgba(255, 255, 255, .08);
+    text-align: center;
+}
+
+    .hill-rollback {
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #f4f7fc;
+}
+
+    .hill-timer {
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #f4f7fc;
+}
+
+    .hill-rollback-label,
+    .hill-timer-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, .65);
+    text-align: center;
+    margin-top: 4px;
+    grid-column: span 1;
+}
+
+    .hill-rollback[data-kind="early"]   { color: #e15252; }
+    .hill-rollback[data-kind="approach"]{ color: #f6d34c; }
+
+    .hill-timer[data-kind="early"]   { color: #e15252; }
+    .hill-timer[data-kind="approach"]{ color: #f6d34c; }
+
+@media (max-height: 720px) {
+    #hill-hud { bottom: 200px; width: 260px; padding: 11px 13px; }
+    .ped-card-headline { font-size: 13px; }
+    .hill-rollback, .hill-timer { font-size: 16px; }
+}
+
+@media (max-width: 640px) {
+    #hill-hud { width: 240px; left: 12px; bottom: 210px; }
+}

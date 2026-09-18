@@ -1,0 +1,51 @@
+#dev-probe-panel {
+    position: fixed;
+    right: 16px;
+    top: 64px;
+    min-width: 132px;
+    padding: 10px 12px 8px;
+    border-radius: 10px;
+    background: rgba(15, 22, 32, 0.78);
+    color: #e8eef6;
+    font: 12px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+    z-index: 50;
+    pointer-events: none;
+    user-select: none;
+}
+
+#dev-probe-panel header {
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    font-size: 11px;
+    color: #f0c94a;
+    margin-bottom: 6px;
+}
+
+#dev-probe-panel dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 10px;
+    row-gap: 2px;
+}
+
+#dev-probe-panel dt {
+    color: #8aa0b8;
+}
+
+#dev-probe-panel dd {
+    margin: 0;
+    text-align: right;
+    color: #e8eef6;
+    font-variant-numeric: tabular-nums;
+}
+
+#dev-probe-panel footer {
+    margin-top: 6px;
+    color: #6e7d92;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+}

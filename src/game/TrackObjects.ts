@@ -1087,7 +1087,7 @@ export class TrackObjects{
     }
 
     /** Tạo chữ in trên mặt đất dùng canvas texture (dùng cho nhãn "0.5 m"). */
-    private makeGroundLabel(text: string, x: number, z: number, roadWidth: number, heightWorld: number): THREE.Mesh {
+    makeGroundLabel(text: string, x: number, z: number, roadWidth: number, heightWorld: number): THREE.Mesh {
         const canvas = document.createElement('canvas');
         canvas.width = 512;
         canvas.height = 128;

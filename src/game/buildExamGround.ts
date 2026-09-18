@@ -39,7 +39,7 @@ export function buildExamGround(objects: TrackObjects) {
 
     // Crosswalk có sẵn (line 35) — addPedestrianZone sẽ attach lại vào zone.
     objects.addPedestrianCrossing(EX02_CROSSWALK_X, -2, 'horizontal', 8, 3);
-    
+
     // Stop-bar cảnh báo thị giác: dừng trước vạch này = không trừ điểm (không có sensor gameplay).
     const zone2A = objects.addPedestrianZone({
         stopLineX: EX02_STOP_LINE_X,
@@ -48,6 +48,97 @@ export function buildExamGround(objects: TrackObjects) {
         roadWidth: 8,
         direction: 'horizontal',
     });
+
+    // ============================================================
+    // ZONE_03_HILL (3A) — DỪNG VÀ KHỞI HÀNH XE NGANG DỐC
+    // Trên cùng corridor với 1A và 2A (trục dọc phía phải sân).
+    // Xe đi từ 2A (X=-8) → lên cầu → dừng tại vạch 3A → qua đỉnh dốc → tiếp tục.
+    //
+    // Theo Bridge.ts (đã sửa — vạch ở ramp lên TÂY):
+    //   - Bridge at X=31, Z=-2, direction='horizontal'
+    //   - Sau rotation -PI/2: local +Z → world X nhỏ hơn, mapping world_X = 31 - local_Z
+    //   - Stop line tại local Z = +5.5 → world X = 31 - 5.5 = 25.5 (xe đang lên dốc)
+    //   - Yellow reference tại local Z = +9.5 → world X = 31 - 9.5 = 21.5
+    //   - Đỉnh dốc tại local Z = 0 → world X = 31
+    //   - Chân dốc phía TÂY (xe vào) tại world X = 31 - 13 = 18
+    //   - Chân dốc phía ĐÔNG (xe ra) tại world X = 31 + 13 = 44
+    // ============================================================
+    const EX03_STOP_LINE_X = 25.5;  // = 31 - 5.5 (matches Bridge.ts local Z=+5.5 stop line center)
+    const EX03_EXIT_X = EX03_STOP_LINE_X + 3;  // Exit sensor 3m sau vạch dừng
+
+    // Vạch dừng 3A (trên cầu, đã có sẵn trong Bridge.ts geometry)
+    // Tham chiếu 0.5 m đặt TRƯỚC vạch dừng (theo hướng xe đến) — học viên
+    // canh khoảng cách A dương để dừng hợp lệ. Vị trí: world X = 25.0.
+    const ex03Ref05 = new THREE.Mesh(
+        new THREE.BoxGeometry(8, .008, .05),
+        new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .85 })
+    );
+    ex03Ref05.position.set(EX03_STOP_LINE_X - 0.5, .07, startPosition.lineZ);
+    ex03Ref05.receiveShadow = true;
+    ex03Ref05.name = 'EX03_REFERENCE_0_5M';
+    objects.root.add(ex03Ref05);
+
+    // Chữ "0.5 m" bên cạnh vạch tham chiếu
+    const ex03Ref05Label = objects.makeGroundLabel('0.5 m',
+        EX03_STOP_LINE_X - 0.5, startPosition.lineZ + 4, 8, .55);
+    ex03Ref05Label.name = 'EX03_REFERENCE_0_5M_TEXT';
+    objects.root.add(ex03Ref05Label);
+
+    // Marker 3A — bảng tên bài thi (theo vạch dừng, đặt lệch trái theo hướng xe đến)
+    objects.root.add(new ExerciseSign({
+        title: 'DỪNG VÀ KHỞI HÀNH\nXE NGANG DỐC',
+        subtitle: 'Dừng tại vạch, không tụt dốc quá 0.5m, qua vạch trong 30 giây',
+        x: EX03_STOP_LINE_X - 4,
+        z: startPosition.lineZ - 5,
+        rotation: Math.PI / 2
+    }).root);
+
+    // Sensor logic cho bài 3 (attach vào userData của một group)
+    const zone3A = new THREE.Group();
+    zone3A.name = 'ZONE_03_HILL';
+    objects.root.add(zone3A);
+
+    const halfWidth = 8 / 2;
+    const roadZ = startPosition.lineZ;
+    // Stop line sensor — dải mỏng tại vạch dừng 3A
+    // Box3(worldX_min, worldY_min, worldZ_min) → (worldX_max, worldY_max, worldZ_max)
+    const stopLineSensor = new THREE.Box3(
+        new THREE.Vector3(EX03_STOP_LINE_X - .15, -1, roadZ - halfWidth),
+        new THREE.Vector3(EX03_STOP_LINE_X + .15, 3, roadZ + halfWidth)
+    );
+    // Over-line sensor — phát hiện thanh cản trước đã vượt vạch
+    const overLineSensor = new THREE.Box3(
+        new THREE.Vector3(EX03_STOP_LINE_X + .15, -1, roadZ - halfWidth),
+        new THREE.Vector3(EX03_STOP_LINE_X + 1, 3, roadZ + halfWidth)
+    );
+    // Exit sensor — 3m sau vạch dừng
+    const exitSensor = new THREE.Box3(
+        new THREE.Vector3(EX03_EXIT_X - .4, -1, roadZ - halfWidth),
+        new THREE.Vector3(EX03_EXIT_X + .4, 3, roadZ + halfWidth)
+    );
+    // Vùng tiếp cận — 15m trước vạch dừng
+    const approachEntryX = EX03_STOP_LINE_X - 15;
+    const approachSensor = new THREE.Box3(
+        new THREE.Vector3(approachEntryX, -1, roadZ - halfWidth),
+        new THREE.Vector3(EX03_STOP_LINE_X + .15, 3, roadZ + halfWidth)
+    );
+
+    zone3A.userData = {
+        sensors: {
+            stopLine: stopLineSensor,
+            overLine: overLineSensor,
+            exitSensor,
+            approachSensor,
+        },
+        metadata: {
+            stopLineX: EX03_STOP_LINE_X,
+            exitX: EX03_EXIT_X,
+            roadZ,
+            roadWidth: 8,
+            direction: 'horizontal',
+            markerId: '3A',
+        },
+    };
 
     // The existing road ends at X=18; the bridge connects there and ends at X=44.
     objects.addBridge(31, -2, 'horizontal');

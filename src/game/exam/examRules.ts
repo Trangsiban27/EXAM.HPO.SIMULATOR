@@ -251,6 +251,109 @@ export const EXAM_02_PEDESTRIAN_RULES_V2: ExamPedestrianRulesV2 = {
 };
 
 /**
+ * Hill stop and start (Bài 3A) rules — aligned with
+ * spec/exam/exam_03_hill_stop_and_start.md (HARD_CONSTRAINT).
+ *
+ * Khoảng cách A: đo từ thanh cản trước đến vạch dừng.
+ *   A ∈ [0, 0.5 m]    → VALID_STOP
+ *   A > 0.5 m          → STOP_TOO_EARLY  (-5)
+ *   A < 0              → STOP_OVER_LINE  (DQ)
+ *   không dừng         → NO_REQUIRED_STOP (DQ)
+ *
+ * Rollback: tính từ vị trí dừng, vector ngược hướng lên dốc.
+ *   rollback > 0.5 m   → DQ_ROLLBACK_OVER_500MM
+ *
+ * Timer 30s: bắt đầu từ thời điểm xe dừng.
+ *   quá 30s chưa khởi hành qua vạch → DQ_START_TIMEOUT_30S
+ */
+export interface ExamHillRules {
+    id: 'EXAM_03_HILL_STOP_AND_START';
+    /** Khoảng cách tối đa từ thanh cản trước đến vạch dừng (HARD_CONSTRAINT: 0.5 m). */
+    stopPosition: {
+        maxDistanceBeforeLineM: number;
+    };
+    /** Quy tắc khởi hành ngang dốc. */
+    hillStart: {
+        maxRollbackM: number;
+        mustCrossStopPositionWithinSec: number;
+    };
+    engine: {
+        maxRPM: number;
+        stallPenalty: Record<ExamVehicleClass, number>;
+        rpmExceededPenalty: Record<ExamVehicleClass, number>;
+    };
+    /** Tốc độ giới hạn (HARD_CONSTRAINT §4.8). */
+    maxSpeedKmh: Record<ExamVehicleClass, number>;
+    penalties: {
+        stopTooEarly: number;
+    };
+    speeding: {
+        intervalSec: number;
+        penaltyPerInterval: number;
+    };
+    /** Thời gian đến bài vượt quy định. allowedTimeSec = null (REQUIRED_INPUT). */
+    arrivalOvertime: {
+        intervalSec: number;
+        penaltyPerInterval: number;
+        allowedTimeSec: number | null;
+    };
+    disqualify: {
+        noRequiredStop: boolean;
+        stopOverLine: boolean;
+        startTimeout30s: boolean;
+        rollbackOver500mm: boolean;
+        accident: boolean;
+    };
+}
+
+export const EXAM_03_HILL_RULES: ExamHillRules = {
+    id: 'EXAM_03_HILL_STOP_AND_START',
+    stopPosition: {
+        maxDistanceBeforeLineM: 0.5,
+    },
+    hillStart: {
+        maxRollbackM: 0.5,
+        mustCrossStopPositionWithinSec: 30,
+    },
+    engine: {
+        maxRPM: 4000,
+        stallPenalty,
+        rpmExceededPenalty,
+    },
+    maxSpeedKmh: {
+        A1: 40,
+        A2: 50,
+        B: 24,
+        D1: 24,
+        D2: 24,
+        C1: 20,
+        C: 20,
+        D: 20,
+        E: 20,
+        Fc: 20,
+    },
+    penalties: {
+        stopTooEarly: 5,
+    },
+    speeding: {
+        intervalSec: 3,
+        penaltyPerInterval: 1,
+    },
+    arrivalOvertime: {
+        intervalSec: 3,
+        penaltyPerInterval: 1,
+        allowedTimeSec: null,
+    },
+    disqualify: {
+        noRequiredStop: true,
+        stopOverLine: true,
+        startTimeout30s: true,
+        rollbackOver500mm: true,
+        accident: true,
+    },
+};
+
+/**
  * Returns a defensive copy of EXAM_01_START_RULES keyed to the supplied vehicle
  * class. Callers should never mutate the returned object in-place.
  */
@@ -270,6 +373,29 @@ export function resolveStartRules(vehicleClass: ExamVehicleClass) {
         signalOffDistanceM: r.signalOffDistanceM,
         penalties: { ...r.penalties },
         startTimeout: { ...r.startTimeout },
+        vehicleClass,
+    };
+}
+
+/** Returns a defensive copy of EXAM_03_HILL_RULES keyed to the supplied vehicle class. */
+export function resolveHillRules(vehicleClass: ExamVehicleClass) {
+    const r = EXAM_03_HILL_RULES;
+    return {
+        maxSpeedKmh: r.maxSpeedKmh[vehicleClass],
+        maxRollbackM: r.hillStart.maxRollbackM,
+        maxRollbackTimeSec: r.hillStart.mustCrossStopPositionWithinSec,
+        engine: {
+            stallPenalty: r.engine.stallPenalty[vehicleClass],
+            rpmExceededPenalty: r.engine.rpmExceededPenalty[vehicleClass],
+            maxRPM: r.engine.maxRPM,
+        },
+        speeding: {
+            intervalSec: r.speeding.intervalSec,
+            penaltyPerInterval: r.speeding.penaltyPerInterval,
+        },
+        penalties: { ...r.penalties },
+        arrivalOvertime: { ...r.arrivalOvertime },
+        disqualify: { ...r.disqualify },
         vehicleClass,
     };
 }

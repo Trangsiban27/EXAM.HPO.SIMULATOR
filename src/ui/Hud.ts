@@ -5,7 +5,9 @@ import './pedestrian-hud.css';
 import { EngineAudio } from './EngineAudio';
 import { notify, type NotifyKind, type NotifyOptions } from './Notify';
 import { pedestrianHud } from './PedestrianHud';
+import { hillHud } from './HillHud';
 import type { Exam02Pedestrian } from '../game/exercises/Exam02Pedestrian';
+import type { Exam03Hill } from '../game/exercises/Exam03Hill';
 
 type Bindings = { onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void };
 
@@ -31,7 +33,7 @@ export class Hud {
             </header>
             <details class="settings"><summary>⚙ &nbsp; CÀI ĐẶT & GÓC NHÌN</summary><div class="settings-body">
                 <button id="cameraBtn">Đổi camera</button><button id="restartBtn">Thi lại</button>
-                <p>Enter: bật/tắt máy<br>Shift: đạp côn · F: nhả nhanh · N/R/1–5: số<br>W/↑: ga · S/↓: phanh<br>A/D: lái · Space: thắng · C: camera${options.develop ? '<br>Develop: chuột phải kéo nhìn · WASD di chuyển · Q/E lên xuống · Shift nhanh' : ''}</p>
+                <p>Enter: bật/tắt máy<br>Shift: đạp côn · F: nhả nhanh · N/R/1–5: số<br>W/↑: ga · S/↓: phanh<br>A/D: lái · Space: thắng · C: camera${options.develop ? '<br>Develop: chuột phải kéo nhìn · WASD di chuyển · Q/E lên xuống · Shift nhanh · P probe toạ độ' : ''}</p>
             </div></details>
             <div class="cockpit">
                 <div class="clutch-column"><button id="quickCamera" class="camera-toggle" aria-label="Đổi camera">▣ <span id="camera">1</span></button>
@@ -268,6 +270,19 @@ export class Hud {
      */
     updatePedestrianHud(exercise: Exam02Pedestrian | undefined, frontX: number | null, visible: boolean) {
         pedestrianHud.update(this.host, exercise, frontX, visible);
+    }
+    /**
+     * Cập nhật widget bài 3 — chỉ hiển thị khi visible=true.
+     * DrivingGame gọi mỗi frame với dữ liệu từ Exam03Hill.
+     */
+    updateHillHud(
+        exercise: Exam03Hill | undefined,
+        stopDistanceA: number | undefined,
+        rollbackM: number,
+        timeRemainingSec: number | undefined,
+        visible: boolean
+    ) {
+        hillHud.update(this.host, exercise, stopDistanceA, rollbackM, timeRemainingSec, visible);
     }
     clearNotices() {
         this.finishedShown = false;

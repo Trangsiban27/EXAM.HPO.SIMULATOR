@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type {PenaltyEvent} from './types';
 import { StartExercise, type StartSignalPhase } from './exercises/StartExercise';
 import { Exam02Pedestrian } from './exercises/Exam02Pedestrian';
+import { Exam03Hill } from './exercises/Exam03Hill';
 import { startPosition } from './startPosition';
 
 /** 2A stop line: hardcoded tại X = -8 (giữ nguyên vị trí).
@@ -11,6 +12,19 @@ import { startPosition } from './startPosition';
  *  Khoảng cách spawn→2A = -8 - (-50) = 42 m. */
 const PEDESTRIAN_DISTANCE_FROM_START_M = 42;
 const PEDESTRIAN_STOP_LINE_X = -8;   // hardcode, không dùng công thức
+
+/** 3A stop line: trên cầu (bridge).
+ *  Bridge at X=31, Z=-2, direction='horizontal'.
+ *  Sau rotation.y = -PI/2: local +Z → world -Z, mapping world_X = 31 - local_Z.
+ *  Vạch trắng tại local Z = +5.5 → world X = 31 - 5.5 = 25.5 (xe đang lên dốc,
+ *  trong ramp lên phía TÂY — trước đỉnh).
+ *  Vạch vàng tại local Z = +9.5 → world X = 31 - 9.5 = 21.5 (4.0m trước vạch trắng,
+ *  vẫn trong ramp lên phía TÂY).
+ *  Đỉnh dốc tại local Z = 0 → world X = 31.
+ *  Chân dốc phía TÂY (xe vào) tại world X = 31 - 13 = 18.
+ *  Chân dốc phía ĐÔNG (xe ra) tại world X = 31 + 13 = 44. */
+const HILL_STOP_LINE_X = 31 - 5.5;   // = 25.5 (matches Bridge.ts local Z=+5.5)
+const HILL_YELLOW_LINE_X = 31 - 9.5;  // = 21.5 (matches Bridge.ts local Z=+9.5)
 
 export interface ExamVehicleSnapshot {
     position: THREE.Vector3;
@@ -39,6 +53,16 @@ export class ExamEngine{
         stopSpeedKmh: .6,
         minStopDwellSec: .3,
     });
+    readonly hillExercise = new Exam03Hill({
+        stopLineX: HILL_STOP_LINE_X,
+        yellowLineX: HILL_YELLOW_LINE_X,
+        roadZ: startPosition.lineZ,
+        roadWidth: 8,
+        hillForwardAxis: new THREE.Vector3(1, 0, 0),
+        exitDistanceM: 3,
+        stopSpeedKmh: .6,
+        minStopDwellSec: .3,
+    });
     disqualified=false;
     disqualifyReason='';
     private cooldown=new Map<number,number>();
@@ -56,6 +80,7 @@ export class ExamEngine{
         this.pedestrianCompleted = false;
         this.startExercise.reset();
         this.pedestrianExercise.reset();
+        this.hillExercise.reset();
     }
     update(vehicle: ExamVehicleSnapshot, startSignal: StartSignalPhase, dt: number): string | undefined {
         if(this.finished) return;
@@ -99,12 +124,47 @@ export class ExamEngine{
             if (result.completed) {
                 this.pedestrianCompleted = true;
                 this.activeIndex = 2;
+                this.startedAt = performance.now();
+                this.hillExercise.activate();
             }
             return result.toast;
         }
 
-        // After 2A, the rest of the route is still under construction.
-        if (!this.finished) this.finished = this.pedestrianCompleted;
+        // Bài 03 — Dừng và khởi hành ngang dốc
+        if (this.activeIndex === 2) {
+            // rearWheelX: bánh xe sau nằm ở phía đối diện của frontPosition
+            const rearWheelX = 2 * vehicle.position.x - vehicle.frontPosition.x;
+            const input = {
+                position: vehicle.position,
+                frontPosition: vehicle.frontPosition,
+                rearWheelX,
+                hillForwardAxis: new THREE.Vector3(1, 0, 0),
+                speedKmh: vehicle.speedKmh,
+                rpm: vehicle.rpm,
+                engineRunning: vehicle.engineRunning,
+                stalled: vehicle.stalled,
+                clutch: vehicle.clutch ?? 1,
+                dt,
+            };
+            const result = this.hillExercise.update(input);
+            for (const evt of result.penalties) this.applyPenaltyEvent(evt);
+            if (result.disqualified) {
+                this.disqualified = true;
+                this.finished = true;
+                this.disqualifyReason = result.toast?.replace(/^Đình chỉ — /, '') ?? 'Đình chỉ sát hạch';
+            }
+            if (result.completed) {
+                this.activeIndex = 3;
+            }
+            // Phát tiếng "Tút" khi nhận được flag readyBeep
+            if (result.readyBeep) {
+                this.hillExercise.playReadyBeep();
+            }
+            return result.toast;
+        }
+
+        // After 3A, the rest of the route is still under construction.
+        if (this.activeIndex >= 3 && !this.finished) this.finished = true;
         return;
     }
     applyLinePenalty(zoneIndex:number,now:number){
@@ -139,6 +199,7 @@ export class ExamEngine{
         if (this.finished) return 'Hoàn thành bài thi';
         if (this.activeIndex === 0) return this.startExercise.title;
         if (this.activeIndex === 1) return this.pedestrianExercise.title;
+        if (this.activeIndex === 2) return this.hillExercise.title;
         return 'Hoàn thành';
     }
     get isFinished(){

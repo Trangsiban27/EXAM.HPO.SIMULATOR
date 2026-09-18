@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-/** A driveable hill-start bridge. Local -Z is the uphill approach direction. */
+/** A driveable hill-start bridge. Local +Z is the downhill direction; local -Z is the uphill approach. */
 export class Bridge {
     readonly root = new THREE.Group();
     readonly width = 8;
@@ -34,6 +34,7 @@ export class Bridge {
         const concrete = new THREE.MeshStandardMaterial({ color: 0xa7adb0, roughness: .9 });
         const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .8 });
         const red = new THREE.MeshStandardMaterial({ color: 0xd83b3b, roughness: .8 });
+        const yellow = new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .8 });
         const metal = new THREE.MeshStandardMaterial({ color: 0xc7d0d5, metalness: .65, roughness: .35 });
         const box = (w: number, h: number, d: number, x: number, y: number, z: number, material: THREE.Material) => {
             const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -59,9 +60,10 @@ export class Bridge {
             const to = from + step;
             const mid = (from + to) / 2;
             const elevation = this.elevation(mid);
-            box(this.width, elevation + .04, step, 0, (elevation + .04) / 2, mid, concrete);
+            // box(this.width, elevation + .04, step, 0, (elevation + .04) / 2, mid, concrete);
             strip(0, this.width, from, to, -.01, .02, asphalt);
             // Solid center line, interrupted by the stop marking on the uphill ramp.
+            // Center line gián đoạn tại vạch trắng (local Z = +5 → world X = 26).
             if (Math.abs(mid - 5) > .3) strip(0, .15, from, to, .012, .008, white);
             for (const side of [-1, 1]) {
                 strip(side * (this.width / 2 - .1), .2, from, to, .025, .05,
@@ -74,8 +76,16 @@ export class Bridge {
                 box(.1, .95, .1, side * (this.width / 2 + .1), .06 + this.elevation(z) + .475, z, metal);
             }
         }
+
+        // Yellow reference line — 4.0m uphill from the white stop line
+        // (vạch vàng nằm phía trước vạch trắng về hướng xe đang lên dốc).
+        // Vàng tại local Z ∈ [+9.6, +9.4] → world X = 21.5 (ramp lên TÂY).
+        strip(0, this.width - .4, 9.6, 9.4, .02, .012, yellow);
+
         // Stop line across the two lanes on the uphill approach.
-        strip(0, this.width - .4, 4.8, 5.2, .02, .012, white);
+        // Xe đi +X; local Z dương = world X nhỏ hơn = phía trước đỉnh dốc (xe đang lên dốc).
+        // Trắng tại local Z ∈ [+5.6, +5.4] → world X = 25.5 (ramp lên TÂY).
+        strip(0, this.width - .4, 5.6, 5.4, .02, .012, white);
 
         const canvas = document.createElement('canvas');
         canvas.width = 1024; canvas.height = 256;
@@ -89,6 +99,7 @@ export class Bridge {
         texture.colorSpace = THREE.SRGBColorSpace;
         const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.05),
             new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide }));
+        // Đặt sign ở local Z = +10 → world X = 21 (trước vạch trắng, trong ramp lên TÂY).
         sign.position.set(this.width / 2 + 2.5, 2.6, 10);
         this.root.add(sign);
         box(.12, 2.6, .12, this.width / 2 + 2.5, 1.3, 10, metal);
