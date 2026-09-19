@@ -3,6 +3,7 @@ import type {PenaltyEvent} from './types';
 import { StartExercise, type StartSignalPhase } from './exercises/StartExercise';
 import { Exam02Pedestrian } from './exercises/Exam02Pedestrian';
 import { Exam03Hill } from './exercises/Exam03Hill';
+import { Exam04WheelTrack, type Exam04CourseSensors } from './exercises/Exam04WheelTrack';
 import { startPosition } from './startPosition';
 
 /** 2A stop line: hardcoded tại X = -8 (giữ nguyên vị trí).
@@ -36,6 +37,15 @@ export interface ExamVehicleSnapshot {
     leftSignal: boolean;
     seatBeltFastened: boolean;
     clutch?: number;
+    /**
+     * World-space positions of 4 wheels. Used by Exam04.
+     * Populated by DrivingGame from Vehicle3.wheelAssy.getWheel(...).getWorldPosition().
+     */
+    wheelPositions?: { FL: THREE.Vector3; FR: THREE.Vector3; RL: THREE.Vector3; RR: THREE.Vector3 };
+    /** True nếu vehicle vừa va chạm (collision). E04-07, E02-07. */
+    accident?: boolean;
+    /** True nếu vehicle đang đi sai layout bài thi. E04-01. */
+    wrongLayout?: boolean;
 }
 
 export class ExamEngine{
@@ -63,11 +73,27 @@ export class ExamEngine{
         stopSpeedKmh: .6,
         minStopDwellSec: .3,
     });
+    /**
+     * 4 course sensors for Exam04 (populated after buildExamGround via
+     * wireExam04() call). Each entry contains the world-space sensors for one
+     * wheel-track course.
+     */
+    readonly wheelTrackSensors: Exam04CourseSensors[] = [];
+    /** Single Exam04 exercise instance. State reset after each course completion. */
+    readonly wheelTrackExercise = new Exam04WheelTrack();
     disqualified=false;
     disqualifyReason='';
     private cooldown=new Map<number,number>();
     private finished=false;
     private pedestrianCompleted = false;
+    /**
+     * Bài 04 có 4 course, player chỉ được chọn 1 và lock cho cả lần thi.
+     * `null` = chưa chạm course nào. Khi xe chạm `startYellowSensor` của
+     * course nào đầu tiên, ta set index đó và KHÔNG cho phép swap sang
+     * course khác. Reset về `null` khi `reset()` exam.
+     */
+    private lockedCourseIndex: number | null = null;
+
     reset(){
         this.score=100;
         this.penalties.length=0;
@@ -78,12 +104,45 @@ export class ExamEngine{
         this.disqualified=false;
         this.disqualifyReason='';
         this.pedestrianCompleted = false;
+        this.lockedCourseIndex = null;
         this.startExercise.reset();
         this.pedestrianExercise.reset();
         this.hillExercise.reset();
+        this.wheelTrackExercise.reset();
     }
+
+    /**
+     * Wire up Exam04 sensors from the track. Call this after Track (and thus
+     * buildExamGround) has been constructed so wheelTrackCourseSensors is populated.
+     */
+    wireExam04(
+        trackSensors: {
+            startYellowSensor: THREE.Box3;
+            endYellowSensor: THREE.Box3;
+            wheelTrackZone: THREE.Box3;
+            boundarySensors: THREE.Box3[];
+            entryWorld: THREE.Vector3;
+            exitForwardAxis: THREE.Vector3;
+        }[]
+    ): void {
+        this.wheelTrackSensors.length = 0;
+        for (let i = 0; i < trackSensors.length; i++) {
+            const s = trackSensors[i];
+            this.wheelTrackSensors.push({
+                index: i,
+                startYellowSensor: s.startYellowSensor,
+                endYellowSensor: s.endYellowSensor,
+                wheelTrackZone: s.wheelTrackZone,
+                boundarySensors: s.boundarySensors,
+                entryWorld: s.entryWorld,
+                exitForwardAxis: s.exitForwardAxis,
+            });
+        }
+    }
+
     update(vehicle: ExamVehicleSnapshot, startSignal: StartSignalPhase, dt: number): string | undefined {
         if(this.finished) return;
+
         if (this.activeIndex === 0) {
             const result = this.startExercise.update({ ...vehicle, startSignal, dt });
             for (const evt of result.penalties) this.applyPenaltyEvent(evt);
@@ -169,8 +228,85 @@ export class ExamEngine{
             return result.toast;
         }
 
-        // After 3A, the rest of the route is still under construction.
-        if (this.activeIndex >= 3 && !this.finished) this.finished = true;
+        // ── Bài 04 — Wheel Track + Right Angle ─────────────────────────────────
+        if (this.activeIndex === 3) {
+            const ex04State = this.wheelTrackExercise.state;
+
+            // State INACTIVE: tìm course mà xe vừa chạm startYellowSensor.
+            // Player chỉ được chọn 1 course (lockedCourseIndex). Nếu xe chạm
+            // vào sensor của course khác trong khi đã lock → bỏ qua.
+            if (ex04State === 'INACTIVE') {
+                if (this.lockedCourseIndex === null) {
+                    const idx = this.wheelTrackExercise.findEnteredCourse(
+                        vehicle.frontPosition,
+                        this.wheelTrackSensors
+                    );
+                    if (idx >= 0) {
+                        this.lockedCourseIndex = idx;
+                        this.wheelTrackExercise.swapToCourse(this.wheelTrackSensors[idx]);
+                        // Run one update to surface the "Bắt đầu" toast for this course
+                        const input = {
+                            position: vehicle.position,
+                            frontPosition: vehicle.frontPosition,
+                            wheelPositions: vehicle.wheelPositions ?? {
+                                FL: vehicle.position.clone(), FR: vehicle.position.clone(),
+                                RL: vehicle.position.clone(), RR: vehicle.position.clone(),
+                            },
+                            speedKmh: vehicle.speedKmh,
+                            rpm: vehicle.rpm,
+                            engineRunning: vehicle.engineRunning,
+                            stalled: vehicle.stalled,
+                            clutch: vehicle.clutch ?? 1,
+                            dt,
+                            accident: vehicle.accident ?? false,
+                            wrongLayout: vehicle.wrongLayout ?? false,
+                        };
+                        this.wheelTrackExercise.update(input);
+                    }
+                }
+                return;
+            }
+
+            // Đang chạy course đã lock. Kết quả COMPLETED → toast "Hoàn thành
+            // bài 4" + set finished=true (không DQ) → HUD flash success.
+            // Kết quả DISQUALIFIED → set finished=true + disqualified=true
+            // → HUD mở dialog Đình chỉ giống bài 01/02/03.
+            const input = {
+                position: vehicle.position,
+                frontPosition: vehicle.frontPosition,
+                wheelPositions: vehicle.wheelPositions ?? {
+                    FL: vehicle.position.clone(), FR: vehicle.position.clone(),
+                    RL: vehicle.position.clone(), RR: vehicle.position.clone(),
+                },
+                speedKmh: vehicle.speedKmh,
+                rpm: vehicle.rpm,
+                engineRunning: vehicle.engineRunning,
+                stalled: vehicle.stalled,
+                clutch: vehicle.clutch ?? 1,
+                dt,
+                accident: vehicle.accident ?? false,
+                wrongLayout: vehicle.wrongLayout ?? false,
+            };
+            const result = this.wheelTrackExercise.update(input);
+            for (const evt of result.penalties) this.applyPenaltyEvent(evt);
+            if (result.disqualified) {
+                this.disqualified = true;
+                this.finished = true;
+                this.disqualifyReason = result.disqualifyReason
+                    ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
+                    ?? 'Đình chỉ sát hạch';
+                return result.toast;
+            }
+            if (result.completed) {
+                // Course hoàn thành → toast "Hoàn thành bài 4" + kết thúc exam
+                // (không DQ). HUD sẽ flash 'Hoàn thành · X điểm' nhờ finished=true.
+                this.finished = true;
+                return result.toast ?? 'Hoàn thành bài 4';
+            }
+            return result.toast;
+        }
+
+        // After all known exercises, the rest of the route is still under construction.
         return;
     }
     applyLinePenalty(zoneIndex:number,now:number){
@@ -206,6 +342,7 @@ export class ExamEngine{
         if (this.activeIndex === 0) return this.startExercise.title;
         if (this.activeIndex === 1) return this.pedestrianExercise.title;
         if (this.activeIndex === 2) return this.hillExercise.title;
+        if (this.activeIndex === 3) return this.wheelTrackExercise.title;
         return 'Hoàn thành';
     }
     get isFinished(){

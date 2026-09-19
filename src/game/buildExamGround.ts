@@ -133,33 +133,66 @@ export function buildExamGround(objects: TrackObjects) {
 
     // The existing road ends at X=18; the bridge connects there and ends at X=44.
     objects.addBridge(31, -2, 'horizontal');
-    objects.addRoad(49, -2, 8, 10, 'horizontal', 'straight', 'white-solid');
-    objects.addRightAngleTurn(58, -2, 8, 'horizontal', 'left', 'white-solid');
-    objects.addRoad(58, -9, 8, 6, 'vertical', 'straight', 'white-dashed');
-    objects.addRoad(58, -15, 8, 10, 'vertical', 'straight', 'white-dashed');
+    objects.addRoad(49, -2, 8, 20, 'horizontal', 'straight', 'white-solid');
+    objects.addRoad(69, -2, 8, 20, 'horizontal', 'straight', 'white-solid');
+    objects.addRightAngleTurn(79, -2, 8, 'horizontal', 'left', 'white-solid');
+    objects.addRoad(79, -8, 8, 6, 'vertical', 'straight', 'white-dashed');
+    objects.addRoad(79, -15, 8, 10, 'vertical', 'straight', 'white-dashed');
+    
+    // ZONE_04_HILL (4A) — DỪNG VÀ KHỞI HÀNH XE NGANG DỐC
     // Nested courses: each successive entry extends one lane pitch farther
     // before turning, keeping the elbows alongside rather than across each other.
-    const courseWidth = 2.2 * 1.8;
-    const courseLength = 4.4;
-    const coursePitch = courseWidth + .44;
-    objects.root.add(new ExerciseSign({
-        title: 'QUA VỆT BÁNH XE\nVÀ ĐƯỜNG VÒNG VUÔNG GÓC',
-        subtitle: 'Đưa bánh phải vào giữa hai vạch trắng',
-        x: 52, z: -12.92, rotation: Math.PI / 2
-    }).root);
-    objects.addRoad(58, -27, 8, 14, 'vertical', 'straight', 'white-dashed');
-    objects.addRoad(21, -10, 8, 6, 'vertical', 'straight', 'yellow-dashed');
+    //
+    // Spec §9.2 hard constraints (VIOS — hạng B):
+    //   Bv = 2.2 * b = 3.96 m   chiều rộng làn đường vuông góc
+    //   Lv = 2.0 * a = 8.8  m   chiều dài đường vuông góc
+    //   Sv = 1.5 * a = 6.6  m   chiều sâu đoạn vuông góc (exit leg)
+    const Bv = 2.2 * 2;
+    const Lv = 2.0 * 4.4;
+    const Sv = 1.5 * 4.4;
+    const coursePitch = Bv + .44;
+    // objects.root.add(new ExerciseSign({
+    //     title: 'QUA VỆT BÁNH XE\nVÀ ĐƯỜNG VÒNG VUÔNG GÓC',
+    //     subtitle: 'Đưa bánh phải vào giữa hai vạch trắng',
+    //     x: 72, z: -12.92, rotation: Math.PI / 2
+    // }).root);
+    objects.addRoad(79, -27, 8, 14, 'vertical', 'straight', 'white-dashed');
+    // objects.addRoad(79, -10, 8, 6, 'vertical', 'straight', 'yellow-dashed');
+
     for (let i = 0; i < 4; i++) {
         const entryZ = -18 - i * coursePitch;
         const entryLength = 10.8 + i * coursePitch;
-        objects.addWheelTrackCourse({ x: 54, z: entryZ, direction: 'horizontal', entryLength });
-        objects.addRoad(56, entryZ, courseWidth, 4, 'horizontal', 'none', 'white-solid', 1);
-        const exitX = 54 - entryLength + courseWidth / 2 - 1.5 * courseLength;
-        const exitZ = entryZ + 2 * courseLength;
-        objects.addRoad((21 + exitX) / 2, exitZ, courseWidth, exitX - 21,
-            'horizontal', 'none', 'white-solid', 1);
+
+        // Đặt hình vệt bánh xe + đường vuông góc (Bài 04) — lấy về world exit để đặt đường ra
+        const sensors = objects.addWheelTrackCourse({
+            x: 73, z: entryZ, direction: 'horizontal', entryLength
+        });
+        // Store all 4 course sensors for Exam04 use
+        objects.wheelTrackCourseSensors.push(sensors);
+
+        // Đường nối từ main road (X=79) vào entry — đúng chiều sâu Sv theo spec §9.2
+        objects.addRoad(76, entryZ, Bv, Sv, 'horizontal', 'none', 'white-solid', 1);
+
+        // Đường ra: mirror entry — vertical road đặt tại course exit, kéo dài Sv về phía nam
+        // (hướng xe chạy khi thoát khỏi course). Width = Bv (theo chiều X), length = Sv (theo chiều Z).
+        // Vị trí tâm đường: world exit của course. Đường kéo dài về phía -Z (hướng thoát) cho Sv.
+        objects.addRoad(
+            sensors.exitWorld.x - 10, sensors.exitWorld.z,
+            Bv, Sv + 18, 'horizontal', 'none', 'white-solid', 1
+        );
+
     }
-    objects.addRoad(21, -26, 8, 26, 'vertical', 'straight', 'yellow-dashed');
+
+    //road ra đường vòng vuông góc số 3
+    objects.addRoad(25, -18.85, Bv, 2, 'horizontal', 'none', 'white-solid', 1);
+    //road ra đường vòng vuông góc số 2
+    objects.addRoad(27, -14.05, Bv, 7, 'horizontal', 'none', 'white-solid', 1);
+    //road ra đường vòng vuông góc số 1
+    objects.addRoad(30, -9.25, Bv, 12, 'horizontal', 'none', 'white-solid', 1);
+
+    ////////////////////////////////////////////////////////////////////////////
+
+    objects.addRoad(21, -24, 8, 36, 'vertical', 'straight', 'yellow-dashed');
     objects.addPedestrianCrossing(21, -36, 'vertical', 8, 3);
     objects.addRoad(21, -42, 8, 26, 'horizontal', 'straight', 'white-dashed');
     objects.addPedestrianCrossing(27, -42, 'horizontal', 8, 3);

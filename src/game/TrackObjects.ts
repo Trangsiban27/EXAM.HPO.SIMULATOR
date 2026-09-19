@@ -5,6 +5,7 @@ import { ExerciseSign } from './ExerciseSign';
 import { PedestrianSign, type PedestrianSignOptions } from './PedestrianSign';
 import { StopSign, type StopSignOptions } from './StopSign';
 import { WindingCourse } from './WindingCourse';
+import { WheelTrackCourse } from './WheelTrackCourse';
 import { startPosition } from './startPosition';
 
 type ArrowType = 'straight' | 'left' | 'right' | 'none';
@@ -20,6 +21,11 @@ export class TrackObjects{
     private readonly bridges: Bridge[] = [];
     private readonly trafficLights: TrafficLight[] = [];
     startSignal: TrafficLight | null = null;
+    /**
+     * Exam04 course sensors for all 4 wheel-track courses.
+     * Populated by buildExamGround after addWheelTrackCourse() calls.
+     */
+    wheelTrackCourseSensors: ReturnType<TrackObjects['addWheelTrackCourse']>[] = [];
 
     update(dt: number, vehiclePosition: THREE.Vector3) {
         for (const light of this.trafficLights) light.update(dt, vehiclePosition);
@@ -550,107 +556,68 @@ export class TrackObjects{
         return marking;
     }
 
+    /**
+     * Bài 04 — Qua vệt bánh xe và đường vòng vuông góc.
+     *
+     * Spec: spec/threejs_exam_yard_specification_v2.md §9
+     *
+     * Delegates geometry to `WheelTrackCourse` (mirrors pattern of `WindingCourse`).
+     * The course geometry is built at local origin (x = 0, z = 0), then translated
+     * and rotated into place via a single Matrix4 transform so that entry/exit
+     * stay consistent with the visual layout.
+     */
     addWheelTrackCourse({ x = 58, z = -20, direction = 'vertical', entryLength = 13.2 }: {
         x?: number;
         z?: number;
         direction?: RoadDirection;
         entryLength?: number;
     } = {}) {
-        const firstObject = this.root.children.length;
-        const firstRoad = this.roads.length;
-        const firstPenalty = this.penaltyZones.length;
-        this.buildWheelTrackCourse(entryLength);
+        // Build the course at local origin (entry at (0, 0, 0)).
+        const course = new WheelTrackCourse(0, 0, entryLength);
 
-        // Position is the entry center; rotate every visual and collision bound together.
+        // Rotate + translate the whole subtree into world placement.
         const transform = new THREE.Matrix4().makeTranslation(x, 0, z)
-            .multiply(new THREE.Matrix4().makeRotationY(direction === 'horizontal' ? Math.PI / 2 : 0))
-            .multiply(new THREE.Matrix4().makeTranslation(-58, 0, 20));
-        for (const object of this.root.children.slice(firstObject)) object.applyMatrix4(transform);
-        for (const zone of this.penaltyZones.slice(firstPenalty)) zone.applyMatrix4(transform);
-        for (const road of this.roads.slice(firstRoad)) {
-            const bounds = new THREE.Box3(
-                new THREE.Vector3(road.bounds.minX, 0, road.bounds.minZ),
-                new THREE.Vector3(road.bounds.maxX, 0, road.bounds.maxZ)
-            ).applyMatrix4(transform);
-            road.x = road.group.position.x;
-            road.z = road.group.position.z;
-            road.bounds = { minX: bounds.min.x, maxX: bounds.max.x, minZ: bounds.min.z, maxZ: bounds.max.z };
-            if (direction === 'horizontal') road.direction = road.direction === 'vertical' ? 'horizontal' : 'vertical';
-        }
-    }
+            .multiply(new THREE.Matrix4().makeRotationY(direction === 'horizontal' ? Math.PI / 2 : 0));
 
-    private buildWheelTrackCourse(entryLength: number) {
-        // Model dimensions in metres: overall length, body width, tyre width.
-        const a = 4.4, b = 1.8, B1 = .22;
-        const Bvb = B1 + .2, Lvb = a, Sv = 1.5 * a, Lv = 2 * a, Bv = 2.2 * b;
-        const half = Bv / 2;
-        const entryX = 58, entryZ = -20;
-        const turnZ = entryZ - entryLength;
-        const exitX = entryX - Lv;
-        // Sv is measured from the outside of the cross leg to the open exit.
-        const exitZ = turnZ + half - Sv;
-        const outline: [number, number][] = [
-            [entryX + half, entryZ], [entryX + half, turnZ - half],
-            [exitX + half, turnZ - half], [exitX + half, exitZ],
-            [exitX - half, exitZ], [exitX - half, turnZ + half],
-            [entryX - half, turnZ + half], [entryX - half, entryZ]
-        ];
-        // One continuous surface avoids overlapping asphalt and seams at the elbows.
-        const shape = new THREE.Shape();
-        outline.forEach(([x, z], i) => {
-            if (i === 0) shape.moveTo(x, -z);
-            else shape.lineTo(x, -z);
-        });
-        shape.closePath();
-        const surface = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, {
-            depth: .08, bevelEnabled: false
-        }),
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95 }));
-        surface.rotation.x = -Math.PI / 2;
-        surface.geometry.translate(0, 0, -.08);
-        surface.position.y = .06;
-        surface.receiveShadow = true;
-        surface.name = 'wheel-track-course-surface';
-        this.root.add(surface);
+        course.root.applyMatrix4(transform);
+        this.root.add(course.root);
 
-        // Open entry/exit; six continuous boundary segments follow the two opposite turns.
-        for (let i = 0; i < outline.length - 1; i++) {
-            if (i === 3) continue;
-            const [x1, z1] = outline[i], [x2, z2] = outline[i + 1];
-            const w = Math.abs(x2 - x1), d = Math.abs(z2 - z1);
-            this.addLine((x1 + x2) / 2, (z1 + z2) / 2,
-                w || .1, d || .1, 0xffffff, true);
-            // Reuse the road's red/white curb pattern outside the measured boundary.
-            const length = Math.hypot(x2 - x1, z2 - z1);
-            const edge = new THREE.Group();
-            edge.position.set((x1 + x2) / 2, 0, (z1 + z2) / 2);
-            edge.rotation.y = Math.atan2(x2 - x1, z2 - z1);
-            this.addRoadEdgePattern(0, 0, .4, length, 'left', edge);
-            this.root.add(edge);
+        // Merge penalty zones (wheel probes) after transform so they remain valid.
+        for (const zone of course.penaltyZones) {
+            this.penaltyZones.push(zone.clone().applyMatrix4(transform));
         }
 
-        // Use the common road arrows, clear of the wheel-track markings and elbows.
-        this.addRoadArrow(entryX, entryZ - 1, Bv, 3, 'straight', this.root);
-        const acrossArrow = new THREE.Group();
-        acrossArrow.position.set((entryX + exitX) / 2, 0, turnZ);
-        acrossArrow.rotation.y = Math.PI / 2;
-        this.addRoadArrow(0, 0, Bv, Lv - Bv, 'straight', acrossArrow);
-        this.root.add(acrossArrow);
-        this.addRoadArrow(exitX, (turnZ - half + exitZ) / 2, Bv,
-            Sv - Bv, 'straight', this.root);
+        // Expose world-space entry/exit so callers can place connecting roads.
+        const entryWorld = new THREE.Vector3(x, 0, z);
+        const exitLocal = new THREE.Vector3(-course.Lv, 0,
+            -entryLength + course.Bv / 2 - course.Sv);
+        const exitWorld = exitLocal.applyMatrix4(transform);
 
-        // Bvb is the clear gap between the two markings, on the right-hand wheel path.
-        const markingWidth = .05;
-        const trackZ = entryZ - a;
-        for (const side of [-1, 1]) {
-            const x = entryX + .94 + side * (Bvb + markingWidth) / 2;
-            this.addLine(x, trackZ, markingWidth, Lvb, 0xffffff);
-            // Wheel probes represent tyre centres; expand by half the actual tyre width.
-            this.penaltyZones.push(new THREE.Box3().setFromCenterAndSize(
-                new THREE.Vector3(x, .5, trackZ),
-                new THREE.Vector3(markingWidth + B1, 1, Lvb)));
-        }
+        // World-space forward axis (unit) — hướng xe chạy khi ra khỏi course
+        // sau khi đảo hướng start/end (xe ra về phía start ban đầu).
+        //   'horizontal' → (1, 0, 0)  — xe chạy về world +X (hướng start)
+        //   'vertical'   → (0, 0, 1)  — xe chạy về world +Z (hướng start)
+        const exitForwardAxis = direction === 'horizontal'
+            ? new THREE.Vector3(1, 0, 0)
+            : new THREE.Vector3(0, 0, 1);
 
+        // Transform all sensors to world space and return for Exam04 use.
+        const startYellowSensor = course.startYellowSensorLocal.clone().applyMatrix4(transform);
+        const endYellowSensor = course.endYellowSensorLocal.clone().applyMatrix4(transform);
+        const wheelTrackZone = course.wheelTrackZoneLocal.clone().applyMatrix4(transform);
+        const boundarySensors = course.boundarySensorsLocal.map(b => b.clone().applyMatrix4(transform));
+
+        return {
+            entryWorld,
+            exitWorld,
+            exitForwardAxis,
+            startYellowLine: course.startYellowLine,
+            endYellowLine: course.endYellowLine,
+            startYellowSensor,
+            endYellowSensor,
+            wheelTrackZone,
+            boundarySensors,
+        };
     }
 
 

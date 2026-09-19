@@ -17,6 +17,19 @@ import * as THREE from 'three';
 export class Vehicle3WheelAssembly {
     private _rolling: THREE.Group[] = [];
     public readonly frontPivots: THREE.Group[] = [];
+    /**
+     * Mapping from wheel id to its steering-pivot Object3D, so callers can read
+     * world-space wheel positions via `pivot.getWorldPosition(tmp)`. Keys are
+     * 'FL', 'FR', 'RL', 'RR' (front/rear × left/right from the driver's
+     * perspective). For Vietnamese VIOS cars (left-hand drive), the passenger
+     * side is on the RIGHT (+X in root-local frame after the body Y-flip).
+     */
+    private readonly _pivots: { FL: THREE.Object3D; FR: THREE.Object3D; RL: THREE.Object3D; RR: THREE.Object3D } = {
+        FL: undefined as unknown as THREE.Object3D,
+        FR: undefined as unknown as THREE.Object3D,
+        RL: undefined as unknown as THREE.Object3D,
+        RR: undefined as unknown as THREE.Object3D,
+    };
 
     private readonly tireRadius: number;
     /**
@@ -76,8 +89,19 @@ export class Vehicle3WheelAssembly {
             parent.add(pivot);
 
             this._rolling.push(roll);
+            this._pivots[id] = pivot;
             if (isFront) this.frontPivots.push(pivot);
         }
+    }
+
+    /**
+     * Return the steering-pivot Object3D for one of the four wheels so callers
+     * can read its world-space position with `pivot.getWorldPosition(tmp)`.
+     */
+    getWheel(id: 'FL' | 'FR' | 'RL' | 'RR'): THREE.Object3D {
+        const pivot = this._pivots[id];
+        if (!pivot) throw new Error(`Vehicle3WheelAssembly: wheel ${id} not built yet`);
+        return pivot;
     }
 
     private buildTyre(parent: THREE.Object3D): void {

@@ -399,3 +399,143 @@ export function resolveHillRules(vehicleClass: ExamVehicleClass) {
         vehicleClass,
     };
 }
+
+/**
+ * Wheel-track + right-angle (Bài 4A) rules — aligned with
+ * spec/exam/exam_04_wheel_track_and_right_angle_v2.md.
+ *
+ * Hai vạch vàng (đầu/cuối) là START_GATE / END_GATE chính thức.
+ * Logic chấm điểm áp dụng sau khi xe qua vạch vàng đầu bài.
+ *
+ * Lỗi đặc biệt:
+ *   E04-02: không bánh nào qua wheel-track (FR + RR) → đình chỉ.
+ *           Chỉ 1 trong 2 bánh qua → trừ 5 điểm / bánh còn lại (E04-02b).
+ *   E04-03: đè vạch giới hạn → -5 mỗi lần (không cộng dồn mỗi frame).
+ *   E04-04: đè vạch liên tục ≥ 5s → thêm -5 theo rule.
+ *   E04-05: quá 02 phút → -5 theo rule.
+ *   E04-08: chết máy → -5 mỗi lần.
+ *   E04-09: RPM > 4000 → -5 mỗi lần.
+ *   E04-10: quá tốc độ → -1 mỗi 3s.
+ *   E04-11: arrival overtime → -1 mỗi 3s (allowedTimeSec = REQUIRED_INPUT → null).
+ */
+export interface Exam04Rules {
+    id: 'EXAM_04_WHEEL_TRACK_AND_RIGHT_ANGLE';
+    time: {
+        limitSec: number;
+        overtimeIntervalSec: number;
+        overtimePenalty: number;
+    };
+    wheelTrack: {
+        /** Phạt cho mỗi bánh còn lại (FR hoặc RR) chưa qua zone khi đã qualify. */
+        missingWheelPenalty: number;
+        /** Phạt khi bánh xe (bất kỳ trong 4) cán lên vệt bánh xe — latch lần đầu. */
+        overlapContactPenalty: number;
+        /** Cadence (giây) áp dụng sustained penalty khi vẫn còn cán. */
+        overlapSustainedIntervalSec: number;
+        /** Phạt sustained mỗi interval khi vẫn còn cán lên vệt. */
+        overlapSustainedPenalty: number;
+    };
+    boundary: {
+        contactPenalty: number;
+        sustainedContactIntervalSec: number;
+        sustainedContactPenalty: number;
+    };
+    engine: {
+        maxRPM: number;
+        stallPenalty: Record<ExamVehicleClass, number>;
+        rpmExceededPenalty: Record<ExamVehicleClass, number>;
+    };
+    maxSpeedKmh: Record<ExamVehicleClass, number>;
+    speeding: {
+        intervalSec: number;
+        penaltyPerInterval: number;
+    };
+    arrivalOvertime: {
+        intervalSec: number;
+        penaltyPerInterval: number;
+        allowedTimeSec: number | null;
+    };
+    disqualify: {
+        wrongLayout: boolean;
+        wheelTrackNotCompleted: boolean;
+        driveOnCurb: boolean;
+        accident: boolean;
+    };
+}
+
+export const EXAM_04_RULES: Exam04Rules = {
+    id: 'EXAM_04_WHEEL_TRACK_AND_RIGHT_ANGLE',
+    time: {
+        limitSec: 120,
+        overtimeIntervalSec: 120,
+        overtimePenalty: 5,
+    },
+    wheelTrack: {
+        missingWheelPenalty: 5, // -5 cho mỗi bánh (FR hoặc RR) còn lại chưa qua zone
+        overlapContactPenalty: 5,            // -5 lần đầu khi bánh đè lên vệt (latch)
+        overlapSustainedIntervalSec: 5,      // cadence (s) phạt sustained khi còn đè
+        overlapSustainedPenalty: 5,          // -5 mỗi interval sustained
+    },
+    boundary: {
+        contactPenalty: 5,
+        sustainedContactIntervalSec: 5,
+        sustainedContactPenalty: 5,
+    },
+    engine: {
+        maxRPM: 4000,
+        stallPenalty,
+        rpmExceededPenalty,
+    },
+    maxSpeedKmh: {
+        A1: 40,
+        A2: 50,
+        B: 24,
+        D1: 24,
+        D2: 24,
+        C1: 20,
+        C: 20,
+        D: 20,
+        E: 20,
+        Fc: 20,
+    },
+    speeding: {
+        intervalSec: 3,
+        penaltyPerInterval: 1,
+    },
+    arrivalOvertime: {
+        intervalSec: 3,
+        penaltyPerInterval: 1,
+        allowedTimeSec: null, // REQUIRED_INPUT — spec không cung cấp.
+    },
+    disqualify: {
+        wrongLayout: true,
+        wheelTrackNotCompleted: true,
+        driveOnCurb: true,
+        accident: true,
+    },
+};
+
+/**
+ * Returns a defensive copy of EXAM_04_RULES keyed to the supplied vehicle class.
+ * Mirrors the pattern of resolveHillRules.
+ */
+export function resolveExam04Rules(vehicleClass: ExamVehicleClass) {
+    const r = EXAM_04_RULES;
+    return {
+        limitSec: r.time.limitSec,
+        overtimeIntervalSec: r.time.overtimeIntervalSec,
+        overtimePenalty: r.time.overtimePenalty,
+        wheelTrack: { ...r.wheelTrack },
+        boundary: { ...r.boundary },
+        maxSpeedKmh: r.maxSpeedKmh[vehicleClass],
+        engine: {
+            stallPenalty: r.engine.stallPenalty[vehicleClass],
+            rpmExceededPenalty: r.engine.rpmExceededPenalty[vehicleClass],
+            maxRPM: r.engine.maxRPM,
+        },
+        speeding: { ...r.speeding },
+        arrivalOvertime: { ...r.arrivalOvertime },
+        disqualify: { ...r.disqualify },
+        vehicleClass,
+    };
+}

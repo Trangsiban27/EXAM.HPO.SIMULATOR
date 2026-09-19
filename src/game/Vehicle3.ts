@@ -13,6 +13,8 @@ import type { InputManager } from './InputManager';
  */
 export class Vehicle3 extends Vehicle {
     private wheelAssy!: Vehicle3WheelAssembly;
+    /** Exposed so DrivingGame can read wheel world positions for Exam04 sensors. */
+    get wheelAssembly(): Vehicle3WheelAssembly { return this.wheelAssy; }
     // Tyre radius 0.32m matches a 195/55 R15 wheel, consistent with the Vios.
     private readonly tireRadius = .32;
     private lamps: { material: THREE.MeshStandardMaterial; base: THREE.Color; emissive: THREE.Color; left: boolean }[] = [];

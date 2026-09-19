@@ -3,6 +3,7 @@ import {CabinView} from './CabinView';
 import {InputManager} from './InputManager';
 import {Vehicle} from './Vehicle';
 import {Vehicle2} from './Vehicle2';
+import {Vehicle3} from './Vehicle3';
 import {Track} from './Track';
 import {ExamEngine} from './ExamEngine';
 import {CameraManager} from './CameraManager';
@@ -25,6 +26,7 @@ private animationId=0;
 private stopped=false;
 private lastCameraKey=false;
 private probe=new THREE.Vector3();
+private wheelTmp=new THREE.Vector3();
 constructor(private host:HTMLDivElement,private hud:Hud,vehicle?:Vehicle,private develop=new URLSearchParams(window.location.search).get('develop')==='true'){
 this.vehicle=vehicle??(new URLSearchParams(window.location.search).get('vehicle')==='2'?new Vehicle2():new Vehicle());
 this.cameras=new CameraManager(this.develop);
@@ -36,8 +38,10 @@ this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 this.renderer.shadowMap.enabled=true;
 this.host.appendChild(this.renderer.domElement);
 this.cameras.attach(this.renderer.domElement);
-this.scene.add(this.track.root,this.vehicle.root);
-this.scene.add(new THREE.HemisphereLight(0xddeeff,0x596347,2));
+    this.scene.add(this.track.root,this.vehicle.root);
+    this.scene.add(new THREE.HemisphereLight(0xddeeff,0x596347,2));
+    // Wire up Exam04 sensors from the track (after buildExamGround ran in Track constructor)
+    this.exam.wireExam04(this.track.wheelTrackCourseSensors);
 if(this.develop){
 this.probeCtrl=new ProbeController(this.cameras.camera,this.track,this.renderer.domElement,this.devProbePanel,true);
 }
@@ -70,7 +74,18 @@ this.vehicle.followSurface((x,z)=>this.track.getSurfaceHeight(x,z));
 this.track.update(dt,this.vehicle.root.position);
 const penaltyCount=this.exam.penalties.length;
 const frontPosition=this.probe.set(0,0,-2.2).applyQuaternion(this.vehicle.root.quaternion).add(this.vehicle.root.position).clone();
-const startToast=this.exam.update({position:this.vehicle.root.position,frontPosition,speedKmh:this.vehicle.getSpeedKmh(),rpm:this.vehicle.transmission.rpm,engineRunning:this.vehicle.transmission.running,stalled:this.vehicle.transmission.car.stalled,leftSignal:this.vehicle.signals.left,seatBeltFastened:this.vehicle.seatBeltFastened},this.track.startSignal?.phase??'idle',dt);
+
+// Populate wheel positions from Vehicle3.wheelAssembly if available
+const wheelPositions = this.vehicle instanceof Vehicle3 && this.vehicle.wheelAssembly
+    ? {
+        FL: this.vehicle.wheelAssembly.getWheel('FL').getWorldPosition(this.wheelTmp).clone(),
+        FR: this.vehicle.wheelAssembly.getWheel('FR').getWorldPosition(this.wheelTmp).clone(),
+        RL: this.vehicle.wheelAssembly.getWheel('RL').getWorldPosition(this.wheelTmp).clone(),
+        RR: this.vehicle.wheelAssembly.getWheel('RR').getWorldPosition(this.wheelTmp).clone(),
+      }
+    : undefined;
+
+const startToast=this.exam.update({position:this.vehicle.root.position,frontPosition,wheelPositions,speedKmh:this.vehicle.getSpeedKmh(),rpm:this.vehicle.transmission.rpm,engineRunning:this.vehicle.transmission.running,stalled:this.vehicle.transmission.car.stalled,leftSignal:this.vehicle.signals.left,seatBeltFastened:this.vehicle.seatBeltFastened},this.track.startSignal?.phase??'idle',dt);
 const added=this.exam.penalties.slice(penaltyCount);
 if(added.length)this.hud.flash(added.map(e=>e.reason+' (−'+e.points+')').join('. '),'penalty');
 this.handlePenalties();
