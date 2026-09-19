@@ -194,22 +194,39 @@ export function buildExamGround(objects: TrackObjects) {
 
     objects.addRoad(21, -24, 8, 36, 'vertical', 'straight', 'yellow-dashed');
     objects.addPedestrianCrossing(21, -36, 'vertical', 8, 3);
-    objects.addRoad(21, -42, 8, 26, 'horizontal', 'straight', 'white-dashed');
+    // Đường ngang phía ĐÔNG ngã tư (xe từ Đông đến dừng trước crosswalk)
+    objects.addRoad(34, -42, 8, 26, 'horizontal', 'straight', 'yellow-dashed');
+    // Crosswalk phụ ở rìa phía Đông (giữ visual hint ở giữa ngã tư bằng 2 crosswalk dưới)
     objects.addPedestrianCrossing(27, -42, 'horizontal', 8, 3);
     objects.addPedestrianCrossing(15, -42, 'horizontal', 8, 3);
-    objects.addRoad(21, -42, 8, 26, 'horizontal', 'straight', 'yellow-dashed');
+    // Đường ngang phía TÂY ngã tư (xe từ Tây đến dừng trước crosswalak)
+    objects.addRoad(8, -42, 8, 26, 'horizontal', 'straight', 'yellow-dashed');
     objects.addRoad(21, -50, 8, 10, 'vertical', 'straight', 'yellow-dashed');
     objects.addPedestrianCrossing(21, -48, 'vertical', 8, 3);
     
-    // Local -Z points into the junction; local -X is the incoming lane
-    // indicated by the two-way road arrows. Stop lines precede each crossing.
-    for (const [x, z, rotation] of [
-        [21, -33, 0],             // South: incoming lane X=19, heading north.
-        [21, -51, Math.PI],       // North: incoming lane X=23, heading south.
-        [12, -42, -Math.PI / 2],  // West: incoming lane Z=-44, heading east.
-        [30, -42, Math.PI / 2]    // East: incoming lane Z=-40, heading west.
+    // Pole luôn lệch local -X (TrafficLight.ts: poleX = -width/2 - 0.55).
+    // Đường dọc NS trải X ∈ [17, 25]; đường ngang EW trải Z ∈ [-46, -38].
+    // Pole phải nằm ngoài lane; panel chính hướng về chiều xe đến.
+    for (const [x, z, rotation, stopLineZ, stopLineX, triggerStart, triggerStartX, triggerLength, markerId] of [
+        [30, -36, 0, 6, -7, 7, , 2, 'SOUTH'], // Pole ở X=16.45 (ngoài mép Tây đường dọc). Panel +Z → xe từ Nam.
+        [12, -47, Math.PI, 7, -7, 7, ,2, 'NORTH'], // Pole ở X=25.55 (ngoài mép Đông đường dọc). Panel -Z → xe từ Bắc.
+        [16, -42, Math.PI / 2, -6, -2, -10, -6, 2, 'WEST'],  // Pole ở Z=-37.45 (ngoài mép Bắc đường ngang). Panel +X → xe từ Tây.
+        [26, -42, -Math.PI / 2, -4, -2, -10, -6, 2, 'EAST'],  // Pole ở Z=-46.55 (ngoài mép Nam đường ngang). Panel -X → xe từ Đông.
     ] as const) {
-        objects.addTrafficLight(x, z, 8, rotation);
+        objects.addTrafficLight(
+            x, 
+            z, 
+            8, 
+            rotation, 
+            { 
+                stopLineZ,
+                stopLineX, 
+                triggerStart,
+                triggerStartX,
+                triggerLength, 
+                markerId: markerId 
+            }
+        );
     }
 
     objects.addRoad(21, -60, 8, 30, 'vertical', 'straight', 'yellow-dashed');

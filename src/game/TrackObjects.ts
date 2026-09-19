@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Bridge } from './Bridge';
-import { TrafficLight } from './TrafficLight';
+import { TrafficLight, type TrafficLightOptions } from './TrafficLight';
 import { ExerciseSign } from './ExerciseSign';
 import { PedestrianSign, type PedestrianSignOptions } from './PedestrianSign';
 import { StopSign, type StopSignOptions } from './StopSign';
@@ -35,8 +35,8 @@ export class TrackObjects{
         for (const light of this.trafficLights) light.reset();
         if (this.startSignal) this.startSignal.reset();
     }
-    addTrafficLight(x: number, z: number, width = 8, rotation = 0) {
-        const signal = new TrafficLight(x, z, width, rotation);
+    addTrafficLight(x: number, z: number, width = 8, rotation = 0, options: TrafficLightOptions = {}) {
+        const signal = new TrafficLight(x, z, width, rotation, options);
         this.trafficLights.push(signal);
         this.root.add(signal.root);
         return signal;
@@ -684,7 +684,7 @@ export class TrackObjects{
 
         if (opts.withSignal) {
             const rotation = opts.signalRotation ?? startPosition.heading;
-            const signal = this.addTrafficLight(x, z, roadWidth, rotation);
+            const signal = this.addTrafficLight(x, z, roadWidth, rotation, { markerId: 'START' });
             signal.root.name = 'START_SIGNAL';
             this.startSignal = signal;
             zone.attach(signal.root);

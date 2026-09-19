@@ -1,10 +1,42 @@
 import * as THREE from 'three';
 
+/** Configuration for {@link TrafficLight}. Optional fields fall back to the legacy defaults
+ *  (yellow line at local Z = 7, trigger from Z = 0 to 7, no marker). */
+export interface TrafficLightOptions {
+    /** Local Z of the yellow stop line (pole sits at local Z = 0). Default `7`. */
+    stopLineZ?: number;
+    /** Local Z where the trigger zone starts (vehicle crossing this point activates the signal). Default `0`. */
+    triggerStart?: number;
+    /** Length of the trigger window along local Z. Default `stopLineZ - triggerStart`. */
+    triggerLength?: number;
+    /** Local X of the yellow stop-line center. Default `-width + 1`. */
+    stopLineX?: number;
+    /** Local X where the trigger zone starts. Default `stopLineX - stopLineHalfWidth`. */
+    triggerStartX?: number;
+    /** Length of the trigger window along local X. Default `2 * stopLineHalfWidth`. */
+    triggerLengthX?: number | any;
+    /** Marker ID surfaced to {@link TrafficLight.onMarkerTriggered} (e.g. `'A'`, `'START'`). Default `undefined`. */
+    markerId?: string;
+}
+
 /** Vehicle-triggered signal. Local -Z points toward the intersection. */
 export class TrafficLight {
     readonly root = new THREE.Group();
     private elapsed = 0;
     private active = false;
+    private readonly markerId?: string;
+    private readonly triggerStart: number;
+    private readonly triggerLength: number;
+    /** Local X of the yellow stop-line center (matches the box() drawn in the constructor). */
+    private readonly stopLineX: number;
+    /** Half-width of the yellow stop line along local X (matches the box() drawn in the constructor). */
+    private readonly stopLineHalfWidth: number;
+    /** Local X where the trigger zone starts (vehicle crossing this point activates the signal). */
+    private readonly triggerStartX: number;
+    /** Length of the trigger window along local X. */
+    private readonly triggerLengthX: number | any;
+    /** Optional callback fired the first time a vehicle enters the trigger zone. Receives the marker ID. */
+    onMarkerTriggered?: (id: string) => void;
     // The signal is viewed from both camera modes, so its flat lenses must
     // render from either side of the plane.
     private readonly red = new THREE.MeshStandardMaterial({
@@ -30,12 +62,35 @@ export class TrafficLight {
         return this.active ? Math.ceil((this.phase === 'red' ? 30 : 40) - this.elapsed) : 0;
     }
 
-    constructor(x: number, z: number, private readonly width = 8, direction: 'vertical' | 'horizontal' | number = 'vertical') {
+    constructor(x: number, z: number, private readonly width = 8, direction: 'vertical' | 'horizontal' | number = 'vertical', options: TrafficLightOptions = {}) {
         this.root.name = 'vehicle-triggered-traffic-light';
         this.root.position.set(x, 0, z);
         this.root.rotation.y = typeof direction === 'number' ? direction : direction === 'horizontal' ? -Math.PI / 2 : 0;
+
+        const stopLineZ = options.stopLineZ ?? 7;
+        const triggerStart = options.triggerStart ?? 0;
+        // Caller may pin the trigger window to the stop line (stopLineZ === triggerStart).
+        // In that case widen the window back to the pole (local Z = 0) so vehicles crossing
+        // the lane on their way to the line still trip the sensor. Explicit triggerLength
+        // always wins.
+        const defaultLength = stopLineZ === triggerStart
+            ? stopLineZ              // [triggerStart, stopLineZ] covers pole → yellow line
+            : (stopLineZ - triggerStart);
+        this.markerId = options.markerId;
+        this.triggerStart = triggerStart;
+        this.triggerLength = options.triggerLength ?? 2;
+        // Mirror the geometry of the yellow box(width/2 - .4, .012, .12, -width + 1, .09, stopLineZ, ...)
+        // drawn below so the trigger zone in update() lines up with the visible line.
+        this.stopLineHalfWidth = (width - .8) / 2;
+        this.stopLineX = options.stopLineX ?? -width + 1;
+        // Default trigger window along local X spans the full stop line. Caller can pin
+        // triggerStartX/triggerLengthX for non-rectangular footprints.
+        this.triggerStartX = options.triggerStartX ?? (this.stopLineX - this.stopLineHalfWidth);
+        this.triggerLengthX = options.triggerLengthX ?? (this.stopLineHalfWidth * 2);
+
         const dark = new THREE.MeshStandardMaterial({ color: 0x20272d, roughness: .6 });
         const metal = new THREE.MeshStandardMaterial({ color: 0x9da8b0, metalness: .6, roughness: .4 });
+
         const box = (w: number, h: number, d: number, px: number, y: number, pz: number, material: THREE.Material) => {
             const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
             mesh.position.set(px, y, pz);
@@ -43,16 +98,20 @@ export class TrafficLight {
             mesh.receiveShadow = true;
             this.root.add(mesh);
         };
+
         // Road arrows place incoming traffic on local -X; keep the post outside that lane.
         const poleX = -width / 2 - .55;
+
         box(.16, 3.6, .16, poleX, 1.8, 0, metal);
         box(.8, 1.6, .4, poleX, 3.45, 0, dark);
+
         // The side panel faces inward from the roadside post toward the lane.
         const faces = [
             { offsetX: 0, offsetZ: .211, rotationY: 0, lensRadius: .25, timerSize: [.85, .425] },
             { offsetX: 0, offsetZ: -.211, rotationY: Math.PI, lensRadius: .25, timerSize: [.85, .425] },
             { offsetX: .411, offsetZ: 0, rotationY: Math.PI / 2, lensRadius: .18, timerSize: [.4, .2] }
         ] as const;
+        
         for (const face of faces) {
             for (const [y, material] of [[3.8, this.red], [3.12, this.green]] as const) {
                 const lens = new THREE.Mesh(new THREE.CircleGeometry(face.lensRadius, 32), material);
@@ -61,12 +120,41 @@ export class TrafficLight {
                 this.root.add(lens);
             }
         }
-        box(width / 2 - .4, .012, .2, -width / 4, .09, 0,
+        
+        // Yellow line position X honors stopLineX so callers can move the visible stop
+        // line (and its trigger zone) off the default `-width + 1` for rotated signals.
+        // Default (-width + 1) preserves the legacy visual.
+        box(width / 2 - .4, .012, .12, this.stopLineX, .09, stopLineZ,
             new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .8 }));
+
+        // Debug marker: paint the trigger zone in semi-transparent red so the
+        // trigger footprint is visible in the scene. The X extent is the full
+        // trigger window (triggerLengthX); the Z extent matches triggerStart..triggerLength.
+        // When either axis collapses to 0 we still draw a thin slab so the
+        // marker stays visible (helps spot mis-configured sensors).
+        const triggerWidth = (width - .8) / 2;
+        const triggerDepth = Math.max(this.triggerLength, .5);
+        const triggerMarker = new THREE.Mesh(
+            new THREE.BoxGeometry(triggerWidth, .04, triggerDepth),
+            new THREE.MeshBasicMaterial({
+                color: 0xff2030,
+                transparent: true,
+                opacity: .35,
+                depthWrite: false
+            })
+        );
+        triggerMarker.name = 'traffic-light-trigger-zone';
+        triggerMarker.position.set(
+            this.triggerStartX + this.triggerLengthX / 2,
+            .07,
+            this.triggerStart + this.triggerLength / 2
+        );
+        this.root.add(triggerMarker);
 
         this.canvas.width = 256; this.canvas.height = 128;
         this.texture = new THREE.CanvasTexture(this.canvas);
         this.texture.colorSpace = THREE.SRGBColorSpace;
+
         for (const face of faces) {
             const timer = new THREE.Mesh(new THREE.PlaneGeometry(face.timerSize[0], face.timerSize[1]),
                 new THREE.MeshBasicMaterial({ map: this.texture, side: THREE.DoubleSide }));
@@ -74,6 +162,7 @@ export class TrafficLight {
             timer.rotation.y = face.rotationY;
             this.root.add(timer);
         }
+
         this.refresh();
     }
 
@@ -82,10 +171,17 @@ export class TrafficLight {
             this.root.updateWorldMatrix(true, false);
             this.probe.copy(vehiclePosition);
             this.root.worldToLocal(this.probe);
-            // Trigger while approaching the yellow line, before the front bumper reaches it.
-            if (this.probe.x >= -this.width / 2 && this.probe.x < 0 && this.probe.z >= 0 && this.probe.z <= 4.5) {
+            // Trigger zone is a 2D rectangle in local XZ. X extent comes from
+            // triggerStartX/triggerLengthX (defaults mirror the yellow stop line);
+            // Z extent comes from triggerStart/triggerLength. Caller can shrink
+            // either axis for non-rectangular detection footprints.
+            if (this.probe.x >= this.triggerStartX
+                && this.probe.x < this.triggerStartX + this.triggerLengthX
+                && this.probe.z >= this.triggerStart
+                && this.probe.z < this.triggerStart + this.triggerLength) {
                 this.active = true;
                 this.elapsed = 0;
+                if (this.markerId) this.onMarkerTriggered?.(this.markerId);
             }
         } else {
             this.elapsed = (this.elapsed + Math.max(0, dt)) % 40;
