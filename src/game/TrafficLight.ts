@@ -24,13 +24,16 @@ export class TrafficLight {
     readonly root = new THREE.Group();
     private elapsed = 0;
     private active = false;
-    private readonly markerId?: string;
+    /** Marker ID surfaced to {@link TrafficLight.onMarkerTriggered} (e.g. `'A'`, `'START'`, `'SOUTH'`). Default `undefined`. */
+    readonly markerId?: string;
+    /** Local Z of the yellow stop line (pole sits at local Z = 0). Exposed for Exam05South to compute world-space stop line. */
+    readonly stopLineZ: number;
     private readonly triggerStart: number;
     private readonly triggerLength: number;
     /** Local X of the yellow stop-line center (matches the box() drawn in the constructor). */
-    private readonly stopLineX: number;
+    readonly stopLineX: number;
     /** Half-width of the yellow stop line along local X (matches the box() drawn in the constructor). */
-    private readonly stopLineHalfWidth: number;
+    readonly stopLineHalfWidth: number;
     /** Local X where the trigger zone starts (vehicle crossing this point activates the signal). */
     private readonly triggerStartX: number;
     /** Length of the trigger window along local X. */
@@ -54,12 +57,20 @@ export class TrafficLight {
     private display = '';
     private readonly probe = new THREE.Vector3();
 
+    /** Red phase length (s). Vehicle-triggered signal stays red this long then goes green. */
+    static readonly RED_DURATION_SEC = 15;
+    /** Green phase length (s). Total cycle = RED + GREEN. */
+    static readonly GREEN_DURATION_SEC = 10;
+    /** Total cycle length (s) = RED + GREEN. */
+    static get CYCLE_SEC(): number { return TrafficLight.RED_DURATION_SEC + TrafficLight.GREEN_DURATION_SEC; }
+
     get phase(): 'idle' | 'red' | 'green' {
-        return !this.active ? 'idle' : this.elapsed < 30 ? 'red' : 'green';
+        return !this.active ? 'idle' : this.elapsed < TrafficLight.RED_DURATION_SEC ? 'red' : 'green';
     }
 
     get remainingSeconds() {
-        return this.active ? Math.ceil((this.phase === 'red' ? 30 : 40) - this.elapsed) : 0;
+        if (!this.active) return 0;
+        return Math.ceil((this.phase === 'red' ? TrafficLight.RED_DURATION_SEC : TrafficLight.CYCLE_SEC) - this.elapsed);
     }
 
     constructor(x: number, z: number, private readonly width = 8, direction: 'vertical' | 'horizontal' | number = 'vertical', options: TrafficLightOptions = {}) {
@@ -77,6 +88,7 @@ export class TrafficLight {
             ? stopLineZ              // [triggerStart, stopLineZ] covers pole → yellow line
             : (stopLineZ - triggerStart);
         this.markerId = options.markerId;
+        this.stopLineZ = stopLineZ;
         this.triggerStart = triggerStart;
         this.triggerLength = options.triggerLength ?? 2;
         // Mirror the geometry of the yellow box(width/2 - .4, .012, .12, -width + 1, .09, stopLineZ, ...)
@@ -184,7 +196,7 @@ export class TrafficLight {
                 if (this.markerId) this.onMarkerTriggered?.(this.markerId);
             }
         } else {
-            this.elapsed = (this.elapsed + Math.max(0, dt)) % 40;
+            this.elapsed = (this.elapsed + Math.max(0, dt)) % TrafficLight.CYCLE_SEC;
         }
         this.refresh();
     }
@@ -198,9 +210,10 @@ export class TrafficLight {
     /** Snap the signal directly to the green phase, skipping the red countdown. */
     goGreenNow() {
         this.active = true;
-        // The `phase` getter treats elapsed < 30 as red, so jump past that threshold
-        // to immediately expose the green lens. refresh() updates the canvas timer.
-        this.elapsed = 30;
+        // The `phase` getter treats elapsed < RED_DURATION_SEC as red, so jump
+        // past that threshold to immediately expose the green lens.
+        // refresh() updates the canvas timer.
+        this.elapsed = TrafficLight.RED_DURATION_SEC;
         this.refresh();
     }
 

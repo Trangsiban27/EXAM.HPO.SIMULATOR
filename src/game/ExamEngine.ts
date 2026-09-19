@@ -4,6 +4,9 @@ import { StartExercise, type StartSignalPhase } from './exercises/StartExercise'
 import { Exam02Pedestrian } from './exercises/Exam02Pedestrian';
 import { Exam03Hill } from './exercises/Exam03Hill';
 import { Exam04WheelTrack, type Exam04CourseSensors } from './exercises/Exam04WheelTrack';
+import { Exam05South } from './exercises/Exam05South';
+import type { TrafficLight } from './TrafficLight';
+import type { TrackObjects } from './TrackObjects';
 import { startPosition } from './startPosition';
 
 /** 2A stop line: hardcoded tại X = -8 (giữ nguyên vị trí).
@@ -81,6 +84,16 @@ export class ExamEngine{
     readonly wheelTrackSensors: Exam04CourseSensors[] = [];
     /** Single Exam04 exercise instance. State reset after each course completion. */
     readonly wheelTrackExercise = new Exam04WheelTrack();
+    /**
+     * Exam05South — chấm điểm bài 5 (ngã tư có tín hiệu) cho trafficLight South.
+     * Được kích hoạt tự động khi xe chạm trigger zone của South light
+     * (xem wireExam05South() và `light.onMarkerTriggered`).
+     */
+    readonly intersectionExercise = new Exam05South();
+    /** Tham chiếu tới South traffic light (set bởi wireExam05South). */
+    private southLight: TrafficLight | null = null;
+    /** Đã gọi wireExam05South chưa — chỉ subscribe markerTriggered một lần. */
+    private exam05Wired = false;
     disqualified=false;
     disqualifyReason='';
     private cooldown=new Map<number,number>();
@@ -109,6 +122,10 @@ export class ExamEngine{
         this.pedestrianExercise.reset();
         this.hillExercise.reset();
         this.wheelTrackExercise.reset();
+        // Bài 5 — reset cả exercise và South light để light quay lại 'idle'
+        // cho lần thi kế tiếp.
+        this.intersectionExercise.reset();
+        this.southLight?.reset();
     }
 
     /**
@@ -138,6 +155,42 @@ export class ExamEngine{
                 exitForwardAxis: s.exitForwardAxis,
             });
         }
+    }
+
+    /**
+     * Wire Exam05South với trafficLight South đã có sẵn trong track.
+     * Gọi sau `wireExam04()` từ DrivingGame.
+     *
+     * - Tìm `track.getTrafficLight('SOUTH')` rồi inject vào intersectionExercise.
+     * - Subscribe `light.onMarkerTriggered` để khi xe chạm trigger lần đầu
+     *   → set `activeIndex = 4` và gọi `intersectionExercise.activate()`.
+     * - Idempotent: gọi nhiều lần chỉ subscribe một lần.
+     *
+     * Tham số `roadZ` là tâm lane world (X-axis của lane dọc, mặc định 21 theo
+     * `buildExamGround.ts`). Sensors Box3 được tính trong Exam05South từ world
+     * transform của light — không hard-code.
+     */
+    wireExam05South(track: TrackObjects, roadZ = 21, roadWidth = 8): void {
+        if (this.exam05Wired) return;
+        const light = track.getTrafficLight('SOUTH');
+        if (!light) {
+            console.warn('[ExamEngine] wireExam05South: track has no trafficLight with markerId="SOUTH"');
+            return;
+        }
+        this.southLight = light;
+        this.intersectionExercise.attach({ light, roadWidth, roadZ });
+
+        // Khi xe chạm trigger zone của South light, chuyển activeIndex = 4.
+        // Lưu ý: trigger bắn một lần duy nhất khi xe vào zone (TrafficLight.update),
+        // nên đăng ký callback ở đây là đủ. Nếu xe rời zone rồi quay lại trong
+        // cùng một lần thi, callback KHÔNG bắn lại (đã active → set lại cũng vô hại).
+        light.onMarkerTriggered = (id: string) => {
+            if (id === 'SOUTH' && this.activeIndex < 4 && !this.disqualified) {
+                this.activeIndex = 4;
+                this.intersectionExercise.activate();
+            }
+        };
+        this.exam05Wired = true;
     }
 
     update(vehicle: ExamVehicleSnapshot, startSignal: StartSignalPhase, dt: number): string | undefined {
@@ -306,6 +359,39 @@ export class ExamEngine{
             return result.toast;
         }
 
+        // ── Bài 05 — Qua ngã tư có tín hiệu (chỉ áp dụng cho trafficLight South) ─
+        // Được kích hoạt tự động khi xe chạm trigger zone South (xem wireExam05South).
+        // Lúc đó activeIndex chuyển từ 3 (WheelTrack) sang 4 (Intersection).
+        if (this.activeIndex === 4) {
+            const input = {
+                position: vehicle.position,
+                frontPosition: vehicle.frontPosition,
+                speedKmh: vehicle.speedKmh,
+                rpm: vehicle.rpm,
+                engineRunning: vehicle.engineRunning,
+                stalled: vehicle.stalled,
+                clutch: vehicle.clutch ?? 1,
+                dt,
+            };
+            const result = this.intersectionExercise.update(input);
+            for (const evt of result.penalties) this.applyPenaltyEvent(evt);
+            if (result.disqualified) {
+                this.disqualified = true;
+                this.finished = true;
+                this.disqualifyReason = result.disqualifyReason
+                    ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
+                    ?? 'Đình chỉ sát hạch';
+                return result.toast;
+            }
+            if (result.completed) {
+                // Hiện tại Exam05South chưa wire endLine sensor (RULE_EX05_20) →
+                // result.completed chỉ true sau khi wire COMPLETED trong tương lai.
+                this.finished = true;
+                return result.toast ?? 'Hoàn thành bài 5';
+            }
+            return result.toast;
+        }
+
         // After all known exercises, the rest of the route is still under construction.
         return;
     }
@@ -343,6 +429,7 @@ export class ExamEngine{
         if (this.activeIndex === 1) return this.pedestrianExercise.title;
         if (this.activeIndex === 2) return this.hillExercise.title;
         if (this.activeIndex === 3) return this.wheelTrackExercise.title;
+        if (this.activeIndex === 4) return this.intersectionExercise.title;
         return 'Hoàn thành';
     }
     get isFinished(){

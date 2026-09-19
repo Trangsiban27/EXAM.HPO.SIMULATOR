@@ -539,3 +539,132 @@ export function resolveExam04Rules(vehicleClass: ExamVehicleClass) {
         vehicleClass,
     };
 }
+
+/**
+ * Bài sát hạch số 5 — Qua ngã tư có tín hiệu điều khiển giao thông
+ * (EXAM_05_SIGNALIZED_INTERSECTION).
+ *
+ * Spec nguồn: spec/exam/exam_05_signalized_intersection.md
+ *
+ * Lần này chỉ wire 4 lỗi chính cho trafficLight South (theo thỏa thuận với user):
+ *   E05-01 Đi qua ngã tư khi đèn đỏ          -10
+ *   E05-02 Dừng xe quá vạch                  -5
+ *   E05-03 Dừng xe chưa đến vạch             -5
+ *   E05-10 Chết máy                          -5 mỗi lần
+ *
+ * RULE_EX05_18 / RULE_EX05_19: spec có 2 giá trị 500mm / 1000mm, chưa được
+ * xác minh. Hiện tại dùng `procedureMaxM` (0.5m) cho rule "dừng chưa đến vạch".
+ * Khi có tài liệu verify, set `verifiedMaxM` để override.
+ */
+export interface Exam05Rules {
+    id: 'EXAM_05_SIGNALIZED_INTERSECTION';
+    stopPosition: {
+        /** §3 "Các bước thực hiện" — A không quá 500 mm. */
+        procedureMaxM: number;
+        /** §3 "Yêu cầu đạt được" — không quá 1000 mm. */
+        requirementMaxM: number;
+        /**
+         * Threshold đã được tài liệu xác minh. `null` = chưa xác minh,
+         * khi đó rule dùng `procedureMaxM` làm fallback.
+         */
+        verifiedMaxM: number | null;
+    };
+    timer: {
+        penaltyAtSec: number;
+        penaltyPoints: number;
+        disqualifyAtSec: number;
+    };
+    penalties: {
+        redLight: number;
+        stopOverLine: number;
+        stopTooEarly: number;
+        engineStall: number;
+    };
+    engine: {
+        maxRPM: number;
+        stallPenalty: Record<ExamVehicleClass, number>;
+        rpmExceededPenalty: Record<ExamVehicleClass, number>;
+    };
+    maxSpeedKmh: Record<ExamVehicleClass, number>;
+    speeding: {
+        intervalSec: number;
+        penaltyPerInterval: number;
+    };
+    disqualify: {
+        timeout30s: boolean;
+    };
+}
+
+export const EXAM_05_RULES: Exam05Rules = {
+    id: 'EXAM_05_SIGNALIZED_INTERSECTION',
+    stopPosition: {
+        procedureMaxM: 0.5,
+        requirementMaxM: 1.0,
+        verifiedMaxM: null,
+    },
+    timer: {
+        penaltyAtSec: 20,
+        penaltyPoints: 5,
+        disqualifyAtSec: 30,
+    },
+    penalties: {
+        redLight: 10,
+        stopOverLine: 5,
+        stopTooEarly: 5,
+        engineStall: 5,
+    },
+    engine: {
+        maxRPM: 4000,
+        stallPenalty,
+        rpmExceededPenalty,
+    },
+    maxSpeedKmh: {
+        A1: 40,
+        A2: 50,
+        B: 24,
+        D1: 24,
+        D2: 24,
+        C1: 20,
+        C: 20,
+        D: 20,
+        E: 20,
+        Fc: 20,
+    },
+    speeding: {
+        intervalSec: 3,
+        penaltyPerInterval: 1,
+    },
+    disqualify: {
+        timeout30s: true,
+    },
+};
+
+/**
+ * Returns a defensive copy of EXAM_05_RULES keyed to the supplied vehicle class.
+ * Mirrors resolveExam04Rules.
+ */
+export function resolveExam05Rules(vehicleClass: ExamVehicleClass) {
+    const r = EXAM_05_RULES;
+    const verifiedMax = r.stopPosition.verifiedMaxM ?? r.stopPosition.procedureMaxM;
+    return {
+        id: r.id,
+        stopPosition: {
+            procedureMaxM: r.stopPosition.procedureMaxM,
+            requirementMaxM: r.stopPosition.requirementMaxM,
+            verifiedMaxM: r.stopPosition.verifiedMaxM,
+            /** Threshold hiệu lực: verifiedMaxM nếu có, ngược lại procedureMaxM. */
+            effectiveMaxM: verifiedMax,
+        },
+        timer: { ...r.timer },
+        penalties: { ...r.penalties },
+        maxSpeedKmh: r.maxSpeedKmh[vehicleClass],
+        engine: {
+            stallPenalty: r.engine.stallPenalty[vehicleClass],
+            rpmExceededPenalty: r.engine.rpmExceededPenalty[vehicleClass],
+            maxRPM: r.engine.maxRPM,
+        },
+        speeding: { ...r.speeding },
+        disqualify: { ...r.disqualify },
+        vehicleClass,
+    };
+}

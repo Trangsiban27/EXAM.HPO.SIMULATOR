@@ -42,6 +42,8 @@ this.cameras.attach(this.renderer.domElement);
     this.scene.add(new THREE.HemisphereLight(0xddeeff,0x596347,2));
     // Wire up Exam04 sensors from the track (after buildExamGround ran in Track constructor)
     this.exam.wireExam04(this.track.wheelTrackCourseSensors);
+    // Wire up Exam05South với trafficLight South đã có sẵn (xem buildExamGround.ts).
+    this.exam.wireExam05South(this.track);
 if(this.develop){
 this.probeCtrl=new ProbeController(this.cameras.camera,this.track,this.renderer.domElement,this.devProbePanel,true);
 }

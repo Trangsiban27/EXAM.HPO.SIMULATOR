@@ -19,7 +19,8 @@ export class TrackObjects{
     readonly root=new THREE.Group();
     readonly penaltyZones:THREE.Box3[]=[];
     private readonly bridges: Bridge[] = [];
-    private readonly trafficLights: TrafficLight[] = [];
+    /** Tất cả traffic lights trong scene. Exposed để ExamEngine tra cứu theo markerId. */
+    readonly trafficLights: TrafficLight[] = [];
     startSignal: TrafficLight | null = null;
     /**
      * Exam04 course sensors for all 4 wheel-track courses.
@@ -40,6 +41,14 @@ export class TrackObjects{
         this.trafficLights.push(signal);
         this.root.add(signal.root);
         return signal;
+    }
+
+    /**
+     * Tra cứu traffic light theo markerId (e.g. 'SOUTH', 'NORTH', 'WEST', 'EAST', 'START').
+     * Trả về `undefined` nếu không tìm thấy.
+     */
+    getTrafficLight(markerId: string): TrafficLight | undefined {
+        return this.trafficLights.find(l => l.markerId === markerId);
     }
 
     private readonly roads: RoadSegment[] = [];
