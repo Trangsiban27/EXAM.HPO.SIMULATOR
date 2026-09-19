@@ -264,8 +264,8 @@ export class TrackObjects{
         if (arrowType !== 'none') {
             for (const laneX of lanes === 1 ? [0] : [-w / 4, w / 4]) {
                 const arrow = this.addRoadArrow(laneX, 0, w / lanes, d, arrowType, segment);
-                if (centerLine === 'yellow-dashed' && lanes === 2 && laneX > 0) {
-                    // Rotate in the marking's plane: right lane travels opposite to the left lane.
+                if (centerLine === 'yellow-dashed' && lanes === 2 && laneX < 0) {
+                    // Làn phải (local X < 0) đi ngược chiều xe → xoay 180°.
                     arrow.rotateZ(Math.PI);
                 }
             }
