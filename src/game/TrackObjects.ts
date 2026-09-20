@@ -480,9 +480,50 @@ export class TrackObjects{
     addCone(x:number,z:number){
         const c=new THREE.Mesh(new THREE.ConeGeometry(.18,.5,20),
         new THREE.MeshStandardMaterial({color:0xff7a22}));
-        
+
         c.position.set(x,.25,z);
         c.castShadow=true;this.root.add(c)
+    }
+
+    /**
+     * Vẽ một vùng trigger zone bán trong suốt (debug/visual) trên mặt đường.
+     * Dùng để đánh dấu vạch hoàn thành bài thi, trigger zone, v.v.
+     * Mesh được add vào `this.root` nên tự nằm trong scene track.
+     *
+     * @param x      tâm X (world)
+     * @param z      tâm Z (world)
+     * @param width  chiều rộng theo trục X (m)
+     * @param length chiều dài theo trục Z (m)
+     * @param color  màu hex (mặc định xanh lá nhạt 0x88ff88)
+     * @param opacity độ trong suốt (mặc định 0.25)
+     * @returns mesh đã add (để caller lưu ref nếu cần toggle visibility)
+     */
+    addTriggerZone(
+        x: number,
+        z: number,
+        width: number,
+        length: number,
+        color = 0x88ff88,
+        opacity = 0.25,
+    ): THREE.Mesh {
+        const geom = new THREE.PlaneGeometry(width, length);
+        const mat = new THREE.MeshBasicMaterial({
+            color,
+            opacity,
+            transparent: true,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+        });
+        const m = new THREE.Mesh(geom, mat);
+        m.rotation.x = -Math.PI / 2; // nằm ngang mặt đường
+        // Y = 0.075 đủ cao để vượt road-surface top (Y=0.06) và center-line top
+        // (Y≈0.071) nhưng vẫn thấp hơn arrow plane (Y=0.081) — không che mũi tên,
+        // đồng thời zone màu xanh nhạt hiện rõ trên mặt đường.
+        m.position.set(x, 0.075, z);
+        m.receiveShadow = false;
+        m.castShadow = false;
+        this.root.add(m);
+        return m;
     }
 
     // Vạch kẻ đường dành cho người đi bộ

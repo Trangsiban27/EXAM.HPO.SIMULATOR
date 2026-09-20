@@ -229,6 +229,15 @@ export function buildExamGround(objects: TrackObjects) {
         );
     }
 
+    // Vạch hoàn thành bài 5: vùng xanh lá nhạt phía nam ngã tư.
+    // Xe đi qua ngã tư South → chạm zone (frontPosition ∈ Box3)
+    // → Exam05South.state = COMPLETED → ExamEngine.finished = true.
+    // Tâm (23, -45): lane phải của đường dọc X∈[17,25], ngay sau crosswalk Z=-48.
+    // Kích thước 4×6: rộng 4m theo X (đúng lane phải), dài 6m theo Z để bắt chắc
+    // dù xe vào zone với góc lệch nhẹ. Box3 sensor trong ExamEngine.ts phải khớp
+    // vị trí và kích thước này (xem wireExam05South).
+    objects.addTriggerZone(23, -45, 4, 6);
+
     objects.addRoad(21, -60, 8, 30, 'vertical', 'straight', 'yellow-dashed');
     objects.addRoad(21, -70, 8, 20, 'vertical', 'straight', 'yellow-dashed');
 

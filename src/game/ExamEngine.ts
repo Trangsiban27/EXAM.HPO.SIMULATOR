@@ -100,6 +100,12 @@ export class ExamEngine{
     private finished=false;
     private pedestrianCompleted = false;
     /**
+     * True giữa lúc E04 đã hoàn thành và xe chưa chạm trigger South light.
+     * Trong khoảng này `activeIndex` vẫn = 3, nhưng HUD đổi title sang
+     * "Chờ vào bài 5" và E04 không còn chạy update nữa.
+     */
+    private awaitingExam05 = false;
+    /**
      * Bài 04 có 4 course, player chỉ được chọn 1 và lock cho cả lần thi.
      * `null` = chưa chạm course nào. Khi xe chạm `startYellowSensor` của
      * course nào đầu tiên, ta set index đó và KHÔNG cho phép swap sang
@@ -118,6 +124,7 @@ export class ExamEngine{
         this.disqualifyReason='';
         this.pedestrianCompleted = false;
         this.lockedCourseIndex = null;
+        this.awaitingExam05 = false;
         this.startExercise.reset();
         this.pedestrianExercise.reset();
         this.hillExercise.reset();
@@ -178,7 +185,17 @@ export class ExamEngine{
             return;
         }
         this.southLight = light;
-        this.intersectionExercise.attach({ light, roadWidth, roadZ });
+        this.intersectionExercise.attach({
+            light,
+            roadWidth,
+            roadZ,
+            // Vạch hoàn thành bài 5: vùng xanh lá nhạt phía nam ngã tư (xem buildExamGround).
+            // Mesh `addTriggerZone(23, -45, 4, 6)` đặt tại lane dọc X=21±2 (lệch +2 để
+            // nằm trong lane phải, nơi xe từ Bắc xuống dừng trước vạch Z=-48), sau
+            // crosswalk (Z=-48). Xe đi qua ngã tư → frontPosition ∈ Box3 → COMPLETED.
+            completionZoneCenter: { x: 23, z: -45 },
+            completionZoneSize: { widthX: 4, lengthZ: 6 },
+        });
 
         // Khi xe chạm trigger zone của South light, chuyển activeIndex = 4.
         // Lưu ý: trigger bắn một lần duy nhất khi xe vào zone (TrafficLight.update),
@@ -351,10 +368,15 @@ export class ExamEngine{
                 return result.toast;
             }
             if (result.completed) {
-                // Course hoàn thành → toast "Hoàn thành bài 4" + kết thúc exam
-                // (không DQ). HUD sẽ flash 'Hoàn thành · X điểm' nhờ finished=true.
-                this.finished = true;
-                return result.toast ?? 'Hoàn thành bài 4';
+                // Bài 4 hoàn thành — KHÔNG kết thúc exam. Chuyển sang trạng thái
+                // chờ xe chạm trigger South light để kích hoạt bài 5.
+                // Lưu ý: result.toast chỉ có ở frame chuyển trạng thái (sau đó E04
+                // early-return không kèm toast), nên HUD chỉ flash một lần.
+                if (!this.awaitingExam05) {
+                    this.awaitingExam05 = true;
+                    return result.toast ?? 'Hoàn thành bài 4';
+                }
+                return; // suppress toast lặp lại mỗi frame
             }
             return result.toast;
         }
@@ -425,6 +447,7 @@ export class ExamEngine{
     }
     get currentExerciseTitle(){
         if (this.finished) return 'Hoàn thành bài thi';
+        if (this.awaitingExam05) return 'Chờ vào bài 5';
         if (this.activeIndex === 0) return this.startExercise.title;
         if (this.activeIndex === 1) return this.pedestrianExercise.title;
         if (this.activeIndex === 2) return this.hillExercise.title;

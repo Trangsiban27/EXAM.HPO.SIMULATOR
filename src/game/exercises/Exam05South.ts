@@ -81,6 +81,10 @@ export interface Exam05SouthAttachOptions {
     light: TrafficLight;
     roadWidth?: number;
     roadZ?: number;
+    /** Tâm world (x, z) của vùng hoàn thành bài (Box3 trigger). Bỏ trống = không wire. */
+    completionZoneCenter?: { x: number; z: number };
+    /** Kích thước zone theo (widthX, lengthZ). Mặc định 6×6. */
+    completionZoneSize?: { widthX: number; lengthZ: number };
 }
 
 const DEFAULTS = {
@@ -95,8 +99,10 @@ export class Exam05South {
 
     /** Box3 vạch dừng (dải mỏng quanh vạch vàng) — world space. */
     readonly stopLine: THREE.Box3;
-    /** Box3 vùng "đã quá vạch" — phát hiện xe chạy đèn đỏ. */
+    /** Box3 vùng "đã quá vạch" (ngay sau vạch ~0.85m) — phát hiện xe chạy đèn đỏ (E05-01). */
     readonly overLine: THREE.Box3;
+    /** Box3 vùng "đã quá vạch ≥ 1m" — phát hiện dừng sâu quá vạch (E05-02 STOP_OVER_LINE). */
+    readonly overLineDeep: THREE.Box3;
     /** Box3 vùng tiếp cận — 15 m trước vạch. */
     readonly approachZone: THREE.Box3;
 
@@ -120,6 +126,9 @@ export class Exam05South {
     private _stopClassification: Exam05Result['stopClassification'];
     /** Đánh dấu đã qua exitLine (chưa wire exit sensor trong lần này). */
     private completed = false;
+    /** Box3 vạch hoàn thành bài — frontPosition nằm trong zone → COMPLETED. */
+    readonly completionZone: THREE.Box3 = new THREE.Box3();
+    private hasCompletionZone = false;
 
     constructor(options?: Exam05SouthOptions) {
         this.roadWidth = options?.roadWidth ?? DEFAULTS.roadWidth;
@@ -131,6 +140,7 @@ export class Exam05South {
         // Khởi tạo Box3 rỗng; attach() sẽ tính lại khi có light.
         this.stopLine = new THREE.Box3();
         this.overLine = new THREE.Box3();
+        this.overLineDeep = new THREE.Box3();
         this.approachZone = new THREE.Box3();
         if (options?.light && options?.roadZ !== undefined) {
             this.attach(options);
@@ -157,8 +167,23 @@ export class Exam05South {
         );
         (this as { stopLine: THREE.Box3 }).stopLine = built.stopLine;
         (this as { overLine: THREE.Box3 }).overLine = built.overLine;
+        (this as { overLineDeep: THREE.Box3 }).overLineDeep = built.overLineDeep;
         (this as { approachZone: THREE.Box3 }).approachZone = built.approachZone;
         (this as { stopLineWorldZ: number }).stopLineWorldZ = built.stopLineWorldZ;
+
+        // Wire completion zone (vạch hoàn thành bài 5) — vùng xanh lá nhạt
+        // phía nam ngã tư. Xe chạm → COMPLETED → ExamEngine.finished.
+        if (options.completionZoneCenter) {
+            const cx = options.completionZoneCenter.x;
+            const cz = options.completionZoneCenter.z;
+            const { widthX, lengthZ } = options.completionZoneSize ?? { widthX: 6, lengthZ: 6 };
+            // Y extent = 4 chỉ để chứa cả xe (~2m cao); X/Z theo đúng kích thước zone.
+            this.completionZone.setFromCenterAndSize(
+                new THREE.Vector3(cx, 0, cz),
+                new THREE.Vector3(widthX, 4, lengthZ),
+            );
+            this.hasCompletionZone = true;
+        }
     }
 
     /**
@@ -176,6 +201,7 @@ export class Exam05South {
     static buildSensorsFromLight(light: TrafficLight, roadWidth: number, roadZ: number): {
         stopLine: THREE.Box3;
         overLine: THREE.Box3;
+        overLineDeep: THREE.Box3;
         approachZone: THREE.Box3;
         stopLineWorldZ: number;
     } {
@@ -191,17 +217,28 @@ export class Exam05South {
             new THREE.Vector3(roadZ - halfWidth, -1, zCenter - .15),
             new THREE.Vector3(roadZ + halfWidth, 3, zCenter + .15),
         );
-        // Over-line sensor: 1m phía -Z so với vạch (xe đã qua, đang trong ngã tư).
+        // E05-01 red-light sensor: phát hiện "đã qua vạch" NGAY khi front vượt vạch
+        // (0.15m buffer). Dùng cho rule "đi qua ngã tư khi đèn đỏ" — vẫn trigger sớm
+        // vì đây là hành vi nguy hiểm, không liên quan ngưỡng "dừng đúng vị trí".
+        // Box3 trải z ∈ [zCenter - 1, zCenter - 0.15] (rộng 0.85m ngay sau vạch).
         const overLine = new THREE.Box3(
             new THREE.Vector3(roadZ - halfWidth, -1, zCenter - 1),
             new THREE.Vector3(roadZ + halfWidth, 3, zCenter - .15),
+        );
+        // STOP_OVER_LINE sensor: chỉ trigger "dừng quá vạch sâu ≥ 1m" khi front đã
+        // cách vạch 1m+ về phía -Z. Box3 trải z ∈ [zCenter - 1.15, zCenter - 1] — đúng
+        // vùng 0.15m ngay sau mốc 1m quá vạch (theo threshold dải đối xứng 1m yêu cầu
+        // mới: A < -1 → STOP_OVER_LINE).
+        const overLineDeep = new THREE.Box3(
+            new THREE.Vector3(roadZ - halfWidth, -1, zCenter - 1.15),
+            new THREE.Vector3(roadZ + halfWidth, 3, zCenter - 1),
         );
         // Approach zone: 15m phía +Z so với vạch (xe đang tiếp cận từ phía nam).
         const approachZone = new THREE.Box3(
             new THREE.Vector3(roadZ - halfWidth, -1, zCenter + .15),
             new THREE.Vector3(roadZ + halfWidth, 3, zCenter + 15),
         );
-        return { stopLine, overLine, approachZone, stopLineWorldZ: zCenter };
+        return { stopLine, overLine, overLineDeep, approachZone, stopLineWorldZ: zCenter };
     }
 
     get title(): string {
@@ -266,6 +303,22 @@ export class Exam05South {
             };
         }
 
+        // === Hoàn thành bài 5: xe chạm vùng trigger xanh lá nhạt phía nam ngã tư ===
+        // Đặt trước các check E05-01/02/03/10 để completion fire ngay khi xe tới zone
+        // (tránh bị stall/stop penalty "lẻ" cùng frame). Chỉ áp dụng khi xe đã ACTIVE
+        // (state INACTIVE đã return sớm ở trên).
+        if (this.hasCompletionZone && this.completionZone.containsPoint(input.frontPosition)) {
+            this.completed = true;
+            this.state = 'COMPLETED';
+            return {
+                toast: 'Hoàn thành bài 5',
+                penalties: [],
+                completed: true,
+                disqualified: false,
+                stopClassification: this._stopClassification,
+            };
+        }
+
         const penalties: PenaltyEvent[] = [];
         const now = performance.now();
         const add = (points: number, reason: string) => {
@@ -304,8 +357,11 @@ export class Exam05South {
 
         // === APPROACHING state ===
         if (this.state === 'APPROACHING') {
-            // Xe đã vượt vạch → buộc phải chấm NO_REQUIRED_STOP, chuyển state.
-            if (overTheLine && !onTheLine) {
+            // Xe đã vượt sâu ≥ 1m quá vạch → buộc phải chấm NO_REQUIRED_STOP, chuyển state.
+            // Dùng overLineDeep (chỉ trigger khi front cách vạch ≥ 1m về phía -Z) thay vì
+            // overLine (trigger ngay khi qua vạch, dành riêng cho E05-01 đèn đỏ).
+            const overLineDeepHit = this.overLineDeep.containsPoint(input.frontPosition);
+            if (overLineDeepHit && !onTheLine) {
                 if (!this.stopEvaluated) {
                     this.stopEvaluated = true;
                     this._stopClassification = 'NO_REQUIRED_STOP';
@@ -324,7 +380,8 @@ export class Exam05South {
 
             // Xe dừng hẳn tại vạch → chấm vị trí dừng (E05-02 / E05-03).
             const A = this.signedDistanceToStopLine(input.frontPosition);
-            const frontNearStopLine = A > -.15 && A < 2;
+            // Buffer 0.15m hai phía để chuyển state mượt khi xe dừng đúng rìa 1m.
+            const frontNearStopLine = A > -1.15 && A < 1.15;
             if (frontNearStopLine && stopped) {
                 if (this.stoppedSince === 0) this.stoppedSince = now;
                 const dwell = (now - this.stoppedSince) / 1000;
@@ -354,7 +411,8 @@ export class Exam05South {
             // Xe dừng tại vạch nhưng chưa chấm được (chưa đủ dwell) → tiếp tục chờ.
             if (!this.stopEvaluated) {
                 const A = this.signedDistanceToStopLine(input.frontPosition);
-                const frontNearStopLine = A > -.15 && A < 2;
+                // Buffer 0.15m hai phía để chuyển state mượt khi xe dừng đúng rìa 1m.
+            const frontNearStopLine = A > -1.15 && A < 1.15;
                 if (frontNearStopLine && stopped) {
                     if (this.stoppedSince === 0) this.stoppedSince = now;
                     const dwell = (now - this.stoppedSince) / 1000;
@@ -390,16 +448,18 @@ export class Exam05South {
     }
 
     /**
-     * Đánh giá vị trí dừng theo spec §5.3 + §11.
-     * RULE_EX05_18/19: dùng effectiveMaxM (= procedureMaxM 0.5m) cho
-     * STOP_TOO_EARLY. Khi verifiedMaxM được set, tự động override.
+     * Đánh giá vị trí dừng theo threshold cứng 1m (đối xứng 2 phía) — yêu cầu mới:
+     *   A < -1 → STOP_OVER_LINE  (vượt sâu ≥ 1m)       → -5 điểm (E05-02)
+     *   A > 1  → STOP_TOO_EARLY  (còn cách > 1m)       → -5 điểm (E05-03)
+     *   -1 ≤ A ≤ 1 → VALID_STOP                         → 0 điểm
+     * Lưu ý: không dùng `this.rules.stopPosition.effectiveMaxM` (động 0.5m/1.0m) — giữ
+     * hard-code 1m cho khớp yêu cầu.
      */
     private evaluateStop(A: number, add: (points: number, reason: string) => void): void {
-        const threshold = this.rules.stopPosition.effectiveMaxM;
-        if (A < 0) {
+        if (A < -1) {
             this._stopClassification = 'STOP_OVER_LINE';
             add(this.rules.penalties.stopOverLine, 'Dừng xe quá vạch dừng quy định');
-        } else if (A > threshold) {
+        } else if (A > 1) {
             this._stopClassification = 'STOP_TOO_EARLY';
             add(this.rules.penalties.stopTooEarly, 'Dừng xe chưa đến vạch dừng quy định');
         } else {
