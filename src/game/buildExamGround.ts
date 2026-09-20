@@ -247,8 +247,13 @@ export function buildExamGround(objects: TrackObjects) {
     // Branch from the right (+Z) side of the eastbound main road.
     objects.addWindingCourse({ x: 41, z: -84, entryLength: 30 });
 
-    objects.addRoad(55, -84, 8, 20, 'horizontal', 'straight', 'yellow-dashed');
+    objects.addRoad(55, -84, 8, 26, 'horizontal', 'straight', 'yellow-dashed');
 
     objects.addWindingCourse({ x: 51, z: -84, entryLength: 15 });
 
+    objects.addRoad(67, -84, 8, 14, 'horizontal', 'straight', 'yellow-dashed');
+
+    objects.addWindingCourse({ x: 61, z: -84, entryLength: 30 });
+
+    objects.addWindingCourse({ x: 71, z: -84, entryLength: 15 });
 }
