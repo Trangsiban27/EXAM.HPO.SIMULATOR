@@ -6,7 +6,7 @@ import { startPosition } from './startPosition';
 
 /** Positions and dimensions of the examination ground. */
 export function buildExamGround(objects: TrackObjects) {
-    const ground=new THREE.Mesh(new THREE.PlaneGeometry(300,300),
+    const ground=new THREE.Mesh(new THREE.PlaneGeometry(500,500),
     new THREE.MeshStandardMaterial({color:0x63735a,roughness:1}));
 
     ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;
@@ -242,35 +242,61 @@ export function buildExamGround(objects: TrackObjects) {
     objects.addRoad(21, -60, 8, 30, 'vertical', 'straight', 'yellow-dashed');
     objects.addRoad(21, -70, 8, 20, 'vertical', 'straight', 'yellow-dashed');
     objects.addRoad(21, -94, 8, 34, 'vertical', 'straight', 'yellow-dashed');
+    objects.addRoad(21, -120, 8, 34, 'vertical', 'straight', 'yellow-dashed');
 
     // The straight ends at Z=-80; the corner enters there and exits toward +X.
-    objects.addRightAngleTurn(21, -114, 8, 'vertical', 'right', 'yellow-dashed');
+    objects.addRightAngleTurn(21, -138, 8, 'vertical', 'right', 'yellow-dashed');
+
+    objects.addFourLaneRoad({
+        x: 45,
+        z: -132,
+        lengthM: 45,
+        laneWidthM: 4,
+        rotationY: Math.PI / 2,
+    });
+
+    objects.addRoad(82, -140, 4, 29, 'horizontal', 'straight', 'yellow-dashed', 1, -Math.PI);
 
     // Exam 06
     // objects.addRoad(34, -100, 8, 20, 'horizontal', 'straight', 'yellow-dashed');
     // Branch from the right (+Z) side of the eastbound main road.
-    
-    // objects.addRoad(55, -100, 8, 26, 'horizontal', 'straight', 'yellow-dashed');
-    // objects.addRoad(67, -100, 8, 14, 'horizontal', 'straight', 'yellow-dashed');
-    // objects.addRoad(84, -100, 8, 24, 'horizontal', 'straight', 'yellow-dashed');
 
-    objects.addRightAngleTurn(100, -100, 8, 'horizontal', 'right', 'yellow-dashed');
+    objects.addRightAngleTurn(100, -138, 8, 'vertical', 'left', 'white-dashed');
 
-    objects.addRoad(100, -76, 8, 40, 'vertical', 'straight', 'yellow-dashed');
-    objects.addRoad(100, -66, 8, 40, 'vertical', 'straight', 'yellow-dashed');
+    objects.addRoad(100, -108, 8, 60, 'vertical', 'straight', 'white-dashed');
+    objects.addRoad(100, -66, 8, 40, 'vertical', 'straight', 'white-dashed');
 
     // Mirror turn phía Bắc line 262: xe đi Nam → Bắc (-Z) rồi quẹo phải về hướng Đông (+X).
     objects.addRightAngleTurn(100, -42, 8, 'vertical', 'right', 'yellow-dashed', 2, Math.PI);
 
     objects.addRoad(66, -42, 8, 60, 'horizontal', 'straight', 'yellow-dashed');
 
-    // objects.addWindingCourse({ x: 36, z: -100, entryLength: 45, exitLength: 10 });
-    
-    // objects.addWindingCourse({ x: 42, z: -100, entryLength: 30, exitLength: 25 });
+    // ============================================================
+    // BÀI 06 — QUA ĐƯỜNG VÒNG QUANH CO CHỮ S
+    // Số đo lấy theo spec/road/s_curve_road_cad_spec.md §3–§6, §28:
+    //   Hạng B: Rn=6.30 Rtr=2.56 Bqc=3.74 Sqc=8.86
+    //   Hạng C: Rn=9.50 Rtr=4.572 Bqc=4.928 Sqc=14.072
+    //   Hạng D: Rn=8.60 Rtr=4.024 Bqc=4.576 Sqc=12.624
+    //   Hạng E: Rn=11.20 Rtr=5.70 Bqc=5.50 Sqc=16.90 (CAD label "HẠNG F")
+    // validateWindingCourseSpec() chạy runtime để đảm bảo Bqc = Rn - Rtr
+    // và Sqc = Rn + Rtr (sai số 0.005 m).
+    // ============================================================
+    // Hạng B — VIOS 1.5E (b = 1.700 m → width = 3.74 m)
+    objects.addWindingCourse({ x: 32, z: -125, entryLength: 70, exitLength: 10, vehicleClass: 'B' });
+    // Hạng C — THACO OLLIN450A (b = 2.240 m → width = 4.928 m)
+    objects.addWindingCourse({ x: 40, z: -124, entryLength: 50, exitLength: 30, vehicleClass: 'C' });
+    // Hạng D — COUTY HD29 E3 (b = 2.080 m → width = 4.576 m)
+    objects.addWindingCourse({ x: 48, z: -127, entryLength: 30, exitLength: 55, vehicleClass: 'D' });
+    // Hạng E — TRANSINCO K52 E2 (b = 2.500 m → width = 5.500 m)
+    objects.addWindingCourse({ x: 64, z: -124, entryLength: 4, exitLength: 78, vehicleClass: 'E' });
 
-    // objects.addWindingCourse({ x: 48, z: -100, entryLength: 15, exitLength: 40 });
-
-    // objects.addWindingCourse({ x: 72, z: -100, entryLength: 12, exitLength: 48  });
+    // Tạo railway crossing road tại vị trí (x, z)
+    objects.addRailwayCrossingRoad({
+        x: 20,
+        z: 0,
+        roadWidthM: 4.0,
+        rotationY: 0, // có thể xoay theo hướng đường
+    });
 
     // ============================================================
     // DECORATION: ngôi sao 5 cánh ở góc xa Đông-Nam của sân.
@@ -284,21 +310,5 @@ export function buildExamGround(objects: TrackObjects) {
         color: '#fe2020',
         rotationY: 120,
     }).root);
-
-    // ============================================================
-    // SMOKE-TEST: Five-lane two-way road (5 × 3.70 m, vertical).
-    // Đặt bên phải sân, ngoài tất cả corridor bài thi (X < 90) để không
-    // ảnh hưởng sensor / penalty zone hiện có.
-    // - 1 lane đi xuống ngoài cùng bên phải (lane 01).
-    // - 4 lane đi lên (cùng chiều), phân cách bằng vạch đứt trắng.
-    // - Phân chia 2 chiều: vạch liền giữa lane 01 và 02.
-    // Theo spec/road/road_6A_object_spec.md §1, §4.
-    // ============================================================
-    objects.addFourLaneRoad({
-        x: 54,
-        z: -108,
-        lengthM: 60,
-        laneWidthM: 4,
-        rotationY: Math.PI / 2,
-    });
+    
 }

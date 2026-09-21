@@ -1,23 +1,52 @@
 import * as THREE from 'three';
+import type { WindingCourseSpec } from './WindingCourseSpec';
 
-/** Two tangent, oppositely turning half circles. Entry and exit face west. */
+/**
+ * Two tangent, oppositely turning half circles. Entry and exit face west.
+ *
+ * Geometry lấy trực tiếp từ `spec/road/s_curve_road_cad_spec.md` §3–§6:
+ *   outerRadius = Rn  (Bqc = Rn - Rtr)
+ *   innerRadius = Rtr
+ *   centreSpacing = Sqc = Rn + Rtr
+ * KHÔNG dùng công thức dẫn xuất turningRadius nữa.
+ */
+export interface WindingCourseOptions {
+    /** Spec chính xác từ CAD (xem WindingCourseSpec). */
+    spec: WindingCourseSpec;
+}
+
 export class WindingCourse {
     readonly root = new THREE.Group();
     readonly penaltyZones: THREE.Box3[] = [];
-    readonly width = 2.2 * 1.8;
-    // Approximate outer front-wheel turning radius from the current vehicle model.
-    readonly turningRadius = Math.hypot(2.65 / Math.tan(THREE.MathUtils.degToRad(31)) + .94, 1.3);
-    // Scale the centre-line radius independently of lane width; 1 uses the base formula.
-    readonly curveScale = 1;
-    readonly outerRadius = (this.turningRadius + 1.2 - this.width / 2) * this.curveScale + this.width / 2;
-    readonly innerRadius = this.outerRadius - this.width;
-    readonly centreSpacing = this.outerRadius + this.innerRadius;
+    /** CAD label, dùng cho debug metadata. */
+    readonly cadLabel: string;
+    /** Chiều rộng phần đường driveable Bqc = Rn - Rtr (m). */
+    readonly width: number;
+    /** Chiều rộng envelope vật lý (clear width + curb). */
+    readonly envelopeWidth: number;
+    /** Bán kính vòng ngoài Rn (m). */
+    readonly outerRadius: number;
+    /** Bán kính vòng trong Rtr (m). */
+    readonly innerRadius: number;
+    /** Khoảng cách tâm hai nửa vòng tròn Sqc = Rn + Rtr (m). */
+    readonly centreSpacing: number;
+    /** Bán kính trung tâm của 1 nửa vòng tròn (= Sqc/2). */
+    readonly radius: number;
     readonly exit: THREE.Vector3;
 
-    constructor(x: number, z: number) {
-        this.root.name = 'winding-course';
-        const radius = this.centreSpacing / 2;
-        this.exit = new THREE.Vector3(x, .06, z + 4 * radius);
+    constructor(x: number, z: number, opts: WindingCourseOptions) {
+        const { spec } = opts;
+        this.cadLabel = spec.cadLabel;
+        this.width = spec.clearRoadWidthM;
+        this.envelopeWidth = spec.constructionEnvelopeWidthM;
+        this.outerRadius = spec.outerRadiusM;
+        this.innerRadius = spec.innerRadiusM;
+        this.centreSpacing = spec.centerDistanceM;
+        this.radius = this.centreSpacing / 2;
+
+        this.root.name = `winding-course-${spec.cadLabel}`;
+
+        this.exit = new THREE.Vector3(x, .06, z + 4 * this.radius);
         const asphalt = new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95 });
         const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .85 });
         const red = new THREE.MeshStandardMaterial({ color: 0xd83b3b, roughness: .85 });
@@ -46,8 +75,8 @@ export class WindingCourse {
             return mesh;
         };
         for (const [cz, from, to] of [
-            [z + radius, -Math.PI / 2, -3 * Math.PI / 2],
-            [z + 3 * radius, -Math.PI / 2, Math.PI / 2]
+            [z + this.radius, -Math.PI / 2, -3 * Math.PI / 2],
+            [z + 3 * this.radius, -Math.PI / 2, Math.PI / 2]
         ]) {
             band(cz, this.innerRadius, this.outerRadius, from, to, .08, .06, asphalt);
             for (const [r, inner, outer] of [

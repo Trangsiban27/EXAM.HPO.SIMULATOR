@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Bridge } from './Bridge';
+import { RailwayCrossingRoad, type RailwayCrossingRoadOptions } from './RailwayCrossingRoad';
 import { TrafficLight, type TrafficLightOptions } from './TrafficLight';
 import { ExerciseSign } from './ExerciseSign';
 import { PedestrianSign, type PedestrianSignOptions } from './PedestrianSign';
@@ -8,6 +9,8 @@ import { WindingCourse } from './WindingCourse';
 import { WheelTrackCourse } from './WheelTrackCourse';
 import { startPosition } from './startPosition';
 import { FourLaneRoad, type FourLaneRoadOptions } from './FourLaneRoad';
+import type { ExamVehicleClass } from './exam/examRules';
+import { getWindingCourseSpec, validateWindingCourseSpec } from './WindingCourseSpec';
 
 type ArrowType = 'straight' | 'left' | 'right' | 'none';
 type RoadDirection = 'vertical' | 'horizontal';
@@ -22,6 +25,7 @@ export class TrackObjects{
     private readonly bridges: Bridge[] = [];
     /** Tất cả traffic lights trong scene. Exposed để ExamEngine tra cứu theo markerId. */
     readonly trafficLights: TrafficLight[] = [];
+    readonly railwayCrossings: RailwayCrossingRoad[] = [];
     startSignal: TrafficLight | null = null;
     /**
      * Exam04 course sensors for all 4 wheel-track courses.
@@ -67,6 +71,23 @@ export class TrackObjects{
         this.bridges.push(bridge);
         this.root.add(bridge.root);
         return bridge;
+    }
+
+    /**
+     * Railway Crossing Road — đường bộ giao cắt đường sắt.
+     * Theo spec/road/railway_crossing_road_spec.md
+     *
+     * Key constraints:
+     *   STOP_LINE ⟂ ROAD_DIRECTION
+     *   RAILS ⟂ ROAD_DIRECTION
+     *   STOP_LINE ∥ RAILS
+     *   distance(STOP_LINE, approachSideOuterRail) = 5.0 m
+     */
+    addRailwayCrossingRoad(opts: RailwayCrossingRoadOptions = {}): RailwayCrossingRoad {
+        const road = new RailwayCrossingRoad(opts);
+        this.railwayCrossings.push(road);
+        this.root.add(road.root);
+        return road;
     }
 
 
@@ -228,13 +249,14 @@ export class TrackObjects{
         direction: RoadDirection = 'vertical', // Dọc theo Z hoặc ngang theo X
         arrowType: ArrowType = 'straight', // Loại mũi tên chỉ hướng: thẳng / trái / phải / không có
         centerLine: CenterLineType = 'white-dashed',
-        lanes: LaneCount = 2 // w remains the total road width, regardless of lane count.
+        lanes: LaneCount = 2, // w remains the total road width, regardless of lane count.
+        rotationY = 0 // Optional: xoay thêm quanh trục Y (radian), áp dụng sau rotation do `direction` thiết lập.
     ) {
         // Dựng theo trục Z rồi xoay cả đoạn, bao gồm viền và mũi tên.
         const segment = new THREE.Group();
         segment.name = 'road';
         segment.position.set(x, 0, z);
-        segment.rotation.y = direction === 'horizontal' ? -Math.PI / 2 : 0;
+        segment.rotation.y = (direction === 'horizontal' ? -Math.PI / 2 : 0) + rotationY;
         this.root.add(segment);
         this.roads.push({ group: segment, x, z, direction, bounds: {
             minX: x - (direction === 'vertical' ? w : d) / 2,
@@ -263,7 +285,7 @@ export class TrackObjects{
 
         // 3. Vạch giữa chia đường thành hai làn bằng nhau.
         const { material, spans } = this.centerLineSegments(d, centerLine, lanes);
-        
+
         for (const [from, to] of spans) {
             const line = new THREE.Mesh(new THREE.BoxGeometry(.15, .008, to - from), material);
             line.position.set(0, .067, -d / 2 + (from + to) / 2);
@@ -719,13 +741,17 @@ export class TrackObjects{
 
 
     /** Complete exercise branching toward +Z, including registered road connections. */
-    addWindingCourse({ x, z, entryLength = 30, exitLength = 6 }: {
+    addWindingCourse({ x, z, entryLength = 30, exitLength = 6, vehicleClass = 'B' }: {
         x: number;
         z: number;
         entryLength?: number;
         exitLength?: number;
+        /** Hạng xe sát hạch (B/C/D/E). Default: 'B'. */
+        vehicleClass?: ExamVehicleClass;
     }) {
-        const winding = new WindingCourse(0, 0);
+        const spec = getWindingCourseSpec(vehicleClass);
+        validateWindingCourseSpec(spec);
+        const winding = new WindingCourse(0, 0, { spec });
         const entryArrowZ = z + Math.min(7, entryLength / 2);
         this.addRoad(x, z + entryLength / 2, winding.width + .4, entryLength,
             'vertical', 'none', 'white-solid', 1);
