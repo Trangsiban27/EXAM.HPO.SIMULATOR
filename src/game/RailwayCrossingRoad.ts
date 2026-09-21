@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+/** Cache cho railway track GLB — load một lần, clone cho mỗi placement */
+let _railwayTrackCache: THREE.Group | null = null;
+let _railwayLoader = new GLTFLoader();
 
 /**
  * Railway Crossing Road — đường bộ giao cắt đường sắt
@@ -6,8 +11,7 @@ import * as THREE from 'three';
  *
  * Visual Elements (màu cyan #00d4ff):
  *   - STOP_LINE: vạch dừng ngang đường
- *   - RAIL_01, RAIL_02: hai thanh ray ngang đường
- *   - SLEEPERS: các thanh gỗ nối giữa 2 ray, vuông góc với ray
+ *   - RAILWAY_TRACK: model GLB đường ray (sử dụng /models/railway_track_v2.glb)
  *   - CENTER_LINE: vạch giữa đứt dọc theo hướng xe
  *
  * Geometry Convention:
@@ -17,8 +21,7 @@ import * as THREE from 'three';
  *
  * Key constraints:
  *   STOP_LINE ⟂ ROAD_DIRECTION
- *   RAILS ⟂ ROAD_DIRECTION
- *   STOP_LINE ∥ RAILS
+ *   RAILWAY_TRACK ⟂ ROAD_DIRECTION
  *   distance(STOP_LINE, approachSideOuterRail) = 5.0 m
  *   distance(approachSideOuterRail, exitRail) = 4.7 m
  */
@@ -33,12 +36,15 @@ export interface RailwayCrossingRoadOptions {
     roadLengthM?: number;
     /** Xoay module quanh trục Y (radian), mặc định 0 */
     rotationY?: number;
+    /** Scale cho GLB railway track, mặc định 1.0 */
+    railwayTrackScale?: number;
 }
 
 export class RailwayCrossingRoad {
     readonly root = new THREE.Group();
     readonly roadWidthM: number;
     readonly roadLengthM: number;
+    readonly railwayTrackScale: number;
 
     // Vị trí các thành phần (local Z trong root)
     readonly stopLineLocalZ: number;           // Vạch dừng
@@ -62,10 +68,12 @@ export class RailwayCrossingRoad {
             roadWidthM = 4.0,
             roadLengthM = 30,
             rotationY = 0,
+            railwayTrackScale = .4,
         } = options;
 
         this.roadWidthM = roadWidthM;
         this.roadLengthM = roadLengthM;
+        this.railwayTrackScale = railwayTrackScale;
 
         this.root.name = 'railway-crossing-road';
         this.root.position.set(x, 0, z);
@@ -82,14 +90,24 @@ export class RailwayCrossingRoad {
         this.root.updateMatrixWorld(true);
     }
 
+    /**
+     * Pre-load railway track GLB vào cache (gọi một lần khi khởi tạo scene).
+     * @returns Promise resolve khi model đã sẵn sàng.
+     */
+    static async preload(): Promise<void> {
+        if (_railwayTrackCache) return;
+        try {
+            const gltf = await _railwayLoader.loadAsync('/models/railway_track_v2.glb');
+            _railwayTrackCache = gltf.scene;
+        } catch (err) {
+            console.error('Failed to load railway_track_v2.glb:', err);
+        }
+    }
+
     private build() {
-        this.buildRoadSurface();
-        this.buildCenterLine();
+        // this.buildRoadSurface();
         this.buildStopLine();
-        this.buildRails();
-        this.buildSleepers();
-        this.buildDimensionMarkers();
-        this.buildSensors();
+        this.buildRailwayTrack();
     }
 
     /**
@@ -214,8 +232,8 @@ export class RailwayCrossingRoad {
      * Vạch dừng (STOP_LINE) - cyan, ngang đường, vuông góc hướng xe
      */
     private buildStopLine() {
-        const cyan = new THREE.MeshStandardMaterial({
-            color: RailwayCrossingRoad.CYAN,
+        const white = new THREE.MeshStandardMaterial({
+            color: '#fff',
             roughness: 0.85,
             emissive: RailwayCrossingRoad.CYAN,
             emissiveIntensity: 0.1,
@@ -223,16 +241,13 @@ export class RailwayCrossingRoad {
 
         // Vạch dừng chạy ngang đường (theo X), tại stopLineLocalZ
         const stopLine = new THREE.Mesh(
-            new THREE.BoxGeometry(this.roadWidthM - 0.4, 0.012, 0.12),
-            cyan
+            new THREE.BoxGeometry(8, 0.012, 0.2),
+            white
         );
         stopLine.position.set(0, 0.075, this.stopLineLocalZ);
         stopLine.receiveShadow = true;
         stopLine.name = 'stop-line';
         this.root.add(stopLine);
-
-        // Thêm text "DỪNG" phía trước stop line
-        this.buildStopLineLabel();
     }
 
     /**
@@ -274,9 +289,49 @@ export class RailwayCrossingRoad {
     }
 
     /**
-     * Hai thanh ray (RAIL_01, RAIL_02) - cyan, ngang đường
+     * Đường ray xe lửa - sử dụng model GLB /models/railway_track_v2.glb
+     * Model được clone từ cache, position tại approachOuterRailLocalZ
      */
-    private buildRails() {
+    private buildRailwayTrack() {
+        if (_railwayTrackCache) {
+            // Clone model từ cache
+            const trackModel = _railwayTrackCache.clone(true);
+
+            // Scale model theo option
+            trackModel.scale.setScalar(this.railwayTrackScale);
+
+            // Enable shadows
+            trackModel.traverse(obj => {
+                if ((obj as THREE.Mesh).isMesh) {
+                    const m = obj as THREE.Mesh;
+                    m.castShadow = true;
+                    m.receiveShadow = true;
+                }
+            });
+
+            // Đo kích thước thực của model (bounding box)
+            const box = new THREE.Box3().setFromObject(trackModel);
+
+            // Position: RAIL_01 tại approachOuterRailLocalZ
+            // Căn giữa model theo X, đặt bottom trên mặt đất (Y=0.08)
+            trackModel.position.set(
+                0,
+                0.08 - box.min.y,
+                this.approachOuterRailLocalZ
+            );
+            trackModel.name = 'railway-track-glb';
+            this.root.add(trackModel);
+        } else {
+            // Fallback: tạo ray đơn giản nếu GLB chưa load
+            console.warn('Railway track GLB not loaded, using fallback rails');
+            this.buildRailwayTrackFallback();
+        }
+    }
+
+    /**
+     * Fallback: tạo ray đơn giản khi GLB không khả dụng
+     */
+    private buildRailwayTrackFallback() {
         const cyan = new THREE.MeshStandardMaterial({
             color: RailwayCrossingRoad.CYAN,
             roughness: 0.6,
@@ -285,47 +340,49 @@ export class RailwayCrossingRoad {
             emissiveIntensity: 0.15,
         });
 
-        const railLength = this.roadWidthM + 4; // Ray dài hơn đường một chút
+        const railLength = this.roadWidthM + 4;
         const railHeight = 0.08;
         const railWidth = 0.06;
 
-        // RAIL_01 - ray phía tiếp cận (gần stop line nhất)
+        // RAIL_01 - approach outer rail
         const rail1 = new THREE.Mesh(
             new THREE.BoxGeometry(railLength, railHeight, railWidth),
             cyan
         );
         rail1.position.set(0, 0.04 + railHeight / 2, this.approachOuterRailLocalZ);
         rail1.castShadow = true;
-        rail1.name = 'rail-01';
+        rail1.name = 'rail-01-fallback';
         this.root.add(rail1);
 
-        // RAIL_02 - ray phía xa hơn
+        // RAIL_02 - exit rail (4.7m từ RAIL_01)
         const rail2 = new THREE.Mesh(
             new THREE.BoxGeometry(railLength, railHeight, railWidth),
             cyan
         );
         rail2.position.set(0, 0.04 + railHeight / 2, this.exitRailLocalZ);
         rail2.castShadow = true;
-        rail2.name = 'rail-02';
+        rail2.name = 'rail-02-fallback';
         this.root.add(rail2);
+
+        // Sleepers fallback
+        this.buildSleepersFallback();
     }
 
     /**
-     * Ghi xilanh (sleepers) - thanh gỗ nối giữa 2 ray, vuông góc với ray
+     * Fallback: tạo sleepers đơn giản
      */
-    private buildSleepers() {
-        const sleeperColor = 0x8b6914; // Nâu gỗ
+    private buildSleepersFallback() {
+        const sleeperColor = 0x8b6914;
         const sleeper = new THREE.MeshStandardMaterial({
             color: sleeperColor,
             roughness: 0.9,
         });
 
-        const sleeperSpacing = 0.4; // Khoảng cách giữa các sleeper
-        const sleeperLength = this.roadWidthM + 6; // Dài hơn đường để nối qua cả 2 ray
+        const sleeperSpacing = 0.4;
+        const sleeperLength = this.roadWidthM + 6;
         const sleeperHeight = 0.06;
         const sleeperWidth = 0.12;
 
-        // Vùng railway từ RAIL_01 đến RAIL_02
         const railwayStartZ = this.approachOuterRailLocalZ - 0.5;
         const railwayEndZ = this.exitRailLocalZ + 0.5;
         const totalDepth = railwayEndZ - railwayStartZ;
@@ -342,7 +399,7 @@ export class RailwayCrossingRoad {
             mesh.position.set(0, 0.03, sleeperZ);
             mesh.receiveShadow = true;
             mesh.castShadow = true;
-            mesh.name = `sleeper-${String(i + 1).padStart(3, '0')}`;
+            mesh.name = `sleeper-fallback-${String(i + 1).padStart(3, '0')}`;
             this.root.add(mesh);
         }
     }

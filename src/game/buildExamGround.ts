@@ -292,10 +292,10 @@ export function buildExamGround(objects: TrackObjects) {
 
     // Tạo railway crossing road tại vị trí (x, z)
     objects.addRailwayCrossingRoad({
-        x: 20,
-        z: 0,
+        x: 100,
+        z: -115,
         roadWidthM: 4.0,
-        rotationY: 0, // có thể xoay theo hướng đường
+        rotationY: Math.PI, // có thể xoay theo hướng đường
     });
 
     // ============================================================
