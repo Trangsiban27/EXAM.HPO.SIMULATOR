@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ExerciseSign } from './ExerciseSign';
 import type { TrackObjects } from './TrackObjects';
+import { StarShape } from './StarShape';
 import { startPosition } from './startPosition';
 
 /** Positions and dimensions of the examination ground. */
@@ -240,18 +241,18 @@ export function buildExamGround(objects: TrackObjects) {
 
     objects.addRoad(21, -60, 8, 30, 'vertical', 'straight', 'yellow-dashed');
     objects.addRoad(21, -70, 8, 20, 'vertical', 'straight', 'yellow-dashed');
-    objects.addRoad(21, -90, 8, 20, 'vertical', 'straight', 'yellow-dashed');
+    objects.addRoad(21, -94, 8, 34, 'vertical', 'straight', 'yellow-dashed');
 
     // The straight ends at Z=-80; the corner enters there and exits toward +X.
-    objects.addRightAngleTurn(21, -100, 8, 'vertical', 'right', 'yellow-dashed');
+    objects.addRightAngleTurn(21, -114, 8, 'vertical', 'right', 'yellow-dashed');
 
     // Exam 06
-    objects.addRoad(34, -100, 8, 20, 'horizontal', 'straight', 'yellow-dashed');
+    // objects.addRoad(34, -100, 8, 20, 'horizontal', 'straight', 'yellow-dashed');
     // Branch from the right (+Z) side of the eastbound main road.
     
-    objects.addRoad(55, -100, 8, 26, 'horizontal', 'straight', 'yellow-dashed');
-    objects.addRoad(67, -100, 8, 14, 'horizontal', 'straight', 'yellow-dashed');
-    objects.addRoad(84, -100, 8, 24, 'horizontal', 'straight', 'yellow-dashed');
+    // objects.addRoad(55, -100, 8, 26, 'horizontal', 'straight', 'yellow-dashed');
+    // objects.addRoad(67, -100, 8, 14, 'horizontal', 'straight', 'yellow-dashed');
+    // objects.addRoad(84, -100, 8, 24, 'horizontal', 'straight', 'yellow-dashed');
 
     objects.addRightAngleTurn(100, -100, 8, 'horizontal', 'right', 'yellow-dashed');
 
@@ -263,11 +264,41 @@ export function buildExamGround(objects: TrackObjects) {
 
     objects.addRoad(66, -42, 8, 60, 'horizontal', 'straight', 'yellow-dashed');
 
-    objects.addWindingCourse({ x: 36, z: -100, entryLength: 45, exitLength: 10 });
+    // objects.addWindingCourse({ x: 36, z: -100, entryLength: 45, exitLength: 10 });
     
-    objects.addWindingCourse({ x: 42, z: -100, entryLength: 30, exitLength: 25 });
+    // objects.addWindingCourse({ x: 42, z: -100, entryLength: 30, exitLength: 25 });
 
-    objects.addWindingCourse({ x: 48, z: -100, entryLength: 15, exitLength: 40 });
+    // objects.addWindingCourse({ x: 48, z: -100, entryLength: 15, exitLength: 40 });
 
-    objects.addWindingCourse({ x: 72, z: -100, entryLength: 12, exitLength: 48  });
+    // objects.addWindingCourse({ x: 72, z: -100, entryLength: 12, exitLength: 48  });
+
+    // ============================================================
+    // DECORATION: ngôi sao 5 cánh ở góc xa Đông-Nam của sân.
+    // Vị trí (130, 80) nằm ngoài tất cả các corridor bài thi, không ảnh hưởng
+    // đến sensor/penalty zone nào.
+    // ============================================================
+    objects.root.add(new StarShape({
+        x: 34,
+        z: -32,
+        size: 4,
+        color: '#fe2020',
+        rotationY: 120,
+    }).root);
+
+    // ============================================================
+    // SMOKE-TEST: Five-lane two-way road (5 × 3.70 m, vertical).
+    // Đặt bên phải sân, ngoài tất cả corridor bài thi (X < 90) để không
+    // ảnh hưởng sensor / penalty zone hiện có.
+    // - 1 lane đi xuống ngoài cùng bên phải (lane 01).
+    // - 4 lane đi lên (cùng chiều), phân cách bằng vạch đứt trắng.
+    // - Phân chia 2 chiều: vạch liền giữa lane 01 và 02.
+    // Theo spec/road/road_6A_object_spec.md §1, §4.
+    // ============================================================
+    objects.addFourLaneRoad({
+        x: 54,
+        z: -108,
+        lengthM: 60,
+        laneWidthM: 4,
+        rotationY: Math.PI / 2,
+    });
 }

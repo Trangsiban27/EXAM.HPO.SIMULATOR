@@ -7,6 +7,7 @@ import { StopSign, type StopSignOptions } from './StopSign';
 import { WindingCourse } from './WindingCourse';
 import { WheelTrackCourse } from './WheelTrackCourse';
 import { startPosition } from './startPosition';
+import { FourLaneRoad, type FourLaneRoadOptions } from './FourLaneRoad';
 
 type ArrowType = 'straight' | 'left' | 'right' | 'none';
 type RoadDirection = 'vertical' | 'horizontal';
@@ -262,6 +263,7 @@ export class TrackObjects{
 
         // 3. Vạch giữa chia đường thành hai làn bằng nhau.
         const { material, spans } = this.centerLineSegments(d, centerLine, lanes);
+        
         for (const [from, to] of spans) {
             const line = new THREE.Mesh(new THREE.BoxGeometry(.15, .008, to - from), material);
             line.position.set(0, .067, -d / 2 + (from + to) / 2);
@@ -280,6 +282,48 @@ export class TrackObjects{
             }
         }
         return segment;
+    }
+
+    /**
+     * Dựng một đoạn đường thẳng 4 làn × `laneWidthM` (mặc định 4 m),
+     * tổng rộng 16 m, theo trục đứng (song song world Z).
+     *
+     * - Lane 01 (ngoài cùng phải): đi xuống (-Z), mũi tên xoay ngược.
+     * - Lane 02..04: đi lên (+Z).
+     * - Giữa lane 01 và 02: vạch LIỀN (phân chia 2 chiều).
+     * - Giữa 02↔03 và 03↔04: vạch ĐỨT trắng.
+     * - 2 biên ngoài: curb đỏ-trắng.
+     *
+     * Truyền `opts.rotationY` để xoay cả đoạn đường quanh trục Y (vd. `Math.PI / 2`
+     * để trục đường nằm ngang theo X).
+     *
+     * Xem module `FourLaneRoad` và spec/road/road_6A_object_spec.md.
+     */
+    addFourLaneRoad(opts: FourLaneRoadOptions): FourLaneRoad {
+        const road = new FourLaneRoad(opts);
+        this.root.add(road.root);
+        // Register vào `roads[]` để connectRoadIntersections() xử lý giao lộ:
+        // trim curb đỏ-trắng, vạch đứt/liền và bỏ mũi tên khi four-lane road
+        // cắt ngang một đường đã đăng ký khác (addRoad / ...).
+        // Direction: 0 hoặc ±PI → trục đứng; ±PI/2 → trục ngang.
+        const rotationY = opts.rotationY ?? 0;
+        const direction: RoadDirection =
+            Math.abs(Math.sin(rotationY)) > 0.5 ? 'horizontal' : 'vertical';
+        // Theo quy ước của addRoad(): X-extent = direction==='vertical' ? width : length;
+        // Z-extent = direction==='vertical' ? length : width.
+        this.roads.push({
+            group: road.root,
+            x: opts.x,
+            z: opts.z,
+            direction,
+            bounds: {
+                minX: opts.x - (direction === 'vertical' ? road.widthM : road.lengthM) / 2,
+                maxX: opts.x + (direction === 'vertical' ? road.widthM : road.lengthM) / 2,
+                minZ: opts.z - (direction === 'vertical' ? road.lengthM : road.widthM) / 2,
+                maxZ: opts.z + (direction === 'vertical' ? road.lengthM : road.widthM) / 2,
+            },
+        });
+        return road;
     }
 
     connectRoadIntersections() {
