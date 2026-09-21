@@ -353,7 +353,8 @@ export class TrackObjects{
         direction: RoadDirection = 'vertical',
         turn: 'left' | 'right' = 'right',
         centerLine: CenterLineType = 'white-solid',
-        lanes: LaneCount = 2
+        lanes: LaneCount = 2,
+        rotationY = 0
     ) {
         // Local entry is the south edge (+Z), with the exit on the right (+X).
         const corner = new THREE.Group();
@@ -397,6 +398,7 @@ export class TrackObjects{
             this.addRoadArrow(laneX, width / 4, width / lanes, width / 2, 'right', corner);
         }
         this.root.add(corner);
+        corner.rotation.y += rotationY;
         return corner;
     }
 
@@ -681,7 +683,7 @@ export class TrackObjects{
     }) {
         const winding = new WindingCourse(0, 0);
         const entryArrowZ = z + Math.min(7, entryLength / 2);
-        this.addRoad(x, z + entryLength / 2, winding.width, entryLength,
+        this.addRoad(x, z + entryLength / 2, winding.width + .4, entryLength,
             'vertical', 'none', 'white-solid', 1);
         this.addRoadArrow(x, entryArrowZ, winding.width, 6, 'straight', this.root).rotateZ(Math.PI);
         winding.root.position.set(x, 0, z + entryLength);
@@ -692,15 +694,15 @@ export class TrackObjects{
             this.penaltyZones.push(zone.clone().applyMatrix4(winding.root.matrix));
         }
         const windingExit = winding.exit.clone().applyMatrix4(winding.root.matrix);
-        this.addRoad(windingExit.x, windingExit.z + exitLength / 2, winding.width, exitLength,
+        this.addRoad(windingExit.x, windingExit.z + exitLength / 2, winding.width + .4, exitLength,
             'vertical', 'none', 'white-solid', 1);
         this.addRoadArrow(windingExit.x, windingExit.z + exitLength / 2, winding.width, exitLength,
             'straight', this.root).rotateZ(Math.PI);
-        this.root.add(new ExerciseSign({
-            title: 'QUA ĐƯỜNG\nVÒNG QUANH CO',
-            subtitle: 'Đi chậm, giữ bánh xe trong vạch giới hạn',
-            x: x + 4, z: entryArrowZ, rotation: Math.PI
-        }).root);
+        // this.root.add(new ExerciseSign({
+        //     title: 'QUA ĐƯỜNG\nVÒNG QUANH CO',
+        //     subtitle: 'Đi chậm, giữ bánh xe trong vạch giới hạn',
+        //     x: x + 4, z: entryArrowZ, rotation: Math.PI
+        // }).root);
     }
 
     /**

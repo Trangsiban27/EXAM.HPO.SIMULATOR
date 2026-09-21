@@ -216,7 +216,7 @@ export function buildExamGround(objects: TrackObjects) {
         objects.addTrafficLight(
             x, 
             z, 
-            8, 
+            8,
             rotation, 
             { 
                 stopLineZ,
@@ -240,20 +240,34 @@ export function buildExamGround(objects: TrackObjects) {
 
     objects.addRoad(21, -60, 8, 30, 'vertical', 'straight', 'yellow-dashed');
     objects.addRoad(21, -70, 8, 20, 'vertical', 'straight', 'yellow-dashed');
+    objects.addRoad(21, -90, 8, 20, 'vertical', 'straight', 'yellow-dashed');
 
     // The straight ends at Z=-80; the corner enters there and exits toward +X.
-    objects.addRightAngleTurn(21, -84, 8, 'vertical', 'right', 'yellow-dashed');
-    objects.addRoad(35, -84, 8, 20, 'horizontal', 'straight', 'yellow-dashed');
+    objects.addRightAngleTurn(21, -100, 8, 'vertical', 'right', 'yellow-dashed');
+
+    // Exam 06
+    objects.addRoad(34, -100, 8, 20, 'horizontal', 'straight', 'yellow-dashed');
     // Branch from the right (+Z) side of the eastbound main road.
-    objects.addWindingCourse({ x: 41, z: -84, entryLength: 30 });
+    
+    objects.addRoad(55, -100, 8, 26, 'horizontal', 'straight', 'yellow-dashed');
+    objects.addRoad(67, -100, 8, 14, 'horizontal', 'straight', 'yellow-dashed');
+    objects.addRoad(84, -100, 8, 24, 'horizontal', 'straight', 'yellow-dashed');
 
-    objects.addRoad(55, -84, 8, 26, 'horizontal', 'straight', 'yellow-dashed');
+    objects.addRightAngleTurn(100, -100, 8, 'horizontal', 'right', 'yellow-dashed');
 
-    objects.addWindingCourse({ x: 51, z: -84, entryLength: 15 });
+    objects.addRoad(100, -76, 8, 40, 'vertical', 'straight', 'yellow-dashed');
+    objects.addRoad(100, -66, 8, 40, 'vertical', 'straight', 'yellow-dashed');
 
-    objects.addRoad(67, -84, 8, 14, 'horizontal', 'straight', 'yellow-dashed');
+    // Mirror turn phía Bắc line 262: xe đi Nam → Bắc (-Z) rồi quẹo phải về hướng Đông (+X).
+    objects.addRightAngleTurn(100, -42, 8, 'vertical', 'right', 'yellow-dashed', 2, Math.PI);
 
-    objects.addWindingCourse({ x: 61, z: -84, entryLength: 30 });
+    objects.addRoad(66, -42, 8, 60, 'horizontal', 'straight', 'yellow-dashed');
 
-    objects.addWindingCourse({ x: 71, z: -84, entryLength: 15 });
+    objects.addWindingCourse({ x: 36, z: -100, entryLength: 45, exitLength: 10 });
+    
+    objects.addWindingCourse({ x: 42, z: -100, entryLength: 30, exitLength: 25 });
+
+    objects.addWindingCourse({ x: 48, z: -100, entryLength: 15, exitLength: 40 });
+
+    objects.addWindingCourse({ x: 72, z: -100, entryLength: 12, exitLength: 48  });
 }
