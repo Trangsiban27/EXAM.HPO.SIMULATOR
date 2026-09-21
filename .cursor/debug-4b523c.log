@@ -1,0 +1,8 @@
+{"sessionId":"4b523c","location":"ParallelParkingBayB.ts:constructor","message":"curb params","data":{"L":6.615,"D":2.125,"R":0.3,"W":0.15,"H":0.05,"offset":0.25},"timestamp":1789983073393}
+{"sessionId":"4b523c","location":"ParallelParkingBayB.ts:constructor","message":"curb params","data":{"L":6.615,"D":2.125,"R":0.3,"W":0.15,"H":0.05,"offset":0.25},"timestamp":1789983144060}
+{"sessionId":"4b523c","location":"ParallelParkingBayB.ts:addPhysicalCurb:entry","message":"building curb with arc","data":{"L":6.615,"D":2.125,"R":0.3,"offset":0.25,"W":0.15,"H":0.05},"timestamp":1789983144074}
+{"sessionId":"4b523c","location":"ParallelParkingBayB.ts:addPhysicalCurb:done","message":"curb built","data":{"topCount":3,"arcSegments":8,"farCount":8,"bottomCount":3},"timestamp":1789983144076}
+{"sessionId":"4b523c","location":"ParallelParkingBayB.ts:constructor","message":"curb params","data":{"L":6.615,"D":2.125,"R":0.3,"W":0.15,"H":0.05,"offset":0.25},"timestamp":1789983163222}
+{"sessionId":"4b523c","location":"ParallelParkingBayB.ts:addPhysicalCurb:done","message":"curb built","data":{"topCount":3,"arcSegments":8,"farCount":8,"bottomCount":3},"timestamp":1789983163223}
+{"sessionId":"4b523c","location":"ParallelParkingBayB.ts:constructor","message":"curb params","data":{"L":6.615,"D":2.125,"R":0.3,"W":0.15,"H":0.05,"offset":0.25},"timestamp":1789983167680}
+{"sessionId":"4b523c","location":"ParallelParkingBayB.ts:addPhysicalCurb:entry","message":"strip vs arc params","data":{"L":6.615,"D":2.125,"R":0.3,"offset":0.25,"W":0.15,"H":0.05,"stripTopInnerZ":3.8575,"arcCenterX":2.075,"arcCenterZ":3.5575,"arcRadius":0.3,"stripWidth":0.15,"arcSegWidth":0.15},"timestamp":1789983825745}

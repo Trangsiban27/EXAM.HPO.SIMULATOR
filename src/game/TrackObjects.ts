@@ -9,6 +9,8 @@ import { WindingCourse } from './WindingCourse';
 import { WheelTrackCourse } from './WheelTrackCourse';
 import { startPosition } from './startPosition';
 import { FourLaneRoad, type FourLaneRoadOptions } from './FourLaneRoad';
+import { FourLaneBidirectionalRoad, type FourLaneBidirectionalRoadOptions } from './FourLaneBidirectionalRoad';
+import { ParallelParkingBayB, type ParallelParkingBayBOptions } from './ParallelParkingBayB';
 import type { ExamVehicleClass } from './exam/examRules';
 import { getWindingCourseSpec, validateWindingCourseSpec } from './WindingCourseSpec';
 
@@ -327,28 +329,98 @@ export class TrackObjects{
         // Register vào `roads[]` để connectRoadIntersections() xử lý giao lộ:
         // trim curb đỏ-trắng, vạch đứt/liền và bỏ mũi tên khi four-lane road
         // cắt ngang một đường đã đăng ký khác (addRoad / ...).
-        // Direction: 0 hoặc ±PI → trục đứng; ±PI/2 → trục ngang.
+        // Direction: 0 hoặc ±PI → trục đứng (song song world Z, length = Z-extent);
+        // ±PI/2 → trục ngang (song song world X, length = X-extent).
         const rotationY = opts.rotationY ?? 0;
         const direction: RoadDirection =
             Math.abs(Math.sin(rotationY)) > 0.5 ? 'horizontal' : 'vertical';
-        // Theo quy ước của addRoad(): X-extent = direction==='vertical' ? width : length;
-        // Z-extent = direction==='vertical' ? length : width.
+        // For rotationY=0: road runs along world Z → X-extent = widthM, Z-extent = lengthM
+        // For rotationY=PI/2: road runs along world X → X-extent = lengthM, Z-extent = widthM
+        const halfL = road.lengthM / 2;
+        const halfW = road.widthM / 2;
         this.roads.push({
             group: road.root,
             x: opts.x,
             z: opts.z,
             direction,
             bounds: {
-                minX: opts.x - (direction === 'vertical' ? road.widthM : road.lengthM) / 2,
-                maxX: opts.x + (direction === 'vertical' ? road.widthM : road.lengthM) / 2,
-                minZ: opts.z - (direction === 'vertical' ? road.lengthM : road.widthM) / 2,
-                maxZ: opts.z + (direction === 'vertical' ? road.lengthM : road.widthM) / 2,
+                minX: opts.x - (direction === 'vertical' ? halfW : halfL),
+                maxX: opts.x + (direction === 'vertical' ? halfW : halfL),
+                minZ: opts.z - (direction === 'vertical' ? halfL : halfW),
+                maxZ: opts.z + (direction === 'vertical' ? halfL : halfW),
             },
         });
         return road;
     }
 
+    /**
+     * Four-Lane Bidirectional Road — đường 4 làn hai chiều.
+     * Theo spec/road/road_4lane_bidirectional_spec.md
+     *
+     * Layout:
+     * - LANE_01, LANE_02: đi xuống (-Z)
+     * - LANE_03, LANE_04: đi lên (+Z)
+     * - Vạch trắng đứt giữa L1/L2 và L3/L4
+     * - Vạch vàng liền giữa L2/L3 (trung tâm hai chiều)
+     */
+    addFourLaneBidirectionalRoad(opts: FourLaneBidirectionalRoadOptions): FourLaneBidirectionalRoad {
+        const road = new FourLaneBidirectionalRoad(opts);
+        this.root.add(road.root);
+        // Register vào `roads[]` để connectRoadIntersections() xử lý giao lộ:
+        // trim curb đỏ-trắng, vạch đứt/liền và bỏ mũi tên khi four-lane bidirectional road
+        // cắt ngang một đường đã đăng ký khác (addRoad / addFourLaneRoad / ...).
+        // Direction: 0 hoặc ±PI → trục đứng (song song world Z, length = Z-extent);
+        // ±PI/2 → trục ngang (song song world X, length = X-extent).
+        const rotationY = opts.rotationY ?? 0;
+        const direction: RoadDirection =
+            Math.abs(Math.sin(rotationY)) > 0.5 ? 'horizontal' : 'vertical';
+        // For rotationY=0: road runs along world Z → X-extent = widthM, Z-extent = lengthM
+        // For rotationY=PI/2: road runs along world X → X-extent = lengthM, Z-extent = widthM
+        const halfL = road.lengthM / 2;
+        const halfW = road.widthM / 2;
+        this.roads.push({
+            group: road.root,
+            x: opts.x,
+            z: opts.z,
+            direction,
+            bounds: {
+                minX: opts.x - (direction === 'vertical' ? halfW : halfL),
+                maxX: opts.x + (direction === 'vertical' ? halfW : halfL),
+                minZ: opts.z - (direction === 'vertical' ? halfL : halfW),
+                maxZ: opts.z + (direction === 'vertical' ? halfL : halfW),
+            },
+        });
+        return road;
+    }
+
+    /**
+     * Thêm một chuồng ghép xe ngang hạng B (B-class parallel parking bay) theo
+     * spec/road/parallel_parking_bay_B_spec.md.
+     *
+     * Bản visual-test: chỉ dựng mesh, KHÔNG tích hợp logic sensor và KHÔNG đăng ký
+     * vào `roads[]`. Khi cần chuồng nằm cạnh đường đã đăng ký để curb/markings của
+     * đường không bị trim nhầm, sẽ đăng ký tại đây (TODO).
+     */
+    addParallelParkingBayB(opts: ParallelParkingBayBOptions): ParallelParkingBayB {
+        const bay = new ParallelParkingBayB(opts);
+        this.root.add(bay.root);
+        return bay;
+    }
+
     connectRoadIntersections() {
+        const LOG_ENDPOINT = 'http://127.0.0.1:7243/ingest/41ea114a-de22-43e0-a2f5-b772e9ee7100';
+        const log = (msg: string, data: object) => fetch(LOG_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '6e3cd6' },
+            body: JSON.stringify({ sessionId: '6e3cd6', location: 'TrackObjects.ts:connectRoadIntersections', message: msg, data, timestamp: Date.now() })
+        }).catch(() => {});
+
+        log('connectRoadIntersections: START', { roadCount: this.roads.length });
+        for (let i = 0; i < this.roads.length; i++) {
+            const r = this.roads[i];
+            log('road_registered', { index: i, name: r.group.name, direction: r.direction, bounds: r.bounds });
+        }
+
         const overlap = (a: RoadRect, b: RoadRect) =>
             Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX) > .00001 &&
             Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ) > .00001;
@@ -364,6 +436,11 @@ export class TrackObjects{
         };
         for (const [index, road] of this.roads.entries()) {
             const intersecting = this.roads.filter(other => other !== road && overlap(road.bounds, other.bounds));
+            log('intersecting_check', { roadIndex: index, roadName: road.group.name, direction: road.direction, intersectCount: intersecting.length });
+            if (intersecting.length === 0) { log('no_intersection_skip', { roadIndex: index, roadName: road.group.name }); continue; }
+            for (const inter of intersecting) {
+                log('intersecting_road_detail', { roadIndex: index, intersectWith: inter.group.name, interDirection: inter.direction, interBounds: inter.bounds });
+            }
             const localRect = (other: RoadSegment): RoadRect => {
                 road.group.updateMatrix();
                 const box = new THREE.Box3(
@@ -374,11 +451,13 @@ export class TrackObjects{
             };
             for (const child of [...road.group.children]) {
                 if (!(child instanceof THREE.Mesh)) continue;
+                log('child_mesh', { roadIndex: index, childName: child.name, childType: child.geometry?.constructor?.name });
                 // Only crossing roads open curbs/markings. Later surfaces are trimmed against
                 // all earlier roads as well, eliminating coplanar overlapping asphalt.
                 const cuts = intersecting.filter(other => child.name === 'road-surface'
                     ? this.roads.indexOf(other) < index : other.direction !== road.direction).map(localRect);
-                if (!cuts.length) continue;
+                log('cuts_result', { roadIndex: index, childName: child.name, isRoadSurface: child.name === 'road-surface', cutsCount: cuts.length, cutsDetail: cuts });
+                if (!cuts.length) { log('no_cuts_skip', { roadIndex: index, childName: child.name }); continue; }
                 child.geometry.computeBoundingBox();
                 child.updateMatrix();
                 const bounds = child.geometry.boundingBox!.clone().applyMatrix4(child.matrix);
@@ -397,6 +476,7 @@ export class TrackObjects{
                 }
                 let pieces = [rect];
                 for (const cut of cuts) pieces = pieces.flatMap(piece => subtract(piece, cut));
+                log('piece_created', { roadIndex: index, childName: child.name, piecesCount: pieces.length, pieceRects: pieces });
                 for (const piece of pieces) {
                     const mesh = new THREE.Mesh(new THREE.BoxGeometry(piece.maxX - piece.minX,
                         bounds.max.y - bounds.min.y, piece.maxZ - piece.minZ), child.material);
@@ -408,8 +488,10 @@ export class TrackObjects{
                 }
                 road.group.remove(child);
                 child.geometry.dispose();
+                log('trim_complete', { roadIndex: index, childName: child.name });
             }
         }
+        log('connectRoadIntersections: END', {});
     }
 
     addRightAngleTurn(
