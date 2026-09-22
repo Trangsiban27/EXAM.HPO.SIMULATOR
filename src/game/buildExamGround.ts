@@ -209,9 +209,9 @@ export function buildExamGround(objects: TrackObjects) {
     // Layout: L1 ↓ | WHITE_DASHED | L2 ↓ | YELLOW_SOLID | L3 ↑ | WHITE_DASHED | L4 ↑
     // ============================================================
     objects.addFourLaneBidirectionalRoad({
-        x: -20,
+        x: -42,
         z: -42,
-        lengthM: 80,
+        lengthM: 120,
         laneWidthM: 3.5,
         rotationY: Math.PI / 2,
     });
@@ -334,6 +334,7 @@ export function buildExamGround(objects: TrackObjects) {
         z: -35.4,
         rotationY: -Math.PI / 2,
         cornerRadiusM: 0.3,
+        vehicleClass: 'B',
     });
 
     objects.addParallelParkingBayB({
@@ -341,6 +342,7 @@ export function buildExamGround(objects: TrackObjects) {
         z: -35.4,
         rotationY: -Math.PI / 2,
         cornerRadiusM: 0.3,
+        vehicleClass: 'D',
     });
 
     objects.addParallelParkingBayB({
@@ -348,6 +350,7 @@ export function buildExamGround(objects: TrackObjects) {
         z: -35.4,
         rotationY: -Math.PI / 2,
         cornerRadiusM: 0.3,
+        vehicleClass: 'E',
     });
 
 }

@@ -69,6 +69,58 @@ export const PARALLEL_PARKING_B = {
     physicalEdgeOffsetM: 0.25,
 } as const;
 
+/**
+ * Vehicle class types supported for parallel parking bay.
+ */
+export type VehicleClass = 'B' | 'D' | 'E';
+
+/**
+ * Thông số kỹ thuật xe theo từng hạng.
+ * Theo spec hiep_phat_exam_yard_standard_v2_corrected.md §14
+ */
+export const VEHICLE_SPECS = {
+    B: {
+        model: 'VIOS 1.5E (2017)',
+        a: 4.410,  // chiều dài xe
+        b: 1.700,  // chiều rộng xe
+        B1: 0.185,
+        Rqv: 5.100,
+        L: 2.550,
+    },
+    D: {
+        model: 'COUTY HD29 E3',
+        a: 7.060,
+        b: 2.080,
+        B1: 0.440,
+        Rqv: 7.400,
+        L: 4.085,
+    },
+    E: {
+        model: 'TRANSINCO K52 E2',
+        a: 10.500,
+        b: 2.500,
+        B1: 0.590,
+        Rqv: 10.000,
+        L: 5.170,
+    },
+} as const;
+
+/**
+ * Kích thước chuồng đỗ theo từng hạng.
+ * Công thức: Lg = 1.5 * a, Rg = 1.25 * b
+ * Theo spec threejs_exam_yard_specification_v2.md §19
+ * Lưu ý: Hạng E có Lg = 17.5m (theo thông số thực tế)
+ */
+export const PARKING_BAY_SIZES: Record<VehicleClass, {
+    parkingLengthM: number;
+    parkingDepthM: number;
+    cornerRadiusM: number;
+}> = {
+    B: { parkingLengthM: 6.615, parkingDepthM: 2.125, cornerRadiusM: 0.3 },   // Lg=1.5*4.41, Rg=1.25*1.7
+    D: { parkingLengthM: 10.59, parkingDepthM: 2.60, cornerRadiusM: 0.3 },    // Lg=1.5*7.06, Rg=1.25*2.08
+    E: { parkingLengthM: 17.5, parkingDepthM: 3.125, cornerRadiusM: 0.3 },    // Lg=17.5, Rg=1.25*2.5
+} as const;
+
 export interface ParallelParkingBayBOptions {
     /** Tâm chuồng / điểm đặt theo trục X (world). */
     x: number;
@@ -78,7 +130,7 @@ export interface ParallelParkingBayBOptions {
      * Xoay toàn bộ bay quanh trục Y (radians). Mặc định 0 (open side tại X=0 quay về -X world).
      */
     rotationY?: number;
-    /** Bán kính bo góc đầu xa (m). Mặc định 0.3. Phải 0 < R ≤ depth. */
+    /** Bán kính bo góc đầu xa (m). Mặc định theo vehicleClass. Phải 0 < R ≤ depth. */
     cornerRadiusM?: number;
     /** Độ dày vạch đỏ sát hạch (m). Mặc định 0.10. */
     examBoundaryWidthM?: number;
@@ -100,6 +152,12 @@ export interface ParallelParkingBayBOptions {
     side?: 'LEFT' | 'RIGHT';
     /** Bật debug dimensions, reference vehicle, labels. Mặc định false. */
     showDebug?: boolean;
+    /**
+     * Hạng xe: 'B', 'D', hoặc 'E'.
+     * Mặc định 'B'.
+     * Kích thước chuồng sẽ được tự động set theo vehicleClass.
+     */
+    vehicleClass?: VehicleClass;
 }
 
 export class ParallelParkingBayB {
@@ -109,6 +167,11 @@ export class ParallelParkingBayB {
     readonly physicalEdgeGroup: THREE.Group;
     readonly logicGroup: THREE.Group;
     readonly debugGroup: THREE.Group;
+
+    /** Vehicle class: 'B', 'D', or 'E' */
+    readonly vehicleClass: VehicleClass;
+    /** Vehicle spec for the current class */
+    readonly vehicleSpec: typeof VEHICLE_SPECS['B'];
 
     readonly lengthM: number;
     readonly depthM: number;
@@ -127,9 +190,17 @@ export class ParallelParkingBayB {
     private _showDebug: boolean;
 
     constructor(opts: ParallelParkingBayBOptions) {
-        const lengthM = PARALLEL_PARKING_B.parkingLengthM;
-        const depthM = PARALLEL_PARKING_B.parkingDepthM;
-        const cornerRadiusM = opts.cornerRadiusM ?? PARALLEL_PARKING_B.cornerRadiusM;
+        // Lấy vehicle class, mặc định 'B'
+        const vehicleClass = opts.vehicleClass ?? 'B';
+
+        // Lấy kích thước chuẩn theo class
+        const sizeConfig = PARKING_BAY_SIZES[vehicleClass];
+        const vehicleSpec = VEHICLE_SPECS[vehicleClass];
+
+        // Override với giá trị từ options nếu có, không thì dùng class spec
+        const lengthM = opts.parkingLengthM ?? sizeConfig.parkingLengthM;
+        const depthM = opts.parkingDepthM ?? sizeConfig.parkingDepthM;
+        const cornerRadiusM = opts.cornerRadiusM ?? sizeConfig.cornerRadiusM;
         const examBoundaryWidthM = opts.examBoundaryWidthM ?? PARALLEL_PARKING_B.examBoundaryWidthM;
         const physicalEdgeOffsetM = opts.physicalEdgeOffsetM ?? PARALLEL_PARKING_B.physicalEdgeOffsetM;
         const curbWidthM = opts.curbWidthM ?? 0.15;
@@ -142,12 +213,13 @@ export class ParallelParkingBayB {
         const rotationY = opts.rotationY ?? 0;
         const showDebug = opts.showDebug ?? false;
 
-        // Validation theo Spec §26:
-        if (Math.abs(lengthM - 6.615) > 0.001) {
-            throw new Error('B-class parking length must be 6.615 m');
+        // Validation theo Spec §26 - dựa trên vehicle class
+        const tolerance = 0.01;
+        if (Math.abs(lengthM - sizeConfig.parkingLengthM) > tolerance) {
+            throw new Error(`${vehicleClass}-class parking length must be ${sizeConfig.parkingLengthM} m (got ${lengthM})`);
         }
-        if (Math.abs(depthM - 2.125) > 0.001) {
-            throw new Error('B-class parking depth must be 2.125 m');
+        if (Math.abs(depthM - sizeConfig.parkingDepthM) > tolerance) {
+            throw new Error(`${vehicleClass}-class parking depth must be ${sizeConfig.parkingDepthM} m (got ${depthM})`);
         }
         if (cornerRadiusM <= 0 || cornerRadiusM > depthM) {
             throw new Error('ParallelParkingBayB: invalid corner radius (must be 0 < R ≤ depth)');
@@ -158,6 +230,10 @@ export class ParallelParkingBayB {
         if (physicalEdgeOffsetM < 0) {
             throw new Error('ParallelParkingBayB: physicalEdgeOffsetM must be ≥ 0');
         }
+
+        // Lưu vehicle class và spec
+        this.vehicleClass = vehicleClass;
+        this.vehicleSpec = vehicleSpec;
 
         this.lengthM = lengthM;
         this.depthM = depthM;
@@ -176,7 +252,7 @@ export class ParallelParkingBayB {
 
         // Root group — placement theo Spec §17:
         const root = new THREE.Group();
-        root.name = 'parallel-parking-bay-b';
+        root.name = `parallel-parking-bay-${vehicleClass.toLowerCase()}`;
         root.position.set(opts.x, 0, opts.z);
         root.rotation.y = rotationY;
         this.root = root;
@@ -818,12 +894,30 @@ export class ParallelParkingBayB {
         const b = this.getBounds();
         return x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ;
     }
+
+    /**
+     * Lấy thông số kích thước chuẩn theo vehicle class.
+     */
+    public static getParkingSize(vehicleClass: VehicleClass): {
+        parkingLengthM: number;
+        parkingDepthM: number;
+        cornerRadiusM: number;
+    } {
+        return { ...PARKING_BAY_SIZES[vehicleClass] };
+    }
+
+    /**
+     * Lấy thông số xe theo vehicle class.
+     */
+    public static getVehicleSpec(vehicleClass: VehicleClass): typeof VEHICLE_SPECS['B'] {
+        return { ...VEHICLE_SPECS[vehicleClass] } as typeof VEHICLE_SPECS['B'];
+    }
 }
 
 /**
  * Factory helper theo Spec §31:
  */
-export function createParallelParkingBayB(
+export function createParallelParkingBay(
     options: ParallelParkingBayBOptions
 ): THREE.Group {
     const bay = new ParallelParkingBayB(options);
@@ -832,21 +926,39 @@ export function createParallelParkingBayB(
 
 /**
  * Validate ParallelParkingBayB theo Spec §26 (chạy lại các check dims).
+ * Hỗ trợ tất cả các vehicle class B, D, E.
  */
-export function validateParallelParkingBayB(
-    bay: ParallelParkingBayB | ParallelParkingBaySpec
+export function validateParallelParkingBay(
+    bay: ParallelParkingBayB | ParallelParkingBaySpec,
+    expectedClass?: VehicleClass
 ): void {
     const length = 'lengthM' in bay ? bay.lengthM : bay.parkingLengthM;
     const depth = 'depthM' in bay ? bay.depthM : bay.parkingDepthM;
     const radius = bay.cornerRadiusM;
 
-    if (Math.abs(length - 6.615) > 0.001) {
-        throw new Error('B-class parking length must be 6.615 m');
+    // Xác định class cần validate
+    const classToValidate = expectedClass ??
+        (bay instanceof ParallelParkingBayB ? bay.vehicleClass : 'B');
+
+    const expected = PARKING_BAY_SIZES[classToValidate];
+    const tolerance = 0.01;
+
+    if (Math.abs(length - expected.parkingLengthM) > tolerance) {
+        throw new Error(`${classToValidate}-class parking length must be ${expected.parkingLengthM} m (got ${length})`);
     }
-    if (Math.abs(depth - 2.125) > 0.001) {
-        throw new Error('B-class parking depth must be 2.125 m');
+    if (Math.abs(depth - expected.parkingDepthM) > tolerance) {
+        throw new Error(`${classToValidate}-class parking depth must be ${expected.parkingDepthM} m (got ${depth})`);
     }
     if (radius <= 0 || radius > depth) {
         throw new Error('Invalid corner radius');
     }
+}
+
+/**
+ * @deprecated Use validateParallelParkingBay instead.
+ */
+export function validateParallelParkingBayB(
+    bay: ParallelParkingBayB | ParallelParkingBaySpec
+): void {
+    validateParallelParkingBay(bay, 'B');
 }
