@@ -11,6 +11,9 @@ import { startPosition } from './startPosition';
 import { FourLaneRoad, type FourLaneRoadOptions } from './FourLaneRoad';
 import { FourLaneBidirectionalRoad, type FourLaneBidirectionalRoadOptions } from './FourLaneBidirectionalRoad';
 import { ParallelParkingBayB, type ParallelParkingBayBOptions } from './ParallelParkingBayB';
+import { PerpendicularParkingBayB, type PerpendicularParkingBayBOptions } from './PerpendicularParkingBayB';
+import { PerpendicularParkingBayC, type PerpendicularParkingBayCOptions } from './PerpendicularParkingBayC';
+import { RoadStraight955, type RoadStraight955Options } from './RoadStraight955';
 import type { ExamVehicleClass } from './exam/examRules';
 import { getWindingCourseSpec, validateWindingCourseSpec } from './WindingCourseSpec';
 
@@ -314,6 +317,36 @@ export class TrackObjects{
     }
 
     /**
+     * Thêm road primitive tái sử dụng với width/length cấu hình theo từng instance.
+     * Không có vạch làn hoặc mũi tên; chỉ gồm asphalt, mép đen và grass zone.
+     */
+    addRoadStraight955(opts: RoadStraight955Options): RoadStraight955 {
+        const road = new RoadStraight955(opts);
+        this.root.add(road.root);
+
+        road.root.updateMatrix();
+        const { lengthM, widthM } = road.geometry;
+        const worldBox = new THREE.Box3(
+            new THREE.Vector3(-lengthM / 2, 0, -widthM / 2),
+            new THREE.Vector3(lengthM / 2, 0, widthM / 2),
+        ).applyMatrix4(road.root.matrix);
+        const rotationY = opts.rotationY ?? 0;
+        this.roads.push({
+            group: road.root,
+            x: opts.x,
+            z: opts.z,
+            direction: Math.abs(Math.sin(rotationY)) > 0.5 ? 'vertical' : 'horizontal',
+            bounds: {
+                minX: worldBox.min.x,
+                maxX: worldBox.max.x,
+                minZ: worldBox.min.z,
+                maxZ: worldBox.max.z,
+            },
+        });
+        return road;
+    }
+
+    /**
      * Dựng một đoạn đường thẳng 4 làn × `laneWidthM` (mặc định 4 m),
      * tổng rộng 16 m, theo trục đứng (song song world Z).
      *
@@ -443,6 +476,67 @@ export class TrackObjects{
         return bay;
     }
 
+    /** Thêm chuồng ghép xe vuông góc hạng B theo CAD. */
+    addPerpendicularParkingBayB(opts: PerpendicularParkingBayBOptions): PerpendicularParkingBayB {
+        const bay = new PerpendicularParkingBayB(opts);
+        this.root.add(bay.root);
+
+        const { controlStartX, controlEndX } = bay.geometry;
+        const localBox = new THREE.Box3(
+            new THREE.Vector3(controlStartX, 0, -bay.clearRoadWidthM),
+            new THREE.Vector3(controlEndX, 0, bay.parkingDepthM),
+        );
+        bay.root.updateMatrix();
+        const worldBox = localBox.applyMatrix4(bay.root.matrix);
+        this.roadObstacles.push({
+            group: bay.root,
+            x: opts.x,
+            z: opts.z,
+            direction: 'horizontal',
+            bounds: {
+                minX: worldBox.min.x,
+                maxX: worldBox.max.x,
+                minZ: worldBox.min.z,
+                maxZ: worldBox.max.z,
+            },
+        });
+        return bay;
+    }
+
+    /**
+     * Thêm chuồng ghép xe vuông góc hạng C theo
+     * spec/road/perpendicular_parking_bay_C_spec.md.
+     */
+    addPerpendicularParkingBayC(opts: PerpendicularParkingBayCOptions): PerpendicularParkingBayC {
+        const bay = new PerpendicularParkingBayC(opts);
+        this.root.add(bay.root);
+
+        const { controlStartX, controlEndX } = bay.geometry;
+        const localBox = new THREE.Box3(
+            new THREE.Vector3(controlStartX, 0, -bay.clearRoadWidthM),
+            new THREE.Vector3(
+                controlEndX,
+                0,
+                bay.parkingDepthM + bay.physicalEdgeOffsetM + bay.curbWidthM,
+            ),
+        );
+        bay.root.updateMatrix();
+        const worldBox = localBox.applyMatrix4(bay.root.matrix);
+        this.roadObstacles.push({
+            group: bay.root,
+            x: opts.x,
+            z: opts.z,
+            direction: 'horizontal',
+            bounds: {
+                minX: worldBox.min.x,
+                maxX: worldBox.max.x,
+                minZ: worldBox.min.z,
+                maxZ: worldBox.max.z,
+            },
+        });
+        return bay;
+    }
+
     connectRoadIntersections() {
         const LOG_ENDPOINT = 'http://127.0.0.1:7243/ingest/41ea114a-de22-43e0-a2f5-b772e9ee7100';
         const log = (msg: string, data: object) => fetch(LOG_ENDPOINT, {
@@ -472,8 +566,12 @@ export class TrackObjects{
         };
         for (const [index, road] of this.roads.entries()) {
             const intersecting = this.roads.filter(other => other !== road && overlap(road.bounds, other.bounds));
+            const intersectsObstacle = this.roadObstacles.some(obstacle => overlap(road.bounds, obstacle.bounds));
             log('intersecting_check', { roadIndex: index, roadName: road.group.name, direction: road.direction, intersectCount: intersecting.length });
-            if (intersecting.length === 0) { log('no_intersection_skip', { roadIndex: index, roadName: road.group.name }); continue; }
+            if (intersecting.length === 0 && !intersectsObstacle) {
+                log('no_intersection_skip', { roadIndex: index, roadName: road.group.name });
+                continue;
+            }
             for (const inter of intersecting) {
                 log('intersecting_road_detail', { roadIndex: index, intersectWith: inter.group.name, interDirection: inter.direction, interBounds: inter.bounds });
             }
@@ -485,17 +583,29 @@ export class TrackObjects{
                 ).applyMatrix4(road.group.matrix.clone().invert());
                 return { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z };
             };
-            for (const child of [...road.group.children]) {
-                if (!(child instanceof THREE.Mesh)) continue;
+            const roadMeshes = road.group.children.flatMap(child =>
+                child instanceof THREE.Mesh
+                    ? [child]
+                    : child.name === 'Edges'
+                        ? child.children.flatMap(edge =>
+                            edge instanceof THREE.Mesh
+                                ? [edge]
+                                : edge.children.filter((mesh): mesh is THREE.Mesh => mesh instanceof THREE.Mesh),
+                        )
+                        : [],
+            );
+            for (const child of roadMeshes) {
+                const parent = child.parent;
+                if (!parent) continue;
                 log('child_mesh', { roadIndex: index, childName: child.name, childType: child.geometry?.constructor?.name });
                 // Only crossing roads open curbs/markings. Later surfaces are trimmed against
                 // all earlier roads as well, eliminating coplanar overlapping asphalt.
                 const crossingRoads = intersecting.filter(other => child.name === 'road-surface'
                     ? this.roads.indexOf(other) < index : other.direction !== road.direction);
-                // Obstacles (vd: parking bay) luôn được dùng làm cut source vì chúng là
-                // vật thể tĩnh nằm cạnh/cắt ngang road — không thuộc logic direction !== .
+                // Chỉ curb đỏ-trắng của đường 4 làn bị cắt theo footprint của parking bay.
+                // Mặt asphalt và vạch làn vẫn liền mạch qua vị trí giao.
                 const obstacleCuts = this.roadObstacles
-                    .filter(obs => overlap(road.bounds, obs.bounds))
+                    .filter(obstacle => child.name === 'red-white-curb' && overlap(road.bounds, obstacle.bounds))
                     .map(localRect);
                 const cuts = [...crossingRoads.map(localRect), ...obstacleCuts];
                 log('cuts_result', { roadIndex: index, childName: child.name, isRoadSurface: child.name === 'road-surface', cutsCount: cuts.length, cutsDetail: cuts });
@@ -507,7 +617,7 @@ export class TrackObjects{
                 if (!cuts.some(cut => overlap(rect, cut))) continue;
                 if (child.geometry instanceof THREE.PlaneGeometry) {
                     // Omit arrows inside the junction so they do not prescribe a conflicting turn.
-                    road.group.remove(child);
+                    parent.remove(child);
                     child.geometry.dispose();
                     const materials = Array.isArray(child.material) ? child.material : [child.material];
                     for (const material of materials) {
@@ -526,9 +636,9 @@ export class TrackObjects{
                     mesh.position.set((piece.minX + piece.maxX) / 2, child.position.y, (piece.minZ + piece.maxZ) / 2);
                     mesh.castShadow = child.castShadow;
                     mesh.receiveShadow = child.receiveShadow;
-                    road.group.add(mesh);
+                    parent.add(mesh);
                 }
-                road.group.remove(child);
+                parent.remove(child);
                 child.geometry.dispose();
                 log('trim_complete', { roadIndex: index, childName: child.name });
             }

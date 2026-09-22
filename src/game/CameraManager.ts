@@ -1,5 +1,14 @@
 import * as THREE from 'three';
 import {Vehicle} from './Vehicle';
+import {notify} from '../ui/Notify';
+
+const DEV_CAMERA_STORAGE_KEY = 'hpo-dev-camera';
+
+type SavedDevCamera = {
+    position: [number, number, number];
+    yaw: number;
+    pitch: number;
+};
 
 export class CameraManager {
     mode = 0;
@@ -22,9 +31,11 @@ export class CameraManager {
 
         // Bind mouse event handlers for free camera
         if (this.developMode) {
+            this.restoreFreeCamera();
             document.addEventListener('mousedown', this.onMouseDown);
             document.addEventListener('mousemove', this.onMouseMove);
             document.addEventListener('mouseup', this.onMouseUp);
+            window.addEventListener('keydown', this.onKeyDown);
             document.addEventListener('contextmenu', (e) => e.preventDefault());
         }
     }
@@ -54,6 +65,49 @@ export class CameraManager {
             this.dragging = false;
         }
     };
+
+    private onKeyDown = (e: KeyboardEvent): void => {
+        if (e.code !== 'KeyK') return;
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+            return;
+        }
+
+        e.preventDefault();
+        if (e.shiftKey) {
+            localStorage.removeItem(DEV_CAMERA_STORAGE_KEY);
+            notify.show('Đã xoá vị trí camera đã lưu', {kind: 'info', durationMs: 1400});
+            return;
+        }
+
+        const saved: SavedDevCamera = {
+            position: [this.freePosition.x, this.freePosition.y, this.freePosition.z],
+            yaw: this.freeYaw,
+            pitch: this.freePitch,
+        };
+        localStorage.setItem(DEV_CAMERA_STORAGE_KEY, JSON.stringify(saved));
+        notify.show(
+            `Đã lưu camera: x ${saved.position[0].toFixed(2)} · y ${saved.position[1].toFixed(2)} · z ${saved.position[2].toFixed(2)}`,
+            {kind: 'success', durationMs: 2200}
+        );
+    };
+
+    private restoreFreeCamera(): void {
+        const raw = localStorage.getItem(DEV_CAMERA_STORAGE_KEY);
+        if (!raw) return;
+
+        try {
+            const saved = JSON.parse(raw) as Partial<SavedDevCamera>;
+            if (!saved.position) return;
+            const [x, y, z] = saved.position;
+            if (![x, y, z, saved.yaw, saved.pitch].every(Number.isFinite)) return;
+            this.freePosition.set(x, y, z);
+            this.freeYaw = saved.yaw!;
+            this.freePitch = saved.pitch!;
+        } catch {
+            localStorage.removeItem(DEV_CAMERA_STORAGE_KEY);
+        }
+    }
 
     next() {
         // Develop mode dùng free camera, không cycle theo preset.
@@ -176,6 +230,7 @@ export class CameraManager {
             document.removeEventListener('mousedown', this.onMouseDown);
             document.removeEventListener('mousemove', this.onMouseMove);
             document.removeEventListener('mouseup', this.onMouseUp);
+            window.removeEventListener('keydown', this.onKeyDown);
         }
     }
 }

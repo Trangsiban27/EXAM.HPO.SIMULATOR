@@ -3,6 +3,8 @@ import { ExerciseSign } from './ExerciseSign';
 import type { TrackObjects } from './TrackObjects';
 import { StarShape } from './StarShape';
 import { startPosition } from './startPosition';
+import { PERPENDICULAR_PARKING_BAY_B } from './PerpendicularParkingBayB';
+import { PERPENDICULAR_PARKING_C } from './PerpendicularParkingBayC';
 
 /** Positions and dimensions of the examination ground. */
 export function buildExamGround(objects: TrackObjects) {
@@ -353,4 +355,65 @@ export function buildExamGround(objects: TrackObjects) {
         vehicleClass: 'E',
     });
 
+    // CHUỒNG GHÉP XE VUÔNG GÓC HẠNG C — object thử nghiệm theo CAD.
+    // Local +X chạy dọc đường tiếp cận, local +Z đi vào chuồng; cửa chuồng tại (120, 80).
+    objects.addPerpendicularParkingBayC({
+        x: 0,
+        z:-63.56,
+        rotationY:-Math.PI / 2,
+        showDebug: true,
+    });
+    objects.addRoadStraight955({
+        x: 4.5,
+        z: -50,
+        widthM: PERPENDICULAR_PARKING_C.mainRoad.clearWidthM,
+        lengthM: 6,
+        rotationY:-Math.PI / 2,        
+        showDebug: true,
+    });
+    // Bản test thứ hai dùng chung object chuồng ghép xe vuông góc hạng C.
+    objects.addPerpendicularParkingBayC({
+        x: -22,
+        z: -74,
+        rotationY:-Math.PI / 2,       
+         showDebug: true,
+    });
+
+    // ROAD_STRAIGHT_9_55 — primitive tái sử dụng, cấu hình widthM/lengthM tại call site.
+    objects.addRoadStraight955({
+        x: -17.4,
+        z: -56,
+        widthM: PERPENDICULAR_PARKING_C.mainRoad.clearWidthM,
+        lengthM: 14.9,
+        rotationY:-Math.PI / 2,        
+        showDebug: true,
+    });
+
+    // CHUỒNG GHÉP XE VUÔNG GÓC HẠNG B — test độc lập theo CAD.
+    objects.addPerpendicularParkingBayB({
+        x: -29.2,
+        z: -63.56,
+        rotationY:-Math.PI / 2,         showDebug: true,
+    });
+    objects.addRoadStraight955({
+        x: -26.55,
+        z: -53,       
+        widthM: PERPENDICULAR_PARKING_BAY_B.mainRoad.clearWidthM,
+        lengthM: 8.5,
+        rotationY:-Math.PI / 2,        
+        showDebug: true,
+    });
+    objects.addPerpendicularParkingBayB({
+        x: -42.5,
+        z: -63.56,
+        rotationY:-Math.PI / 2,         showDebug: true,
+    });
+    objects.addRoadStraight955({
+        x: -26.55,
+        z: -53,       
+        widthM: PERPENDICULAR_PARKING_BAY_B.mainRoad.clearWidthM,
+        lengthM: 8.5,
+        rotationY:-Math.PI / 2,        
+        showDebug: true,
+    });
 }

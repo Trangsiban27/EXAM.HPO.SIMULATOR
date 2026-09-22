@@ -177,6 +177,7 @@ export class FourLaneBidirectionalRoad {
                 new THREE.BoxGeometry(curbWidth, curbHeight, segLen),
                 new THREE.MeshStandardMaterial({ color, roughness: 0.85 }),
             );
+            curb.name = 'red-white-curb';
             curb.position.set(
                 curbCenterX,
                 0.08 / 2 + curbHeight / 2 + 0.02,
