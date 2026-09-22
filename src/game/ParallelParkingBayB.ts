@@ -245,16 +245,18 @@ export class ParallelParkingBayB {
     /**
      * Vạch đỏ sát hạch (Spec §5, §6, §11, §12).
      * Gồm 3 thành phần con theo Spec §6 và §21:
-     *   - TopRedLine: đoạn thẳng song song trục X tại Z = +L/2
+     *   - TopRedLine: đoạn thẳng song song trục X tại Z = +L/2, từ X = offset đến X = D - R
      *   - FarEndRedLine: nối top và bottom gồm 2 cung tròn chuẩn R và đoạn thẳng đáy X = D
-     *   - BottomRedLine: đoạn thẳng song song trục X tại Z = -L/2
-     * Hard constraint: KHÔNG CÓ vạch nào ở open side (X=0).
+     *   - BottomRedLine: đoạn thẳng song song trục X tại Z = -L/2, từ X = offset đến X = D - R
+     * Hard constraint: KHÔNG CÓ vạch nào ở open side (X ∈ [0, offset]).
+     * Đoạn [0, offset] được cắt bỏ để không đè lên phần vạch/mép của đường chính.
      */
     private buildExamBoundary(): void {
         const sideSign = this.side === 'LEFT' ? -1 : 1;
         const L = this.lengthM;
         const D = this.depthM;
         const R = this.cornerRadiusM;
+        const offset = this.physicalEdgeOffsetM;
         const W = this.examBoundaryWidthM;
         const H = 0.008;
         const Y = 0.06 + H / 2; // Nằm ngay trên mặt đường asphalt (Y=0.06)
@@ -265,23 +267,25 @@ export class ParallelParkingBayB {
             side: THREE.DoubleSide,
         });
 
-        // 1. TopRedLine: thẳng từ X=0 đến X=D-R tại Z=+L/2
-        const straightLen = D - R;
+        // 1. TopRedLine: thẳng từ X=offset đến X=D-R tại Z=+L/2.
+        // Phần sát open side (X ∈ [0, offset]) được cắt bỏ để không đè lên vạch/phần của đường chính.
+        const straightLen = (D - R) - offset;
         const topRedLine = new THREE.Mesh(
             new THREE.BoxGeometry(straightLen, H, W),
             redMat
         );
-        topRedLine.position.set(sideSign * (straightLen / 2), Y, +L / 2);
+        topRedLine.position.set(sideSign * (offset + straightLen / 2), Y, +L / 2);
         topRedLine.name = 'TopRedLine';
         topRedLine.receiveShadow = true;
         this.examBoundaryGroup.add(topRedLine);
 
-        // 2. BottomRedLine: thẳng từ X=0 đến X=D-R tại Z=-L/2
+        // 2. BottomRedLine: thẳng từ X=offset đến X=D-R tại Z=-L/2.
+        // Phần sát open side (X ∈ [0, offset]) cũng được cắt bỏ.
         const bottomRedLine = new THREE.Mesh(
             new THREE.BoxGeometry(straightLen, H, W),
             redMat
         );
-        bottomRedLine.position.set(sideSign * (straightLen / 2), Y, -L / 2);
+        bottomRedLine.position.set(sideSign * (offset + straightLen / 2), Y, -L / 2);
         bottomRedLine.name = 'BottomRedLine';
         bottomRedLine.receiveShadow = true;
         this.examBoundaryGroup.add(bottomRedLine);
@@ -342,10 +346,11 @@ export class ParallelParkingBayB {
      * Dải mép vật lý / Curb viền phía ngoài.
      * Mặc định là dải viền xen kẽ đỏ-trắng (0xffffff và 0xd83b3b) như đường viền của Road.
      * Cửa vào phía road (X=0) hoàn toàn mở, không có curb (Spec §15).
+     * Phần curb sát open side (X ∈ [0, offset]) bị cắt bỏ để không đè lên mặt đường chính.
      * Gồm:
-     *   - TopCurb: các phân đoạn xen kẽ dọc trục X tại Z = +(L/2 + offset + W/2)
+     *   - TopCurb: các phân đoạn xen kẽ dọc trục X từ X=offset đến X=D-R, tại Z = +(L/2 + offset + W/2)
      *   - FarEndCurb: cung trên bo cong + cạnh xa dọc Z tại X = D+offset+W/2 + cung dưới bo cong
-     *   - BottomCurb: các phân đoạn xen kẽ dọc trục X tại Z = -(L/2 + offset + W/2)
+     *   - BottomCurb: các phân đoạn xen kẽ dọc trục X từ X=D-R về X=offset, tại Z = -(L/2 + offset + W/2)
      */
     private buildPhysicalCurb(): void {
         const sideSign = this.side === 'LEFT' ? -1 : 1;
@@ -380,8 +385,12 @@ export class ParallelParkingBayB {
 
         let runningIndex = 0;
 
-        // 1. TopCurb: chạy dọc X từ 0 đến D-R tại Z = +L/2 + offset + W/2
-        const straightLen = D - R;
+        // 1. TopCurb: chạy dọc X từ `offset` (cách mép road một khoảng `physicalEdgeOffsetM`)
+        // đến D-R tại Z = +L/2 + offset + W/2.
+        // Phần sát open side (từ X=0 đến X=offset) được cắt bỏ vì trùng với mặt đường chính.
+        const topStraightStart = offset;
+        const topStraightEnd = D - R;
+        const straightLen = topStraightEnd - topStraightStart;
         const topCurbZ = +L / 2 + offset + W / 2;
         const topCurbGroup = new THREE.Group();
         topCurbGroup.name = 'TopCurb';
@@ -395,7 +404,7 @@ export class ParallelParkingBayB {
                 new THREE.BoxGeometry(topSegLen, H, W),
                 getMat(runningIndex++)
             );
-            const xMid = (i + 0.5) * topSegLen;
+            const xMid = topStraightStart + (i + 0.5) * topSegLen;
             segMesh.position.set(sideSign * xMid, 0, 0);
             segMesh.name = `TopCurbSeg_${i}`;
             segMesh.castShadow = true;
@@ -487,7 +496,8 @@ export class ParallelParkingBayB {
 
         this.physicalEdgeGroup.add(farEndCurbGroup);
 
-        // 3. BottomCurb: chạy dọc X từ D-R về 0 tại Z = -L/2 - offset - W/2
+        // 3. BottomCurb: chạy dọc X từ D-R về `offset` tại Z = -L/2 - offset - W/2.
+        // Phần sát open side (từ X=0 đến X=offset) được cắt bỏ vì trùng với mặt đường chính.
         const bottomCurbZ = -L / 2 - offset - W / 2;
         const bottomCurbGroup = new THREE.Group();
         bottomCurbGroup.name = 'BottomCurb';
@@ -500,8 +510,8 @@ export class ParallelParkingBayB {
                 new THREE.BoxGeometry(botSegLen, H, W),
                 getMat(runningIndex++)
             );
-            // Đi từ góc bo D-R về phía cửa vào X=0
-            const xMid = straightLen - (i + 0.5) * botSegLen;
+            // Đi từ góc bo D-R về phía cửa vào, dừng lại tại X = offset (bỏ đoạn 0 → offset)
+            const xMid = topStraightEnd - (i + 0.5) * botSegLen;
             segMesh.position.set(sideSign * xMid, 0, 0);
             segMesh.name = `BottomCurbSeg_${i}`;
             segMesh.castShadow = true;

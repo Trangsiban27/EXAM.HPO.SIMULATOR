@@ -209,9 +209,9 @@ export function buildExamGround(objects: TrackObjects) {
     // Layout: L1 ↓ | WHITE_DASHED | L2 ↓ | YELLOW_SOLID | L3 ↑ | WHITE_DASHED | L4 ↑
     // ============================================================
     objects.addFourLaneBidirectionalRoad({
-        x: -12,
+        x: -20,
         z: -42,
-        lengthM: 60,
+        lengthM: 80,
         laneWidthM: 3.5,
         rotationY: Math.PI / 2,
     });
@@ -220,11 +220,11 @@ export function buildExamGround(objects: TrackObjects) {
     // Pole luôn lệch local -X (TrafficLight.ts: poleX = -width/2 - 0.55).
     // Đường dọc NS trải X ∈ [17, 25]; đường ngang EW trải Z ∈ [-46, -38].
     // Pole phải nằm ngoài lane; panel chính hướng về chiều xe đến.
-    for (const [x, z, rotation, stopLineZ, stopLineX, triggerStart, triggerStartX, triggerLength, markerId] of [
-        [30, -34, 0, 6, -7, 7, , 2, 'SOUTH'], // Pole ở X=16.45 (ngoài mép Tây đường dọc). Panel +Z → xe từ Nam.
-        [12, -50, Math.PI, 7, -7, 7, ,2, 'NORTH'], // Pole ở X=25.55 (ngoài mép Đông đường dọc). Panel -Z → xe từ Bắc.
-        [16, -38, Math.PI / 2, -4, -2, -10, -6, 2, 'WEST'],  // Pole ở Z=-37.45 (ngoài mép Bắc đường ngang). Panel +X → xe từ Tây.
-        [26, -42, -Math.PI / 2, -4, -2, -10, -6, 2, 'EAST'],  // Pole ở Z=-46.55 (ngoài mép Nam đường ngang). Panel -X → xe từ Đông.
+    for (const [x, z, rotation, stopLineZ, stopLineX, stopLineLength, triggerStart, triggerStartX, triggerLength, markerId] of [
+        [30, -34, 0, 6, -7, 4, 7, , 2, 'SOUTH'], // Pole ở X=16.45 (ngoài mép Tây đường dọc). Panel +Z → xe từ Nam.
+        [12, -50, Math.PI, 7, -7, 4, 7, ,2, 'NORTH'], // Pole ở X=25.55 (ngoài mép Đông đường dọc). Panel -Z → xe từ Bắc.
+        [16, -38, Math.PI / 2, -4, .5, 7, -12, -3, 7, 'WEST'],  // Pole ở Z=-37.45 (ngoài mép Bắc đường ngang). Panel +X → xe từ Tây.
+        [26, -42, -Math.PI / 2, -4, -2, 4, -10, -6, 2, 'EAST'],  // Pole ở Z=-46.55 (ngoài mép Nam đường ngang). Panel -X → xe từ Đông.
     ] as const) {
         objects.addTrafficLight(
             x, 
@@ -234,6 +234,7 @@ export function buildExamGround(objects: TrackObjects) {
             { 
                 stopLineZ,
                 stopLineX, 
+                stopLineLength,
                 triggerStart,
                 triggerStartX,
                 triggerLength, 
@@ -329,8 +330,22 @@ export function buildExamGround(objects: TrackObjects) {
     // Vị trí (130, 80) cách xa tất cả corridor bài thi để không ảnh hưởng scoring.
     // ============================================================
     objects.addParallelParkingBayB({
-        x: -12,
-        z: -35,
+        x: -7,
+        z: -35.4,
+        rotationY: -Math.PI / 2,
+        cornerRadiusM: 0.3,
+    });
+
+    objects.addParallelParkingBayB({
+        x: -27,
+        z: -35.4,
+        rotationY: -Math.PI / 2,
+        cornerRadiusM: 0.3,
+    });
+
+    objects.addParallelParkingBayB({
+        x: -47,
+        z: -35.4,
         rotationY: -Math.PI / 2,
         cornerRadiusM: 0.3,
     });

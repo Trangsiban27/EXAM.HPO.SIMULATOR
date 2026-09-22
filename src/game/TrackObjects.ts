@@ -20,7 +20,6 @@ type LaneCount = 1 | 2;
 type CenterLineType = 'white-dashed' | 'white-solid' | 'yellow-dashed' | 'yellow-solid';
 type RoadRect = { minX: number; maxX: number; minZ: number; maxZ: number };
 type RoadSegment = { group: THREE.Group; x: number; z: number; direction: RoadDirection; bounds: RoadRect };
-
 export class TrackObjects{
     readonly root=new THREE.Group();
     readonly penaltyZones:THREE.Box3[]=[];
@@ -59,6 +58,12 @@ export class TrackObjects{
     }
 
     private readonly roads: RoadSegment[] = [];
+    /**
+     * Các "vật cản" không phải road (vd: ParallelParkingBayB, cột đèn, vật thể trang trí…)
+     * dùng làm nguồn cut cho `roads[]` trong `connectRoadIntersections()`. Các vật cản
+     * KHÔNG bị iterate để trim các mesh của chính nó — chỉ mesh của `roads[]` bị trim.
+     */
+    private readonly roadObstacles: RoadSegment[] = [];
 
     getSurfaceHeight(x: number, z: number) {
         for (const bridge of this.bridges) {
@@ -397,13 +402,44 @@ export class TrackObjects{
      * Thêm một chuồng ghép xe ngang hạng B (B-class parallel parking bay) theo
      * spec/road/parallel_parking_bay_B_spec.md.
      *
-     * Bản visual-test: chỉ dựng mesh, KHÔNG tích hợp logic sensor và KHÔNG đăng ký
-     * vào `roads[]`. Khi cần chuồng nằm cạnh đường đã đăng ký để curb/markings của
-     * đường không bị trim nhầm, sẽ đăng ký tại đây (TODO).
+     * Bản visual-test: chỉ dựng mesh, KHÔNG tích hợp logic sensor.
+     *
+     * Đăng ký vào `roadObstacles[]` (mảng riêng, KHÔNG thuộc `roads[]`) để
+     * `connectRoadIntersections()` dùng làm nguồn "cut" cho curb/markings của
+     * các road đã đăng ký mà KHÔNG bị iterate để trim các mesh của chính bay.
+     *
+     * World bounds được tính bằng Box3 + applyMatrix4 từ local bbox của bay, robust
+     * với mọi rotation. Bbox bao trùm toàn bộ chuồng kể cả curb (depthM + offset + curbW).
      */
     addParallelParkingBayB(opts: ParallelParkingBayBOptions): ParallelParkingBayB {
         const bay = new ParallelParkingBayB(opts);
         this.root.add(bay.root);
+
+        // Tính world bounds từ local bbox (bao gồm curb mở rộng).
+        const sideSign = bay.side === 'LEFT' ? -1 : 1;
+        const localXMin = sideSign > 0 ? 0 : -(bay.depthM + bay.physicalEdgeOffsetM + bay.curbWidthM);
+        const localXMax = sideSign > 0 ? (bay.depthM + bay.physicalEdgeOffsetM + bay.curbWidthM) : 0;
+        const localZMin = -bay.lengthM / 2;
+        const localZMax = +bay.lengthM / 2;
+        bay.root.updateMatrix();
+        const localBox = new THREE.Box3(
+            new THREE.Vector3(localXMin, 0, localZMin),
+            new THREE.Vector3(localXMax, 0, localZMax),
+        );
+        const worldBox = localBox.applyMatrix4(bay.root.matrix);
+
+        this.roadObstacles.push({
+            group: bay.root,
+            x: opts.x,
+            z: opts.z,
+            direction: 'horizontal', // không quan trọng — obstacle không bị iterate để trim
+            bounds: {
+                minX: worldBox.min.x,
+                maxX: worldBox.max.x,
+                minZ: worldBox.min.z,
+                maxZ: worldBox.max.z,
+            },
+        });
         return bay;
     }
 
@@ -454,8 +490,14 @@ export class TrackObjects{
                 log('child_mesh', { roadIndex: index, childName: child.name, childType: child.geometry?.constructor?.name });
                 // Only crossing roads open curbs/markings. Later surfaces are trimmed against
                 // all earlier roads as well, eliminating coplanar overlapping asphalt.
-                const cuts = intersecting.filter(other => child.name === 'road-surface'
-                    ? this.roads.indexOf(other) < index : other.direction !== road.direction).map(localRect);
+                const crossingRoads = intersecting.filter(other => child.name === 'road-surface'
+                    ? this.roads.indexOf(other) < index : other.direction !== road.direction);
+                // Obstacles (vd: parking bay) luôn được dùng làm cut source vì chúng là
+                // vật thể tĩnh nằm cạnh/cắt ngang road — không thuộc logic direction !== .
+                const obstacleCuts = this.roadObstacles
+                    .filter(obs => overlap(road.bounds, obs.bounds))
+                    .map(localRect);
+                const cuts = [...crossingRoads.map(localRect), ...obstacleCuts];
                 log('cuts_result', { roadIndex: index, childName: child.name, isRoadSurface: child.name === 'road-surface', cutsCount: cuts.length, cutsDetail: cuts });
                 if (!cuts.length) { log('no_cuts_skip', { roadIndex: index, childName: child.name }); continue; }
                 child.geometry.computeBoundingBox();

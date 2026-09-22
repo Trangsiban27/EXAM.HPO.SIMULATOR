@@ -11,6 +11,8 @@ export interface TrafficLightOptions {
     triggerLength?: number;
     /** Local X of the yellow stop-line center. Default `-width + 1`. */
     stopLineX?: number;
+    /** Length of the yellow stop line along local X. Default `4`. */
+    stopLineLength?: number;
     /** Local X where the trigger zone starts. Default `stopLineX - stopLineHalfWidth`. */
     triggerStartX?: number;
     /** Length of the trigger window along local X. Default `2 * stopLineHalfWidth`. */
@@ -38,6 +40,8 @@ export class TrafficLight {
     private readonly triggerStartX: number;
     /** Length of the trigger window along local X. */
     private readonly triggerLengthX: number | any;
+    /** Length of the yellow stop line along local X (matches the box() drawn in the constructor). */
+    readonly stopLineLength: number;
     /** Optional callback fired the first time a vehicle enters the trigger zone. Receives the marker ID. */
     onMarkerTriggered?: (id: string) => void;
     // The signal is viewed from both camera modes, so its flat lenses must
@@ -91,9 +95,11 @@ export class TrafficLight {
         this.stopLineZ = stopLineZ;
         this.triggerStart = triggerStart;
         this.triggerLength = options.triggerLength ?? 2;
-        // Mirror the geometry of the yellow box(width/2 - .4, .012, .12, -width + 1, .09, stopLineZ, ...)
+        // Mirror the geometry of the yellow box(stopLineLength, .012, .12, -stopLineX, .09, stopLineZ, ...)
         // drawn below so the trigger zone in update() lines up with the visible line.
-        this.stopLineHalfWidth = (width - .8) / 2;
+        const stopLineLength = options.stopLineLength ?? 4;
+        this.stopLineLength = stopLineLength;
+        this.stopLineHalfWidth = stopLineLength / 2;
         this.stopLineX = options.stopLineX ?? -width + 1;
         // Default trigger window along local X spans the full stop line. Caller can pin
         // triggerStartX/triggerLengthX for non-rectangular footprints.
@@ -136,7 +142,7 @@ export class TrafficLight {
         // Yellow line position X honors stopLineX so callers can move the visible stop
         // line (and its trigger zone) off the default `-width + 1` for rotated signals.
         // Default (-width + 1) preserves the legacy visual.
-        box(width / 2 - .4, .012, .12, this.stopLineX, .09, stopLineZ,
+        box(stopLineLength, .012, .12, this.stopLineX, .09, stopLineZ,
             new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .8 }));
 
         // Debug marker: paint the trigger zone in semi-transparent red so the
@@ -144,7 +150,7 @@ export class TrafficLight {
         // trigger window (triggerLengthX); the Z extent matches triggerStart..triggerLength.
         // When either axis collapses to 0 we still draw a thin slab so the
         // marker stays visible (helps spot mis-configured sensors).
-        const triggerWidth = (width - .8) / 2;
+        const triggerWidth = this.stopLineHalfWidth;
         const triggerDepth = Math.max(this.triggerLength, .5);
         const triggerMarker = new THREE.Mesh(
             new THREE.BoxGeometry(triggerWidth, .04, triggerDepth),
