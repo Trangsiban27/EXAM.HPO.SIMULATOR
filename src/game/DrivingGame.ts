@@ -28,7 +28,8 @@ private lastCameraKey=false;
 private probe=new THREE.Vector3();
 private wheelTmp=new THREE.Vector3();
 constructor(private host:HTMLDivElement,private hud:Hud,vehicle?:Vehicle,private develop=new URLSearchParams(window.location.search).get('develop')==='true'){
-this.vehicle=vehicle??(new URLSearchParams(window.location.search).get('vehicle')==='2'?new Vehicle2():new Vehicle());
+const vehicleParam=new URLSearchParams(window.location.search).get('vehicle');
+this.vehicle=vehicle??(vehicleParam==='2'?new Vehicle2():vehicleParam==='1'?new Vehicle():new Vehicle3());
 this.cameras=new CameraManager(this.develop);
 this.cabin=new CabinView(this.host);
 this.scene.background=new THREE.Color(0x9ec4e4);

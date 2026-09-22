@@ -22,7 +22,16 @@ type RoadDirection = 'vertical' | 'horizontal';
 type LaneCount = 1 | 2;
 type CenterLineType = 'white-dashed' | 'white-solid' | 'yellow-dashed' | 'yellow-solid';
 type RoadRect = { minX: number; maxX: number; minZ: number; maxZ: number };
-type RoadSegment = { group: THREE.Group; x: number; z: number; direction: RoadDirection; bounds: RoadRect };
+export type RoadSegment = { group: THREE.Group; x: number; z: number; direction: RoadDirection; bounds: RoadRect };
+export type WindingCourseEntry = {
+    course: WindingCourse;
+    entryRoadIndex: number;
+    exitRoadIndex: number;
+    /** Length of the straight entry road segment that leads into the winding course. */
+    _entryLength: number;
+    /** Length of the straight exit road segment that follows the winding course. */
+    _exitLength: number;
+};
 export class TrackObjects{
     readonly root=new THREE.Group();
     readonly penaltyZones:THREE.Box3[]=[];
@@ -61,6 +70,8 @@ export class TrackObjects{
     }
 
     private readonly roads: RoadSegment[] = [];
+    /** Registry of all WindingCourse placements so the editor can find/rebuild/persist them. */
+    private readonly windingCourses: WindingCourseEntry[] = [];
     /**
      * Các "vật cản" không phải road (vd: ParallelParkingBayB, cột đèn, vật thể trang trí…)
      * dùng làm nguồn cut cho `roads[]` trong `connectRoadIntersections()`. Các vật cản
@@ -987,6 +998,7 @@ export class TrackObjects{
         validateWindingCourseSpec(spec);
         const winding = new WindingCourse(0, 0, { spec });
         const entryArrowZ = z + Math.min(7, entryLength / 2);
+        const entryRoadIndex = this.roads.length;
         this.addRoad(x, z + entryLength / 2, winding.width + .4, entryLength,
             'vertical', 'none', 'white-solid', 1);
         this.addRoadArrow(x, entryArrowZ, winding.width, 6, 'straight', this.root).rotateZ(Math.PI);
@@ -998,10 +1010,12 @@ export class TrackObjects{
             this.penaltyZones.push(zone.clone().applyMatrix4(winding.root.matrix));
         }
         const windingExit = winding.exit.clone().applyMatrix4(winding.root.matrix);
+        const exitRoadIndex = this.roads.length;
         this.addRoad(windingExit.x, windingExit.z + exitLength / 2, winding.width + .4, exitLength,
             'vertical', 'none', 'white-solid', 1);
         this.addRoadArrow(windingExit.x, windingExit.z + exitLength / 2, winding.width, exitLength,
             'straight', this.root).rotateZ(Math.PI);
+        this.windingCourses.push({ course: winding, entryRoadIndex, exitRoadIndex, _entryLength: entryLength, _exitLength: exitLength });
         // this.root.add(new ExerciseSign({
         //     title: 'QUA ĐƯỜNG\nVÒNG QUANH CO',
         //     subtitle: 'Đi chậm, giữ bánh xe trong vạch giới hạn',
@@ -1439,6 +1453,68 @@ export class TrackObjects{
         return mesh;
     }
 
+    // ─── editor support API ───────────────────────────────────────────────────
+    // The Road Editor (develop mode only) depends on the following accessors to
+    // look up, mutate, and persist road / winding-course placements.
+
+    /** Return the internal road registry. Used by the editor to find segments and rebind indices. */
+    getRoads(): RoadSegment[] {
+        return this.roads;
+    }
+
+    /** Return all registered winding-course entries (in insertion order). */
+    getWindingCourses(): WindingCourseEntry[] {
+        return this.windingCourses;
+    }
+
+    /** Walk up the parent chain of `obj` and return the WindingCourseEntry whose
+     *  `course.root` contains it, or null when `obj` does not belong to any course. */
+    findWindingCourseOf(obj: THREE.Object3D): WindingCourseEntry | null {
+        for (const wc of this.windingCourses) {
+            let cur: THREE.Object3D | null = obj;
+            while (cur) {
+                if (cur === wc.course.root) return wc;
+                cur = cur.parent;
+            }
+        }
+        return null;
+    }
+
+    /** Move the entry/exit road segments that belong to a winding course so they
+     *  follow the course's current world position. Used after the editor drags
+     *  the course to a new location. */
+    rebuildWindingCourseRoads(entry: WindingCourseEntry): void {
+        const { course } = entry;
+        const newX = course.root.position.x;
+        const newZ = course.root.position.z;
+        const eRoad = this.roads[entry.entryRoadIndex];
+        if (eRoad) {
+            eRoad.group.position.set(newX, 0, newZ);
+            eRoad.x = newX;
+            eRoad.z = newZ;
+        }
+        const exit = course.exit.clone().applyMatrix4(course.root.matrix);
+        const xRoad = this.roads[entry.exitRoadIndex];
+        if (xRoad) {
+            xRoad.group.position.set(exit.x, 0, exit.z);
+            xRoad.x = exit.x;
+            xRoad.z = exit.z;
+        }
+    }
+
+    /** Persist a road move to localStorage so a reload restores the layout. */
+    persistRoadEdit(roadIndex: number, newX: number, newZ: number): void {
+        try {
+            localStorage.setItem(`road-edit-${roadIndex}`, JSON.stringify({ x: newX, z: newZ }));
+        } catch { /* localStorage unavailable */ }
+    }
+
+    /** Persist a winding-course move to localStorage so a reload restores the layout. */
+    persistWCEdit(wcIndex: number, newX: number, newZ: number): void {
+        try {
+            localStorage.setItem(`wc-edit-${wcIndex}`, JSON.stringify({ x: newX, z: newZ }));
+        } catch { /* localStorage unavailable */ }
+    }
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {

@@ -18,7 +18,8 @@ async function start() {
         // Preload assets in parallel: vehicle GLB + stop sign GLB + railway track GLB.
         // All must finish BEFORE DrivingGame is constructed because its Track creates
         // StopSign and RailwayCrossingRoad instances synchronously and relies on preload() cache.
-        const wantsVehicle3 = new URLSearchParams(window.location.search).get('vehicle') === '3';
+        const vehicleParam = new URLSearchParams(window.location.search).get('vehicle');
+        const wantsVehicle3 = vehicleParam === '3' || vehicleParam === null;
         const [vehicle] = await Promise.all([
             wantsVehicle3 ? Vehicle3.create() : Promise.resolve(undefined),
             StopSign.preload(),

@@ -158,6 +158,10 @@ export interface ParallelParkingBayBOptions {
      * Kích thước chuồng sẽ được tự động set theo vehicleClass.
      */
     vehicleClass?: VehicleClass;
+    /** Override chiều dài nơi đỗ (m). Mặc định theo vehicleClass. */
+    parkingLengthM?: number;
+    /** Override chiều sâu nơi đỗ (m). Mặc định theo vehicleClass. */
+    parkingDepthM?: number;
 }
 
 export class ParallelParkingBayB {
@@ -171,7 +175,7 @@ export class ParallelParkingBayB {
     /** Vehicle class: 'B', 'D', or 'E' */
     readonly vehicleClass: VehicleClass;
     /** Vehicle spec for the current class */
-    readonly vehicleSpec: typeof VEHICLE_SPECS['B'];
+    readonly vehicleSpec: typeof VEHICLE_SPECS[VehicleClass];
 
     readonly lengthM: number;
     readonly depthM: number;
