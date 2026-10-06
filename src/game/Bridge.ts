@@ -1,15 +1,23 @@
 import * as THREE from 'three';
+import { EXAM_03_STOP_LINE_LOCAL_Z, EXAM_03_YELLOW_LINE_LOCAL_Z } from './exam/examCourseGeometry';
 
 /** A driveable hill-start bridge. Local +Z is the downhill direction; local -Z is the uphill approach. */
 export class Bridge {
     readonly root = new THREE.Group();
-    readonly width = 8;
-    readonly length = 26;
+    readonly width: number;
+    readonly length = 40;
     private readonly height = 1.5;
-    private readonly rampLength = 10;
+    private readonly rampLength = 15;
     private readonly probe = new THREE.Vector3();
 
-    constructor(x: number, z: number, direction: 'vertical' | 'horizontal' = 'vertical') {
+    constructor(
+        x: number,
+        z: number,
+        direction: 'vertical' | 'horizontal' = 'vertical',
+        widthM = 8,
+    ) {
+        if (widthM <= 0) throw new Error('Bridge: widthM must be > 0');
+        this.width = widthM;
         this.root.name = 'hill-start-bridge';
         this.root.position.set(x, 0, z);
         this.root.rotation.y = direction === 'horizontal' ? -Math.PI / 2 : 0;
@@ -62,30 +70,79 @@ export class Bridge {
             const elevation = this.elevation(mid);
             // box(this.width, elevation + .04, step, 0, (elevation + .04) / 2, mid, concrete);
             strip(0, this.width, from, to, -.01, .02, asphalt);
-            // Solid center line, interrupted by the stop marking on the uphill ramp.
-            // Center line gián đoạn tại vạch trắng (local Z = +5 → world X = 26).
-            if (Math.abs(mid - 5) > .3) strip(0, .15, from, to, .012, .008, white);
+            // Vạch giữa nét đứt từ chân dốc lên qua đỉnh tới chân dốc xuống.
+            const distanceFromEntry = this.length / 2 - mid;
+            if (distanceFromEntry % 2.5 < 1.5 && Math.abs(mid - 10) > .2) {
+                strip(0, .12, from, to, .012, .008, white);
+            }
             for (const side of [-1, 1]) {
-                strip(side * (this.width / 2 - .1), .2, from, to, .025, .05,
+                strip(side * (this.width / 2 - .08), .16, from, to, .025, .05,
                     Math.floor(i / 3) % 2 === 0 ? white : red);
                 strip(side * (this.width / 2 + .1), .08, from, to, .9, .08, metal);
             }
         }
-        for (let z = -12; z <= 12; z += 2) {
+        for (let z = -this.length / 2 + 1; z <= this.length / 2 - 1; z += 2) {
             for (const side of [-1, 1]) {
                 box(.1, .95, .1, side * (this.width / 2 + .1), .06 + this.elevation(z) + .475, z, metal);
             }
         }
 
-        // Yellow reference line — 4.0m uphill from the white stop line
-        // (vạch vàng nằm phía trước vạch trắng về hướng xe đang lên dốc).
-        // Vàng tại local Z ∈ [+9.6, +9.4] → world X = 21.5 (ramp lên TÂY).
-        strip(0, this.width - .4, 9.6, 9.4, .02, .012, yellow);
-
+        // Yellow reference line — 4.0m uphill from the highlighted stop line.
+        // Vàng cách chân dốc lên 6 m: chân dốc local Z = +20, vạch tâm tại Z = +14.
+        strip(0, this.width - .4, EXAM_03_YELLOW_LINE_LOCAL_Z + .075,
+            EXAM_03_YELLOW_LINE_LOCAL_Z - .075, .02, .012, yellow);
         // Stop line across the two lanes on the uphill approach.
         // Xe đi +X; local Z dương = world X nhỏ hơn = phía trước đỉnh dốc (xe đang lên dốc).
-        // Trắng tại local Z ∈ [+5.6, +5.4] → world X = 25.5 (ramp lên TÂY).
-        strip(0, this.width - .4, 5.6, 5.4, .02, .012, white);
+        // Vạch dừng màu trắng cách vạch vàng 4 m về phía đỉnh dốc.
+        strip(0, this.width - .4, EXAM_03_STOP_LINE_LOCAL_Z + .075,
+            EXAM_03_STOP_LINE_LOCAL_Z - .075, .02, .012, white);
+
+        // Mũi tên ở chính giữa đỉnh cầu (local Z = 0) và trên dốc xuống,
+        // cùng chiều xe chạy (local -Z).
+        // Chia nhỏ mặt phẳng để từng đỉnh bám vào độ cao cong của mặt cầu.
+        const arrowCanvas = document.createElement('canvas');
+        arrowCanvas.width = 256;
+        arrowCanvas.height = 512;
+        const arrowCtx = arrowCanvas.getContext('2d')!;
+        arrowCtx.fillStyle = '#ffffff';
+        arrowCtx.strokeStyle = '#ffffff';
+        arrowCtx.lineWidth = 28;
+        arrowCtx.lineCap = 'round';
+        arrowCtx.beginPath();
+        arrowCtx.moveTo(128, 420);
+        arrowCtx.lineTo(128, 140);
+        arrowCtx.stroke();
+        arrowCtx.beginPath();
+        arrowCtx.moveTo(128, 90);
+        arrowCtx.lineTo(73, 165);
+        arrowCtx.lineTo(108, 165);
+        arrowCtx.lineTo(108, 250);
+        arrowCtx.lineTo(148, 250);
+        arrowCtx.lineTo(148, 165);
+        arrowCtx.lineTo(183, 165);
+        arrowCtx.closePath();
+        arrowCtx.fill();
+        const arrowTexture = new THREE.CanvasTexture(arrowCanvas);
+        arrowTexture.colorSpace = THREE.SRGBColorSpace;
+        const arrowMaterial = new THREE.MeshBasicMaterial({
+            map: arrowTexture,
+            transparent: true,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+        });
+        for (const centerZ of [0, -12.5]) {
+            for (const laneX of [-this.width / 4, this.width / 4]) {
+                const geometry = new THREE.PlaneGeometry(Math.min(this.width * .16, 1.2), 3.4, 1, 34);
+                const positions = geometry.getAttribute('position');
+                for (let i = 0; i < positions.count; i++) {
+                    const localZ = centerZ - positions.getY(i);
+                    positions.setXYZ(i, laneX + positions.getX(i), .09 + this.elevation(localZ), localZ);
+                }
+                const arrow = new THREE.Mesh(geometry, arrowMaterial);
+                arrow.name = 'bridge-direction-arrow';
+                this.root.add(arrow);
+            }
+        }
 
         const canvas = document.createElement('canvas');
         canvas.width = 1024; canvas.height = 256;
@@ -99,9 +156,9 @@ export class Bridge {
         texture.colorSpace = THREE.SRGBColorSpace;
         const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.05),
             new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide }));
-        // Đặt sign ở local Z = +10 → world X = 21 (trước vạch trắng, trong ramp lên TÂY).
-        sign.position.set(this.width / 2 + 2.5, 2.6, 10);
+        // Đặt sign gần vạch vàng trên đoạn dốc lên.
+        sign.position.set(this.width / 2 + 2.5, 2.6, 14);
         this.root.add(sign);
-        box(.12, 2.6, .12, this.width / 2 + 2.5, 1.3, 10, metal);
+        box(.12, 2.6, .12, this.width / 2 + 2.5, 1.3, 14, metal);
     }
 }

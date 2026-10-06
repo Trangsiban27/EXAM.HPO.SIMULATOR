@@ -34,20 +34,21 @@ export class Vehicle3WheelAssembly {
     private readonly tireRadius: number;
     /**
      * Track width measured independently on each side because the source GLB is
-     * not centred on its own origin: the left wheel-arch sits ~1.0m to the left
-     * of root and the right arch only ~0.7m to the right. We expose those two
-     * offsets so the wheels can be dropped straight into the arches without
-     * nudging the whole body off-centre.
+     * not centred on its own origin. The visible tyre centres in root-local
+     * coordinates are X = -0.901 and +0.585 m.
      */
     private readonly leftX: number;
     private readonly rightX: number;
-    private readonly axleDistance: number;
+    private readonly frontAxleZ: number;
+    private readonly rearAxleZ: number;
 
-    constructor(tireRadius = .32, leftX = -1, rightX = .7, axleDistance = 2.5) {
+    constructor(tireRadius = .297, leftX = -.901, rightX = .585,
+        frontAxleZ = -1.1985, rearAxleZ = 1.359) {
         this.tireRadius = tireRadius;
         this.leftX = leftX;
         this.rightX = rightX;
-        this.axleDistance = axleDistance;
+        this.frontAxleZ = frontAxleZ;
+        this.rearAxleZ = rearAxleZ;
     }
 
     /** Track width = rightX − leftX (positive). Used by Ackermann steering. */
@@ -60,8 +61,8 @@ export class Vehicle3WheelAssembly {
      * Build 4 steering + rolling wheel pivots as children of `parent`.
      *
      * Forward (root-local) is -Z, matching the rest of `Vehicle`:
-     *   - Front wheels (FL, FR) go at z = -axleDistance / 2.
-     *   - Rear wheels  (RL, RR) go at z = +axleDistance / 2.
+     *   - Front/rear pivots follow the visible GLB wheel centres. The asset's
+     *     origin is offset from the midpoint between the two axles.
      *
      * Each side uses its own X offset (leftX / rightX) so the wheels end up
      * inside the actual wheel arches of the off-centre GLB bodywork. Pivot Y is
@@ -72,8 +73,7 @@ export class Vehicle3WheelAssembly {
             const isFront = id.startsWith('F');
             const isLeft = id.endsWith('L');
 
-            // Forward is -Z (root-local), so front wheels sit at -axleDistance/2.
-            const z = isFront ? -this.axleDistance / 2 : this.axleDistance / 2;
+            const z = isFront ? this.frontAxleZ : this.rearAxleZ;
             const x = isLeft ? this.leftX : this.rightX;
 
             // Pivot at Y = tireRadius so bottom of tyre touches road (Y=0).
@@ -109,9 +109,9 @@ export class Vehicle3WheelAssembly {
         const trim  = new THREE.MeshStandardMaterial({ color: 0x101820, roughness: .4 });
         const chrome = new THREE.MeshStandardMaterial({ color: 0xbac5cc, roughness: .24, metalness: .8 });
 
-        // Tyre: cylinder lying on its side (axis along X after rotateZ). Width
-        // 0.24m matches a 195-section tyre (about 60% of the GLB-side rim width).
-        const tyreWidth = .24;
+        // Tyre: cylinder lying on its side (axis along X after rotateZ). The
+        // Match the 0.20 m tyre width measured in the GLB.
+        const tyreWidth = .20;
         const tyreHalfWidth = tyreWidth / 2;
         const wheelGeo = new THREE.CylinderGeometry(this.tireRadius, this.tireRadius, tyreWidth, 32);
         wheelGeo.rotateZ(Math.PI / 2);

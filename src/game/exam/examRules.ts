@@ -81,9 +81,8 @@ export interface ExamStartRules {
     };
     /** Distance past the start line where the left signal must be off. HARD_CONSTRAINT §4.4. */
     signalOffDistanceM: number;
-    /** Per-event penalty points (spec §5, Lỗi 01–04). */
+    /** Per-event penalty points for the active start checks. */
     penalties: {
-        noSeatbelt: number;
         noLeftSignalAtStart: number;
         leftSignalNotOffAt5m: number;
         leftSignalTiming: number;
@@ -115,7 +114,6 @@ export const EXAM_01_START_RULES: ExamStartRules = {
     },
     signalOffDistanceM: 5,
     penalties: {
-        noSeatbelt: 5,
         noLeftSignalAtStart: 5,
         leftSignalNotOffAt5m: 5,
         leftSignalTiming: 5,

@@ -13,14 +13,14 @@ import {
  * Nomenclature follows spec/exam/exam_01_start.md §7:
  *
  *   PRE_START                     → xe đang chạy đến vạch, động cơ có thể đã nổ.
- *     ↓ thắt dây an toàn + vào wait zone
+ *     ↓ vào wait zone
  *   WAITING_FOR_START_COMMAND     → đã dừng trước vạch, đợi countdown mềm 5s.
  *     ↓ countdown xong
  *   WAITING_FOR_GO                → chờ tín hiệu xanh (tương đương WAITING_COMMAND cũ).
  *     ↓ đèn xanh + loa
  *   COMMAND_RECEIVED              → bật startLamp, bắt đầu timer 20s/30s.
  *     ↓ xe đi qua START_LINE
- *   START_LINE_CROSSED            → đã vượt vạch, kiểm tra dây an toàn + xi nhan trái.
+ *   START_LINE_CROSSED            → đã vượt vạch, kiểm tra xi nhan trái.
  *     ↓ đến mốc 5 m
  *   SIGNAL_OFF_ZONE               → kiểm tra xi nhan trái tắt tại 5 m.
  *     ↓ đã tắt
@@ -51,7 +51,6 @@ export interface Exam01Input {
     engineRunning: boolean;
     stalled: boolean;
     leftSignal: boolean;
-    seatBeltFastened: boolean;
     /** Phase of the start signal (driven by the vehicle-mounted TrafficLight). */
     startSignal: StartSignalPhase;
     /** Time delta in seconds since the previous update call. */
@@ -83,9 +82,8 @@ export interface StartExerciseOptions {
 /**
  * Bài sát hạch số 1 — Xuất phát (1A / EXAM_01_START).
  *
- * Seatbelt and left-signal-at-start are scored at khởi hành (first motion after
- * GO, or front bumper crossing START_LINE). Left signal must be off 5 m after the
- * line. Spec source: spec/exam/exam_01_start.md.
+ * Left signal is scored when the front bumper crosses START_LINE and must be off
+ * 5 m after the line. Spec source: spec/exam/exam_01_start.md.
  */
 export class StartExercise {
     readonly id = 'EXAM_01_START';
@@ -188,15 +186,17 @@ export class StartExercise {
         }
 
         if (this.state === 'PRE_START') {
+            if (crossedLine) return this.markEarlyCrossing(input, add, penalties);
             return this.updateApproach(input);
         }
 
         // Soft 5-second countdown: exam not officially started until it elapses.
         // BUGFIX (verified earlier): use input.position (root), not frontPosition.
-        // frontPosition.x = rootPosition.x + 2.2 m; the actual chassis sits inside the
+        // frontPosition is ahead of the chassis centre; the chassis sits inside the
         // wait zone before the front bumper reaches it, so the zone check must use
         // the chassis centre to ever fire.
         if (this.state === 'COUNTDOWN_5S') {
+            if (crossedLine) return this.markEarlyCrossing(input, add, penalties);
             const atLine = this.waitZone.containsPoint(input.position)
                 && input.position.x < this.lineX - .15;
             const stopped = Math.abs(input.speedKmh) < .6;
@@ -327,12 +327,27 @@ export class StartExercise {
     ): void {
         if (this.crossedChecked) return;
         this.crossedChecked = true;
-        if (!input.seatBeltFastened) {
-            add(this.rules.penalties.noSeatbelt, 'Không thắt dây an toàn khi xuất phát');
-        }
         if (!input.leftSignal) {
             add(this.rules.penalties.noLeftSignalAtStart, 'Không bật xi nhan trái khi xuất phát');
         }
+    }
+
+    private markEarlyCrossing(
+        input: Exam01Input,
+        add: (points: number, reason: string) => void,
+        penalties: PenaltyEvent[]
+    ): Exam01Result {
+        // A driver may leave before the countdown ends. Still score the crossing
+        // and advance the exam so later exercises do not remain locked behind PRE_START.
+        this.checkEngineAndSpeed(input, add);
+        this.markCrossed(input, add);
+        this.state = 'START_LINE_CROSSED';
+        return {
+            toast: 'Đã qua vạch xuất phát',
+            penalties,
+            completed: false,
+            disqualified: false,
+        };
     }
 
     private checkSignalOff(

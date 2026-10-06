@@ -2,7 +2,7 @@ import { Engine } from './Engine';
 import { Clutch } from './Clutch';
 import { Transmission } from './Transmission';
 import { VehiclePhysics } from './VehiclePhysics';
-import { manualConfig, type ManualConfig } from './config';
+import { clamp, manualConfig, type ManualConfig } from './config';
 import { gearFeedback, type GearWarning } from './GearFeedback';
 export class ManualCar {
     readonly engine: Engine;
@@ -25,8 +25,21 @@ export class ManualCar {
         for (let remaining = Math.min(dt, .1); remaining > 1e-8;) {
             const h = Math.min(remaining, 1 / 240); remaining -= h;
             this.clutch.update(h, pedal, fast);
-            const torque = this.clutch.torque(h, this.engine.rpm, this.gearbox.rpm(this.physics.speed), this.engine.running && this.gearbox.gear !== 0);
-            this.engine.update(h, gas, torque);
+            const uphill = this.engine.running && this.gearbox.gear === 1 && gas < .01
+                ? clamp((slope - .02) / .06, 0, 1) : 0;
+            const bite = clamp((this.config.biteStart - this.clutch.pedal)
+                / (this.config.biteStart - this.config.biteOptimal), 0, 1);
+            const fullReleaseFade = clamp((this.clutch.pedal - this.config.biteFull)
+                / (this.config.biteOptimal - this.config.biteFull), 0, 1);
+            // Give first gear enough idle pull on the bridge while the clutch
+            // is at the yellow bite point. Fade out at both ends of clutch travel.
+            const hillStartAssist = uphill * Math.pow(bite * fullReleaseFade, .25);
+            const torque = this.clutch.torque(h, this.engine.rpm, this.gearbox.rpm(this.physics.speed),
+                this.engine.running && this.gearbox.gear !== 0,
+                this.config.hillStartBiteEngagement * hillStartAssist);
+            const idleTorqueLimit = this.config.idleTorqueLimit
+                + (this.config.hillStartIdleTorqueLimit - this.config.idleTorqueLimit) * hillStartAssist;
+            this.engine.update(h, gas, torque, idleTorqueLimit);
             this.physics.update(h, this.gearbox.force(torque), brake, slope);
             if (this.engine.checkStall(h, this.clutch.engagement, this.gearbox.gear)) this.stalled = true;
             const kick = this.clutch.releaseSpeed > 6 && Math.abs(this.physics.speed) < 2 ? torque * .015 : 0;

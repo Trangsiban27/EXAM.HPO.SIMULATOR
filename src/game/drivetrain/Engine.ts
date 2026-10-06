@@ -6,9 +6,9 @@ export class Engine {
     constructor(private c: ManualConfig) {}
     start() { this.running = true; this.rpm = this.c.idleRPM; this.lowTime = 0; }
     stop() { this.running = false; this.rpm = 0; this.lowTime = 0; }
-    update(dt: number, throttle: number, load: number) {
+    update(dt: number, throttle: number, load: number, idleTorqueLimit = this.c.idleTorqueLimit) {
         if (!this.running) return;
-        const idle = clamp((this.c.idleRPM - this.rpm) * .4, 0, 65);
+        const idle = clamp((this.c.idleRPM - this.rpm) * .4, 0, idleTorqueLimit);
         const lowRPM = clamp(this.rpm / this.c.lugRPM, .15, 1);
         const highRPM = clamp((this.c.redlineRPM - this.rpm) / (this.c.redlineRPM - this.c.torqueFadeRPM), 0, 1);
         const torque = idle + throttle * this.c.peakTorque * lowRPM * highRPM - this.rpm * .004;

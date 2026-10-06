@@ -267,6 +267,21 @@ export class Vehicle {
         const hazardColor = this.signals.hazard ? onHazard : 0x6a1010;
         for (const m of this.signalMaterials.hazard) m.color.setHex(hazardColor);
     }
+    /** Direct movement used by the guided auto-drive mode; skips engine, gear and clutch simulation. */
+    updateAutomatic(dt: number, steeringInput: number, speed: number) {
+        this.updateAutomaticMotion(dt, steeringInput, speed);
+        for (const wheel of this.wheels) wheel.rotation.x -= this.speed / steeringConfig.wheelRadius * dt;
+    }
+    protected updateAutomaticMotion(dt: number, steeringInput: number, speed: number) {
+        this.steeringSystem.update(dt, 0, this.speed,
+            THREE.MathUtils.clamp(steeringInput, -1, 1) * steeringConfig.maxSteeringWheelAngle);
+        this.steering = this.steeringSystem.centerSteerAngle;
+        this.speed = Math.max(0, speed);
+        const pose = advanceVehicle(this.root.position.x, this.root.position.z, this.root.rotation.y, this.speed, this.steering, dt);
+        this.root.position.x = pose.x; this.root.position.z = pose.z; this.root.rotation.y = pose.heading;
+        for (const pivot of this.frontPivots) pivot.rotation.y = -(pivot.position.x < 0 ? this.steeringSystem.frontLeftAngle : this.steeringSystem.frontRightAngle);
+        this.updateSignalBlink();
+    }
     update(dt: number, input: InputManager) { 
             const left = input.isDown('KeyA') || input.isDown('ArrowLeft');
             const right = input.isDown('KeyD') || input.isDown('ArrowRight');

@@ -1,6 +1,7 @@
 import type { InputManager } from './InputManager';
 import { ManualCar } from './drivetrain/ManualCar';
 import { Pedals } from './drivetrain/Pedals';
+import { manualConfig } from './drivetrain/config';
 import { notify } from '../ui/Notify';
 
 /** Simplified manual drivetrain; clutch release is gradual for keyboard controls. */
@@ -29,10 +30,13 @@ export class ManualTransmission {
             return fresh;
         };
         const pedal = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
+        const clutchTarget = pedal ? 1 : input.getAnalog('clutch') ?? 0;
+        // Đạp côn là tức thời, nên phím Shift và Enter/số trong cùng khung hình vẫn hợp lệ.
+        const effectiveClutch = Math.max(this.clutch, clutchTarget);
 
         if (pressed('Enter')) {
             if (this.running) { this.car.engine.stop(); this.status = 'Máy tắt'; }
-            else if (this.gear === 0 && this.clutch >= 1 - 1e-6) {
+            else if (this.gear === 0 && effectiveClutch >= 1 - 1e-6) {
                 this.car.engine.start();
                 this.status = 'Máy đang chạy';
                 // notify.show(
@@ -40,11 +44,11 @@ export class ManualTransmission {
                 //     { kind: 'exam', persist: true }
                 // );
             }
-            else this.status = 'Về số N và đạp hết côn (thanh 0%), rồi nhấn Enter';
+            else this.status = 'Về số N và đạp hết côn (100%), rồi nhấn Enter';
         }
         for (const [code, gear] of [['KeyN', 0], ['KeyR', -1], ['Digit1', 1], ['Digit2', 2], ['Digit3', 3], ['Digit4', 4], ['Digit5', 5]] as const) {
             if (!pressed(code)) continue;
-            if (this.car.clutch.engagement > .001) { this.status = 'Đạp côn xuống mức 50% hoặc thấp hơn để sang số'; continue; }
+            if (effectiveClutch < manualConfig.biteStart) { this.status = 'Đạp côn ít nhất 50% để sang số'; continue; }
             if ((gear === -1 && speed > .1) || (gear > 0 && speed < -.1)) {
                 this.status = 'Dừng xe trước khi đổi chiều'; continue;
             }
@@ -56,7 +60,7 @@ export class ManualTransmission {
         this.pedals.update(dt, gas ? 1 : input.getAnalog('gas') ?? 0, brake ? 1 : 0);
         this.car.physics.speed = speed;
         this.car.update(dt, this.pedals.gas,
-            pedal ? 1 : input.getAnalog('clutch') ?? 0, input.isDown('KeyF'), this.pedals.brake, slope);
+            clutchTarget, input.isDown('KeyF'), this.pedals.brake, slope);
         if (this.car.stalled) this.status = 'Chết máy — về N, đạp hết côn rồi nhấn Enter';
         else if (this.car.clutch.riding) this.status = 'Đang rà côn';
         else if (this.status === 'Đang rà côn') this.status = this.running ? 'Máy đang chạy' : 'Máy tắt';

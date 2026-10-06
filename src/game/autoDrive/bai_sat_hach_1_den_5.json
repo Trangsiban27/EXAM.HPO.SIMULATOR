@@ -1,0 +1,60 @@
+{
+  "exams": [
+    {
+      "id": 1,
+      "name": "Bài sát hạch số 1: Xuất phát",
+      "steps": [
+        "Thí sinh thắt dây an toàn, dừng xe trước vạch xuất phát, chờ hiệu lệnh.",
+        "Khi có lệnh xuất phát (đèn xanh trên xe bật sáng, tiếng loa trên xe báo lệnh xuất phát), bật đèn xi nhan trái, lái xe xuất phát.",
+        "Tắt xi nhan trái ở khoảng cách 05 mét sau vạch xuất phát (đèn xanh trên xe tắt).",
+        "Lái xe đến bài sát hạch tiếp theo."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Bài sát hạch số 2: Dừng xe nhường đường cho người đi bộ",
+      "steps": [
+        "Dừng xe để khoảng cách từ hình chiếu thanh cản phía trước của xe xuống mặt đường đến vạch dừng (khoảng cách A) không quá 500 mm.",
+        "Lái xe đến bài sát hạch tiếp theo."
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Bài sát hạch số 3: Dừng và khởi hành xe ngang dốc",
+      "steps": [
+        "Dừng xe để khoảng cách từ hình chiếu thanh cản phía trước của xe xuống mặt đường đến vạch dừng (khoảng cách A) không quá 500 mm.",
+        "Khởi hành lên dốc nhẹ nhàng, không bị tụt dốc, bảo đảm thời gian quy định.",
+        "Lái xe đến bài sát hạch tiếp theo."
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Bài sát hạch số 4: Qua vệt bánh xe và đường vòng vuông góc",
+      "steps": [
+        "Lái xe để bánh xe trước và bánh xe sau bên lái phụ qua vùng giới hạn của hình vệt bánh xe.",
+        "Lái xe qua đường vòng vuông góc trong vùng giới hạn của hình sát hạch trong thời gian 02 phút.",
+        "Lái xe qua vạch kết thúc bài sát hạch và đến bài sát hạch tiếp theo."
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Bài sát hạch số 5: Qua ngã tư có tín hiệu điều khiển giao thông",
+      "steps": [
+        {
+          "title": "Chấp hành theo tín hiệu đèn điều khiển giao thông",
+          "details": [
+            "Đèn tín hiệu màu đỏ phải dừng lại.",
+            "Đèn tín hiệu màu xanh hoặc vàng được phép đi.",
+            "Đèn tín hiệu màu vàng nếu đã đi quá vạch dừng thì được phép đi; nếu chưa đến vạch dừng phải dừng lại."
+          ]
+        },
+        "Dừng xe để khoảng cách từ hình chiếu thanh cản phía trước của xe xuống mặt đường đến vạch dừng (khoảng cách A) không quá 500 mm.",
+        "Bật đèn xi nhan trái khi qua ngã tư rẽ trái.",
+        "Bật đèn xi nhan phải khi qua ngã tư rẽ phải.",
+        "Lái xe qua ngã tư trong thời gian quy định.",
+        "Lái xe qua ngã tư không vi phạm vạch kẻ đường.",
+        "Lái xe đến bài sát hạch tiếp theo."
+      ]
+    }
+  ]
+}

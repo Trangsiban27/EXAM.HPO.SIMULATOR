@@ -40,6 +40,8 @@ export type Exam04State =
     | 'DISQUALIFIED';
 
 export interface Exam04Input {
+    /** Chế độ chỉ báo lỗi: giữ bài 4 hoạt động sau lỗi đình chỉ. */
+    continueAfterDisqualification?: boolean;
     /** Tâm xe (root). */
     position: THREE.Vector3;
     /** Hình chiếu thanh cản phía trước — dùng cho vị trí xe. */
@@ -425,13 +427,13 @@ export class Exam04WheelTrack {
         if (isActiveExercise) {
             // E04-07: accident — DQ
             if (input.accident === true) {
-                this.state = 'DISQUALIFIED';
+                if (!input.continueAfterDisqualification) this.state = 'DISQUALIFIED';
                 this._disqualifyReason = 'Xử lý tình huống không hợp lý gây tai nạn';
                 return { toast, penalties, completed: false, disqualified: true, disqualifyReason: this._disqualifyReason };
             }
             // E04-01: wrong exam layout — DQ
             if (input.wrongLayout === true) {
-                this.state = 'DISQUALIFIED';
+                if (!input.continueAfterDisqualification) this.state = 'DISQUALIFIED';
                 this._disqualifyReason = 'Đi không đúng hình của hạng xe sát hạch';
                 return { toast, penalties, completed: false, disqualified: true, disqualifyReason: this._disqualifyReason };
             }
@@ -466,7 +468,7 @@ export class Exam04WheelTrack {
                     );
                 })()
             ) {
-                this.state = 'DISQUALIFIED';
+                if (!input.continueAfterDisqualification) this.state = 'DISQUALIFIED';
                 this._disqualifyReason = 'Lái xe lên vỉa hè';
                 return { toast, penalties, completed: false, disqualified: true, disqualifyReason: this._disqualifyReason };
             }

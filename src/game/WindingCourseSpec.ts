@@ -5,24 +5,30 @@ import type { ExamVehicleClass } from './exam/examRules';
  *
  * Nguồn: `spec/road/s_curve_road_cad_spec.md` §3, §4, §5, §6, §28.
  *
- * Các giá trị `outerRadiusM`, `innerRadiusM`, `clearRoadWidthM`,
- * `constructionEnvelopeWidthM`, `centerDistanceM` đọc trực tiếp từ CAD,
- * phải thỏa mãn:
+ * `outerRadiusM` và `innerRadiusM` là constraints đọc từ bản vẽ. Các giá trị
+ * còn lại được kiểm tra hoặc dẫn xuất từ hai bán kính này:
+ *
+ *   Bqc = 2.2b
+ *   Rn = Rqv + 1.2
+ *   Bqc = Rn - Rtr
+ *   Sqc = Rn + Rtr
+ *
+ * và phải thỏa mãn:
  *
  *   Bqc == Rn - Rtr
  *   Sqc == Rn + Rtr
  *
  * với sai số 0.005 m (spec §13).
  *
- * CAD ghi "HẠNG F" nhưng thông số kỹ thuật tương ứng với hạng E
- * (TRANSINCO K52 E2, a = 10.5 m, b = 2.5 m — spec §14.4) — map E → bộ
- * CAD_F để giữ geometry chính xác theo bản vẽ.
+ * Bảng dưới giữ thêm `a`, `b`, `Rqv` để kiểm tra công thức CAD và metadata.
  */
 export interface WindingCourseSpec {
     /** Nhãn CAD (debug metadata). */
     readonly cadLabel: string;
     /** Bán kính vòng ngoài Rn (m). */
     readonly outerRadiusM: number;
+    /** Bán kính quay vòng nhỏ nhất Rqv (m). */
+    readonly rqvM: number;
     /** Bán kính vòng trong Rtr (m). */
     readonly innerRadiusM: number;
     /** Chiều rộng phần đường driveable Bqc = Rn - Rtr (m). */
@@ -35,60 +41,55 @@ export interface WindingCourseSpec {
     readonly a: number;
     /** Chiều rộng toàn bộ xe (m). */
     readonly b: number;
+    /**
+     * Kích thước dọc tổng trên bản vẽ (từ mép trong đoạn thẳng trên đến mép
+     * ngoài đoạn thẳng dưới, cùng lề). H = dz + Sqc. Dùng để suy ra góc nghiêng
+     * đường nối tâm: cosφ = (H - Sqc) / Sqc. Bỏ trống → dùng tỉ lệ đo từ hạng B.
+     */
+    readonly verticalSpanM?: number;
 }
 
 /**
  * Bảng thông số WindingCourse theo từng hạng xe.
  * Mapping theo spec/road/s_curve_road_cad_spec.md §28.
  *
- * Hạng E dùng bộ thông số CAD_F vì spec §6.2 nêu rõ: trong CAD ghi
- * "HẠNG F" nhưng bộ số Rn=11.20 / Rtr=5.70 / Bqc=5.50 / Sqc=16.90
- * tương ứng với hạng E (TRANSINCO K52 E2). Tên `cadLabel` giữ nguyên
- * để debug metadata khớp CAD gốc.
+ * Hạng D: Rn=8.60 / Rtr=4.02 / Bqc=4.58 / Sqc=12.62.
+ * Hạng E: Rn=11.20 / Rtr=5.70 / Bqc=5.50 / Sqc=16.90.
  */
+const CONSTRUCTION_MARGIN_M = 0.40;
+
 export const WINDING_COURSE_SPEC: Record<
     'B' | 'C' | 'D' | 'E',
     WindingCourseSpec
 > = {
-    B: {
-        cadLabel: 'HẠNG B',
-        outerRadiusM: 6.300,
-        innerRadiusM: 2.560,
-        clearRoadWidthM: 3.740,
-        constructionEnvelopeWidthM: 4.140,
-        centerDistanceM: 8.860,
-        a: 4.410, b: 1.700,
-    },
-    C: {
-        cadLabel: 'HẠNG C',
-        outerRadiusM: 9.500,
-        innerRadiusM: 4.572,
-        clearRoadWidthM: 4.928,
-        constructionEnvelopeWidthM: 5.328,
-        centerDistanceM: 14.072,
-        a: 7.630, b: 2.240,
-    },
-    D: {
-        cadLabel: 'HẠNG D',
-        outerRadiusM: 11.20,
-        innerRadiusM: 5.70,
-        clearRoadWidthM: 5.5,
-        constructionEnvelopeWidthM: 5.9,
-        centerDistanceM: 16.9,
-        a: 7.060, b: 2.080,
-    },
-    E: {
-        // CAD label gốc là "HẠNG F" (xem spec/road/s_curve_road_cad_spec.md §6.2),
-        // bộ thông số tương ứng với hạng E (TRANSINCO K52 E2).
-        cadLabel: 'HẠNG F (E)',
-        outerRadiusM: 8.60,
-        innerRadiusM: 4.02,
-        clearRoadWidthM: 4.58,
-        constructionEnvelopeWidthM: 4.98,
-        centerDistanceM: 12.62,
-        a: 10.500, b: 2.500,
-    },
+    B: createWindingCourseSpec('HẠNG B', 4.410, 1.700, 5.100, 6.300, 2.560),
+    C: createWindingCourseSpec('HẠNG C', 7.630, 2.240, 8.300, 9.500, 4.572),
+    D: createWindingCourseSpec('HẠNG D', 7.060, 2.080, 7.400, 8.600, 4.024),
+    E: createWindingCourseSpec('HẠNG E', 10.500, 2.500, 10.000, 11.200, 5.700),
 };
+
+function createWindingCourseSpec(
+    cadLabel: string,
+    a: number,
+    b: number,
+    rqvM: number,
+    outerRadiusM: number,
+    innerRadiusM: number,
+): WindingCourseSpec {
+    const clearRoadWidthM = outerRadiusM - innerRadiusM;
+
+    return {
+        cadLabel,
+        outerRadiusM,
+        rqvM,
+        innerRadiusM,
+        clearRoadWidthM,
+        constructionEnvelopeWidthM: clearRoadWidthM + CONSTRUCTION_MARGIN_M,
+        centerDistanceM: outerRadiusM + innerRadiusM,
+        a,
+        b,
+    };
+}
 
 /**
  * Lấy spec WindingCourse cho một hạng xe.
@@ -109,6 +110,18 @@ export function getWindingCourseSpec(vehicleClass: ExamVehicleClass): WindingCou
  * với sai số 0.005 m.
  */
 export function validateWindingCourseSpec(spec: WindingCourseSpec, eps = 0.005): void {
+    const clearRoadWidth = 2.2 * spec.b;
+    if (Math.abs(clearRoadWidth - spec.clearRoadWidthM) > eps) {
+        throw new Error(
+            `WindingCourse spec "${spec.cadLabel}": Bqc (${spec.clearRoadWidthM}) != 2.2b (${clearRoadWidth})`
+        );
+    }
+    const outerRadius = spec.rqvM + 1.2;
+    if (Math.abs(outerRadius - spec.outerRadiusM) > eps) {
+        throw new Error(
+            `WindingCourse spec "${spec.cadLabel}": Rn (${spec.outerRadiusM}) != Rqv + 1.2 (${outerRadius})`
+        );
+    }
     const width = spec.outerRadiusM - spec.innerRadiusM;
     if (Math.abs(width - spec.clearRoadWidthM) > eps) {
         throw new Error(

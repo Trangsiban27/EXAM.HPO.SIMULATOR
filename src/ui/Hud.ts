@@ -5,11 +5,12 @@ import './pedestrian-hud.css';
 import { EngineAudio } from './EngineAudio';
 import { notify, type NotifyKind, type NotifyOptions } from './Notify';
 import { pedestrianHud } from './PedestrianHud';
-import { hillHud } from './HillHud';
 import type { Exam02Pedestrian } from '../game/exercises/Exam02Pedestrian';
-import type { Exam03Hill } from '../game/exercises/Exam03Hill';
+import type { ExamScoringMode } from '../game/exam/examScoringMode';
+import type { AutoDriveLesson } from '../game/autoDrive/autoDriveLessons';
+import './auto-drive.css';
 
-type Bindings = { onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void };
+type Bindings = { onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void; onAutoDriveToggle: () => void; onWaypointRecordingStart: () => void; onWaypointRecordingFinish: () => string };
 
 export class Hud {
     private audio: EngineAudio;
@@ -19,6 +20,7 @@ export class Hud {
     private status = '';
     private finishedShown = false;
     private clutchDragging = false;
+    private autoLessonContinue?: () => void;
     private signalState = { left: false, right: false, hazard: false };
     private elements = new Map<string, HTMLElement>();
     constructor(private host: HTMLDivElement, private options: { develop?: boolean } = {}) {
@@ -32,12 +34,12 @@ export class Hud {
                 <section class="pill"><strong id="speed">0</strong><small class="blue">KM/H</small><i></i><span class="amber">ϟ</span><b class="amber" id="rpm">0</b><small class="amber">RPM</small><i></i><button id="engine" data-key="Enter" class="engine" aria-label="Bật hoặc tắt động cơ">ENGINE</button></section>
             </header>
             <details class="settings"><summary>⚙ &nbsp; CÀI ĐẶT & GÓC NHÌN</summary><div class="settings-body">
-                <button id="cameraBtn">Đổi camera</button><button id="restartBtn">Thi lại</button>
+                <button id="cameraBtn">Đổi camera</button><button id="restartBtn">Thi lại</button><button id="autoDriveBtn" aria-pressed="false">Bật tự chạy</button>
                 <p>Enter: bật/tắt máy<br>Shift: đạp côn · F: nhả nhanh · N/R/1–5: số<br>W/↑: ga · S/↓: phanh<br>A/D: lái · Space: thắng · C: camera${options.develop ? '<br>Develop: chuột phải kéo nhìn · WASD di chuyển · Q/E lên xuống · Shift nhanh · P probe toạ độ · K lưu camera · Shift+K xoá camera đã lưu' : ''}</p>
             </div></details>
             <div class="cockpit">
                 <div class="clutch-column"><button id="quickCamera" class="camera-toggle" aria-label="Đổi camera">▣ <span id="camera">1</span></button>
-                    <div class="pedal clutch"><b>CÔN</b><span class="clutch-scale"><input class="analog-clutch" type="range" min="0" max="1" step="0.01" value="1" aria-label="Mức nhả côn" aria-describedby="clutchHelp" data-analog="clutch"></span><small id="clutchHelp">Giữ <kbd>Shift</kbd> để đạp</small></div>
+                    <div class="pedal clutch"><b>CÔN</b><span class="clutch-scale"><input class="analog-clutch" type="range" min="0" max="1" step="0.01" value="0" aria-label="Mức đạp côn" aria-describedby="clutchHelp" data-analog="clutch"></span><small id="clutchHelp">Giữ <kbd>Shift</kbd> để đạp</small></div>
                 </div>
                 <div class="signal-cluster" role="group" aria-label="Xi nhan và đèn cảnh báo nguy hiểm">
                     <div class="signal-readout" aria-hidden="true">
@@ -55,8 +57,34 @@ export class Hud {
                 <div class="wheel-control"><div id="wheel" class="steering-wheel" role="slider" tabindex="0" aria-label="Vô lăng — kéo để lái, phím trái phải để điều chỉnh" aria-valuemin="-540" aria-valuemax="540" aria-valuenow="0"><svg id="wheelFace" viewBox="0 0 240 240" aria-hidden="true"><circle cx="120" cy="120" r="99" fill="none" stroke="#111820" stroke-width="27"/><circle cx="120" cy="120" r="99" fill="none" stroke="#87909c" stroke-width="2"/><path d="M29 95 L99 107 L105 133 L39 132 M211 95 L141 107 L135 133 L201 132 M107 137 L103 214 L137 214 L133 137" fill="#47515f" stroke="#a2aab6" stroke-width="2"/><circle cx="120" cy="120" r="34" fill="#202b38" stroke="#697786" stroke-width="2"/><path d="M112 120h16" stroke="#a7bccd" stroke-width="3"/><path d="M120 12v18" stroke="#edc864" stroke-width="6"/></svg></div><small id="steering">0°</small></div>
                 <div class="drive-column"><details class="gear-selector"><summary><span id="gear">N</span> ⌃</summary><div class="gear-options">${[['KeyR','R'],['KeyN','N'],...Array.from({length:5},(_,i)=>['Digit'+(i+1),String(i+1)])].map(([code,label])=>`<button data-key="${code}" aria-label="Chọn số ${label}">${label}</button>`).join('')}<small>Giữ côn để sang số</small></div></details>
                     <label class="fine-gas">Chỉnh mức ga <input type="range" min="0" max="1" step="0.01" value="0" data-analog="gas" aria-label="Mức ga"></label><div class="pedals"><button data-key="ArrowDown" class="pedal brake" aria-label="Giữ để phanh"><b>PHANH</b><span class="pedal-meter"><span id="brakeFill"></span></span><small id="brakeValue">0%</small><kbd>S / ↓</kbd></button><button data-key="ArrowUp" class="pedal gas" aria-label="Giữ để đạp ga"><b>⌃ GA</b><span class="pedal-meter gas-meter"><span id="gasFill"></span></span><small id="gasValue">Nhả ga</small><kbd>W / ↑</kbd></button></div>
+            </div>
+            </div>
+            <section id="autoLesson" class="auto-quiz" role="dialog" aria-modal="true" aria-labelledby="autoLessonTitle" hidden>
+                <div class="auto-quiz-card auto-lesson-card">
+                    <div class="auto-quiz-eyebrow">HƯỚNG DẪN BÀI SÁT HẠCH</div>
+                    <h2 id="autoLessonTitle"></h2>
+                    <ol id="autoLessonSteps" class="auto-lesson-steps"></ol>
+                    <button id="autoLessonContinue" class="auto-quiz-choice auto-lesson-continue" type="button">Đã đọc, tiếp tục</button>
+                    <button id="autoLessonStop" class="auto-quiz-stop" type="button">Dừng xe tự chạy</button>
                 </div>
-            </div>`;
+            </section>
+            <section id="waypointPrompt" class="auto-quiz" role="dialog" aria-modal="true" aria-labelledby="waypointTitle" hidden>
+                <div class="auto-quiz-card waypoint-card">
+                    <div class="auto-quiz-eyebrow">GHI TUYẾN WAYPOINT</div>
+                    <h2 id="waypointTitle">Xe đã dừng ở cuối cầu</h2>
+                    <p id="waypointInstructions">Bật máy (Enter), vào số 1 hoặc R, giữ Shift để đạp côn; dùng W/↑ để ga, A/D để lái và S/↓ để phanh. Khi đỗ đúng vị trí, lưu tuyến.</p>
+                    <textarea id="waypointRouteOutput" aria-label="Danh sách waypoint đã ghi" readonly hidden></textarea>
+                    <div class="waypoint-actions">
+                        <button id="waypointRecordStart" class="auto-quiz-choice" type="button">Bắt đầu ghi tuyến</button>
+                        <button id="waypointCopy" class="auto-quiz-choice" type="button" hidden>Sao chép waypoint</button>
+                        <button id="waypointDone" class="auto-quiz-stop" type="button" hidden>Đóng</button>
+                    </div>
+                </div>
+            </section>
+            <aside id="waypointRecordingBadge" class="waypoint-recording-badge" hidden>
+                <span>ĐANG GHI WAYPOINT · <b id="waypointCount">0</b></span>
+                <button id="waypointRecordFinish" type="button">Lưu tuyến</button>
+            </aside>`;
         this.host.querySelectorAll<HTMLElement>('[id]').forEach(el => this.elements.set(el.id, el));
     }
     private el(id: string) { return this.elements.get(id)!; }
@@ -97,7 +125,7 @@ export class Hud {
         wheel.addEventListener('blur', releaseWheel);
         window.addEventListener('blur', releaseWheel);
         this.host.querySelectorAll<HTMLInputElement>('[data-analog]').forEach(el => {
-            el.addEventListener('input', () => b.onAnalog(el.dataset.analog!, el.dataset.analog === 'clutch' ? 1 - Number(el.value) : Number(el.value)));
+            el.addEventListener('input', () => b.onAnalog(el.dataset.analog!, Number(el.value)));
             if (el.dataset.analog === 'clutch') {
                 const release = () => {
                     this.clutchDragging = false;
@@ -115,9 +143,31 @@ export class Hud {
                 el.addEventListener('blur', release);
                 window.addEventListener('blur', release);
             }
-            window.addEventListener('blur', () => { el.value = el.dataset.analog === 'clutch' ? '1' : '0'; b.onAnalog(el.dataset.analog!, 0); });
+            window.addEventListener('blur', () => { el.value = '0'; b.onAnalog(el.dataset.analog!, 0); });
         });
         this.el('restartBtn').addEventListener('click', b.onRestart);
+        this.el('autoDriveBtn').addEventListener('click', b.onAutoDriveToggle);
+        this.el('autoLessonContinue').addEventListener('click', () => this.autoLessonContinue?.());
+        this.el('autoLessonStop').addEventListener('click', b.onAutoDriveToggle);
+        this.el('waypointRecordStart').addEventListener('click', () => {
+            b.onWaypointRecordingStart();
+            this.host.classList.add('waypoint-recording-active');
+            this.el('waypointPrompt').setAttribute('hidden', '');
+            this.el('waypointRecordingBadge').removeAttribute('hidden');
+        });
+        this.el('waypointRecordFinish').addEventListener('click', () => {
+            this.showWaypointRecordingResult(b.onWaypointRecordingFinish());
+        });
+        this.el('waypointCopy').addEventListener('click', () => {
+            const output = this.el('waypointRouteOutput') as HTMLTextAreaElement;
+            output.focus();
+            output.select();
+            void navigator.clipboard?.writeText(output.value).then(
+                () => this.flash('Đã sao chép waypoint', 'success'),
+                () => this.flash('Đã chọn waypoint — nhấn Ctrl+C để sao chép', 'info'),
+            );
+        });
+        this.el('waypointDone').addEventListener('click', () => this.el('waypointPrompt').setAttribute('hidden', ''));
         this.el('cameraBtn').addEventListener('click', b.onCamera);
         this.el('quickCamera').addEventListener('click', b.onCamera);
         this.host.querySelectorAll<HTMLButtonElement>('[data-key]').forEach(btn => {
@@ -203,7 +253,82 @@ export class Hud {
             applySeatBelt(this.el('seatBelt').getAttribute('aria-pressed') !== 'true');
         });
     }
-    update(t: GameTelemetry, finished: boolean) {
+
+    setAutoDriveMode(enabled: boolean) {
+        const button = this.el('autoDriveBtn') as HTMLButtonElement;
+        button.textContent = enabled ? 'Tắt tự chạy' : 'Bật tự chạy';
+        button.setAttribute('aria-pressed', String(enabled));
+        button.classList.toggle('active', enabled);
+        this.host.classList.toggle('auto-drive-active', enabled);
+        if (!enabled) {
+            this.host.classList.remove('waypoint-recording-active');
+            this.showAutoDriveLesson(null, () => {});
+            this.el('waypointPrompt').setAttribute('hidden', '');
+            this.el('waypointRecordingBadge').setAttribute('hidden', '');
+        }
+    }
+
+    showWaypointStopPrompt(_kind: 'bridge' = 'bridge'): void {
+        this.el('autoLesson').setAttribute('hidden', '');
+        this.el('waypointTitle').textContent = 'Xe đã dừng ở cuối cầu';
+        this.el('waypointInstructions').textContent = 'Bấm “Bắt đầu ghi tuyến”, tự lái liên tục từ cuối cầu qua bài 4 đến gần bài 5 rồi bấm “Lưu tuyến”. Vị trí và hướng xe được ghi mỗi 0,4 m. Điều khiển bằng Enter, số 1/R, Shift, W/↑, A/D và S/↓.';
+        (this.el('waypointRouteOutput') as HTMLTextAreaElement).value = '';
+        this.el('waypointRouteOutput').setAttribute('hidden', '');
+        this.el('waypointRecordStart').removeAttribute('hidden');
+        this.el('waypointCopy').setAttribute('hidden', '');
+        this.el('waypointDone').setAttribute('hidden', '');
+        this.el('waypointPrompt').removeAttribute('hidden');
+    }
+
+    setWaypointRecordingCount(count: number): void {
+        this.el('waypointCount').textContent = String(count);
+    }
+
+    private showWaypointRecordingResult(route: string): void {
+        this.host.classList.remove('waypoint-recording-active');
+        this.el('waypointRecordingBadge').setAttribute('hidden', '');
+        this.el('waypointInstructions').textContent = 'Đã ghi một tuyến liên tục. Sao chép đoạn mã bên dưới và thêm vào autoDriveRoutes.ts để xe tự chạy theo tuyến mới.';
+        const output = this.el('waypointRouteOutput') as HTMLTextAreaElement;
+        output.value = route;
+        output.removeAttribute('hidden');
+        this.el('waypointRecordStart').setAttribute('hidden', '');
+        this.el('waypointCopy').removeAttribute('hidden');
+        this.el('waypointDone').removeAttribute('hidden');
+        this.el('waypointPrompt').removeAttribute('hidden');
+    }
+
+    showAutoDriveLesson(lesson: AutoDriveLesson | null, onContinue: () => void) {
+        const panel = this.el('autoLesson');
+        this.autoLessonContinue = lesson ? onContinue : undefined;
+        panel.toggleAttribute('hidden', !lesson);
+        if (!lesson) return;
+
+        this.el('autoLessonTitle').textContent = lesson.name;
+        const steps = this.el('autoLessonSteps');
+        steps.replaceChildren();
+        for (const step of lesson.steps) {
+            const item = document.createElement('li');
+            if (typeof step === 'string') {
+                item.textContent = step;
+            } else {
+                const title = document.createElement('strong');
+                title.textContent = step.title;
+                const details = document.createElement('ul');
+                for (const detail of step.details) {
+                    const detailItem = document.createElement('li');
+                    detailItem.textContent = detail;
+                    details.append(detailItem);
+                }
+                item.append(title, details);
+            }
+            steps.append(item);
+        }
+        const continueButton = this.el('autoLessonContinue') as HTMLButtonElement;
+        continueButton.textContent = lesson.id === 5 ? 'Hoàn thành' : 'Đã đọc, tiếp tục';
+        continueButton.focus();
+    }
+
+    update(t: GameTelemetry, finished: boolean, scoringMode: ExamScoringMode = 'normal') {
         this.audio.update(t.rpm);
         this.el('gasFill').style.height = (t.gasPedal * 100) + '%';
         this.el('brakeFill').style.height = (t.brakePedal * 100) + '%';
@@ -224,7 +349,7 @@ export class Hud {
         const examName = t.currentExercise.split(' · ')[0];
         if (examName && examName !== this.lastExercise) {
             this.lastExercise = examName;
-            if (examName !== 'Chuẩn bị') this.flash(`Vào bài: ${examName}`, 'exam');
+            if (scoringMode === 'normal' && examName !== 'Chuẩn bị') this.flash(`Vào bài: ${examName}`, 'exam');
         }
         this.el('penalty').textContent = `${t.penalties.length} lỗi`;
         this.el('rpm').textContent = String(t.rpm);
@@ -233,7 +358,7 @@ export class Hud {
         this.el('engine').title = t.engineStatus + ' · Enter';
         this.el('gear').textContent = t.gear === 0 ? 'N' : t.gear === -1 ? 'R' : String(t.gear);
         if (!this.clutchDragging) {
-            this.host.querySelector<HTMLInputElement>('[data-analog="clutch"]')!.value = String(1 - t.clutch);
+            this.host.querySelector<HTMLInputElement>('[data-analog="clutch"]')!.value = String(t.clutch);
         }
         this.el('steering').textContent = `${Math.round(t.steering)}°`;
         this.el('wheelFace').style.transform = `rotate(${t.steeringWheelAngle}deg)`;
@@ -241,6 +366,15 @@ export class Hud {
         this.el('camera').textContent = this.options.develop ? 'Dev' : t.cameraMode === 2 ? 'Cabin' : String(t.cameraMode + 1);
         this.el('cameraBtn').textContent = this.options.develop ? 'Camera tự do' : 'Đổi camera · ' + ['Chéo', 'Trên cao', 'Cabin'][t.cameraMode];
         const signals = t.signals ?? { left: false, right: false, hazard: false };
+        if (this.signalState.left !== signals.left || this.signalState.right !== signals.right
+            || this.signalState.hazard !== signals.hazard) {
+            this.signalState = { ...signals };
+            for (const side of ['left', 'right', 'hazard'] as const) {
+                const button = this.el(`signal${side[0].toUpperCase()}${side.slice(1)}`);
+                button.classList.toggle('active', signals[side]);
+                button.setAttribute('aria-pressed', String(signals[side]));
+            }
+        }
         this.host.querySelector('.signal-led-left')!.classList.toggle('led-on', signals.left);
         this.host.querySelector('.signal-led-right')!.classList.toggle('led-on', signals.right);
         this.host.querySelector('.signal-led-hazard')!.classList.toggle('led-on', signals.hazard);
@@ -248,7 +382,7 @@ export class Hud {
         this.el('seatBelt').setAttribute('aria-pressed', String(t.seatBelt));
         this.el('startLamp').classList.toggle('on', t.startLamp);
         if (this.status !== t.engineStatus) { this.status = t.engineStatus; this.flash(t.engineStatus, 'info'); }
-        if (finished) {
+        if (finished && scoringMode === 'normal') {
             if (!this.finishedShown) {
                 this.finishedShown = true;
                 if (t.disqualified) {
@@ -270,19 +404,6 @@ export class Hud {
      */
     updatePedestrianHud(exercise: Exam02Pedestrian | undefined, frontX: number | null, visible: boolean) {
         pedestrianHud.update(this.host, exercise, frontX, visible);
-    }
-    /**
-     * Cập nhật widget bài 3 — chỉ hiển thị khi visible=true.
-     * DrivingGame gọi mỗi frame với dữ liệu từ Exam03Hill.
-     */
-    updateHillHud(
-        exercise: Exam03Hill | undefined,
-        stopDistanceA: number | undefined,
-        rollbackM: number,
-        timeRemainingSec: number | undefined,
-        visible: boolean
-    ) {
-        hillHud.update(this.host, exercise, stopDistanceA, rollbackM, timeRemainingSec, visible);
     }
     clearNotices() {
         this.finishedShown = false;

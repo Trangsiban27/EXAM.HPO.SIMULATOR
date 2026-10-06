@@ -8,27 +8,12 @@ import { Exam05South } from './exercises/Exam05South';
 import type { TrafficLight } from './TrafficLight';
 import type { TrackObjects } from './TrackObjects';
 import { startPosition } from './startPosition';
-
-/** 2A stop line: hardcoded tại X = -8 (giữ nguyên vị trí).
- *  Xe spawn tại X = lineX - distance = -35 - 15 = -50, heading -PI/2 (hướng +X).
- *  Vạch dừng 2A đặt tại X = -8 — đồng bộ với EX02_STOP_LINE_X
- *  trong buildExamGround.ts (3 m trước crosswalk tại X=-5, đúng spec §7.1).
- *  Khoảng cách spawn→2A = -8 - (-50) = 42 m. */
-const PEDESTRIAN_DISTANCE_FROM_START_M = 42;
-const PEDESTRIAN_STOP_LINE_X = -8;   // hardcode, không dùng công thức
-
-/** 3A stop line: trên cầu (bridge).
- *  Bridge at X=31, Z=-2, direction='horizontal'.
- *  Sau rotation.y = -PI/2: local +Z → world -Z, mapping world_X = 31 - local_Z.
- *  Vạch trắng tại local Z = +5.5 → world X = 31 - 5.5 = 25.5 (xe đang lên dốc,
- *  trong ramp lên phía TÂY — trước đỉnh).
- *  Vạch vàng tại local Z = +9.5 → world X = 31 - 9.5 = 21.5 (4.0m trước vạch trắng,
- *  vẫn trong ramp lên phía TÂY).
- *  Đỉnh dốc tại local Z = 0 → world X = 31.
- *  Chân dốc phía TÂY (xe vào) tại world X = 31 - 13 = 18.
- *  Chân dốc phía ĐÔNG (xe ra) tại world X = 31 + 13 = 44. */
-const HILL_STOP_LINE_X = 31 - 5.5;   // = 25.5 (matches Bridge.ts local Z=+5.5)
-const HILL_YELLOW_LINE_X = 31 - 9.5;  // = 21.5 (matches Bridge.ts local Z=+9.5)
+import { EXAM_SCORING_MODE, type ExamScoringMode } from './exam/examScoringMode';
+import {
+    EXAM_02_STOP_LINE_X,
+    EXAM_03_STOP_LINE_X,
+    EXAM_03_YELLOW_LINE_X,
+} from './exam/examCourseGeometry';
 
 export interface ExamVehicleSnapshot {
     position: THREE.Vector3;
@@ -52,13 +37,14 @@ export interface ExamVehicleSnapshot {
 }
 
 export class ExamEngine{
+    constructor(readonly scoringMode: ExamScoringMode = EXAM_SCORING_MODE) {}
     score=100;
     readonly penalties:PenaltyEvent[]=[];
     activeIndex=0;
     startedAt=performance.now();
     readonly startExercise = new StartExercise();
     readonly pedestrianExercise = new Exam02Pedestrian({
-        stopLineX: PEDESTRIAN_STOP_LINE_X,
+        stopLineX: EXAM_02_STOP_LINE_X,
         roadZ: startPosition.lineZ,
         roadWidth: 8,
         approachZoneM: 15,
@@ -67,8 +53,8 @@ export class ExamEngine{
         minStopDwellSec: .3,
     });
     readonly hillExercise = new Exam03Hill({
-        stopLineX: HILL_STOP_LINE_X,
-        yellowLineX: HILL_YELLOW_LINE_X,
+        stopLineX: EXAM_03_STOP_LINE_X,
+        yellowLineX: EXAM_03_YELLOW_LINE_X,
         roadZ: startPosition.lineZ,
         roadWidth: 8,
         hillForwardAxis: new THREE.Vector3(1, 0, 0),
@@ -105,6 +91,8 @@ export class ExamEngine{
      * "Chờ vào bài 5" và E04 không còn chạy update nữa.
      */
     private awaitingExam05 = false;
+    /** Tránh báo cùng một lỗi đình chỉ của bài 4 ở mọi frame. */
+    private exam04ActiveDisqualification: string | null = null;
     /**
      * Bài 04 có 4 course, player chỉ được chọn 1 và lock cho cả lần thi.
      * `null` = chưa chạm course nào. Khi xe chạm `startYellowSensor` của
@@ -125,6 +113,7 @@ export class ExamEngine{
         this.pedestrianCompleted = false;
         this.lockedCourseIndex = null;
         this.awaitingExam05 = false;
+        this.exam04ActiveDisqualification = null;
         this.startExercise.reset();
         this.pedestrianExercise.reset();
         this.hillExercise.reset();
@@ -169,8 +158,7 @@ export class ExamEngine{
      * Gọi sau `wireExam04()` từ DrivingGame.
      *
      * - Tìm `track.getTrafficLight('SOUTH')` rồi inject vào intersectionExercise.
-     * - Subscribe `light.onMarkerTriggered` để khi xe chạm trigger lần đầu
-     *   → set `activeIndex = 4` và gọi `intersectionExercise.activate()`.
+     * - Khi bài 4 đã hoàn thành, trigger SOUTH chuyển sang bài 5.
      * - Idempotent: gọi nhiều lần chỉ subscribe một lần.
      *
      * Tham số `roadZ` là tâm lane world (X-axis của lane dọc, mặc định 21 theo
@@ -190,20 +178,18 @@ export class ExamEngine{
             roadWidth,
             roadZ,
             // Vạch hoàn thành bài 5: vùng xanh lá nhạt phía nam ngã tư (xem buildExamGround).
-            // Mesh `addTriggerZone(23, -45, 4, 6)` đặt tại lane dọc X=21±2 (lệch +2 để
-            // nằm trong lane phải, nơi xe từ Bắc xuống dừng trước vạch Z=-48), sau
-            // crosswalk (Z=-48). Xe đi qua ngã tư → frontPosition ∈ Box3 → COMPLETED.
+            // Mesh `addTriggerZone(23, -45, 4, 6)` đặt tại làn X=21..25.
+            // Xe đi theo -Z qua vạch đèn tại Z=-28 rồi vào zone → COMPLETED.
             completionZoneCenter: { x: 23, z: -45 },
             completionZoneSize: { widthX: 4, lengthZ: 6 },
         });
 
-        // Khi xe chạm trigger zone của South light, chuyển activeIndex = 4.
-        // Lưu ý: trigger bắn một lần duy nhất khi xe vào zone (TrafficLight.update),
-        // nên đăng ký callback ở đây là đủ. Nếu xe rời zone rồi quay lại trong
-        // cùng một lần thi, callback KHÔNG bắn lại (đã active → set lại cũng vô hại).
+        // Chỉ vào bài 5 sau khi bài 4 hoàn thành.
         light.onMarkerTriggered = (id: string) => {
-            if (id === 'SOUTH' && this.activeIndex < 4 && !this.disqualified) {
+            if (id !== 'SOUTH' || this.disqualified) return;
+            if (this.activeIndex === 3 && this.awaitingExam05) {
                 this.activeIndex = 4;
+                this.awaitingExam05 = false;
                 this.intersectionExercise.activate();
             }
         };
@@ -217,11 +203,10 @@ export class ExamEngine{
             const result = this.startExercise.update({ ...vehicle, startSignal, dt });
             for (const evt of result.penalties) this.applyPenaltyEvent(evt);
             if (result.disqualified) {
-                this.disqualified = true;
-                this.finished = true;
-                this.disqualifyReason = result.disqualifyReason
+                const reason = result.disqualifyReason
                     ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
                     ?? 'Đình chỉ sát hạch';
+                return this.handleDisqualification(0, reason, result.toast);
             }
             if (result.completed) {
                 this.activeIndex = 1;
@@ -248,11 +233,10 @@ export class ExamEngine{
             const result = this.pedestrianExercise.update(input);
             for (const evt of result.penalties) this.applyPenaltyEvent(evt);
             if (result.disqualified) {
-                this.disqualified = true;
-                this.finished = true;
-                this.disqualifyReason = result.disqualifyReason
+                const reason = result.disqualifyReason
                     ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
                     ?? 'Đình chỉ sát hạch';
+                return this.handleDisqualification(1, reason, result.toast);
             }
             if (result.completed) {
                 this.pedestrianCompleted = true;
@@ -282,11 +266,10 @@ export class ExamEngine{
             const result = this.hillExercise.update(input);
             for (const evt of result.penalties) this.applyPenaltyEvent(evt);
             if (result.disqualified) {
-                this.disqualified = true;
-                this.finished = true;
-                this.disqualifyReason = result.disqualifyReason
+                const reason = result.disqualifyReason
                     ?? result.toast?.replace(/^Đình chỉ — /, '')
                     ?? 'Đình chỉ sát hạch';
+                return this.handleDisqualification(2, reason, result.toast);
             }
             if (result.completed) {
                 this.activeIndex = 3;
@@ -300,6 +283,7 @@ export class ExamEngine{
 
         // ── Bài 04 — Wheel Track + Right Angle ─────────────────────────────────
         if (this.activeIndex === 3) {
+            if (this.awaitingExam05) return;
             const ex04State = this.wheelTrackExercise.state;
 
             // State INACTIVE: tìm course mà xe vừa chạm startYellowSensor.
@@ -311,36 +295,14 @@ export class ExamEngine{
                         vehicle.frontPosition,
                         this.wheelTrackSensors
                     );
-                    if (idx >= 0) {
-                        this.lockedCourseIndex = idx;
-                        this.wheelTrackExercise.swapToCourse(this.wheelTrackSensors[idx]);
-                        // Run one update to surface the "Bắt đầu" toast for this course
-                        const input = {
-                            position: vehicle.position,
-                            frontPosition: vehicle.frontPosition,
-                            wheelPositions: vehicle.wheelPositions ?? {
-                                FL: vehicle.position.clone(), FR: vehicle.position.clone(),
-                                RL: vehicle.position.clone(), RR: vehicle.position.clone(),
-                            },
-                            speedKmh: vehicle.speedKmh,
-                            rpm: vehicle.rpm,
-                            engineRunning: vehicle.engineRunning,
-                            stalled: vehicle.stalled,
-                            clutch: vehicle.clutch ?? 1,
-                            dt,
-                            accident: vehicle.accident ?? false,
-                            wrongLayout: vehicle.wrongLayout ?? false,
-                        };
-                        this.wheelTrackExercise.update(input);
-                    }
+                    if (idx < 0) return;
+                    this.lockedCourseIndex = idx;
+                    this.wheelTrackExercise.swapToCourse(this.wheelTrackSensors[idx]);
                 }
-                return;
             }
 
-            // Đang chạy course đã lock. Kết quả COMPLETED → toast "Hoàn thành
-            // bài 4" + set finished=true (không DQ) → HUD flash success.
-            // Kết quả DISQUALIFIED → set finished=true + disqualified=true
-            // → HUD mở dialog Đình chỉ giống bài 01/02/03.
+            // Kể cả frame vừa vào course, xử lý kết quả để không bỏ sót lỗi.
+            // Chỉ khi COMPLETED mới chuyển sang chờ bài 5.
             const input = {
                 position: vehicle.position,
                 frontPosition: vehicle.frontPosition,
@@ -356,17 +318,17 @@ export class ExamEngine{
                 dt,
                 accident: vehicle.accident ?? false,
                 wrongLayout: vehicle.wrongLayout ?? false,
+                continueAfterDisqualification: this.scoringMode === 'errors-only',
             };
             const result = this.wheelTrackExercise.update(input);
             for (const evt of result.penalties) this.applyPenaltyEvent(evt);
             if (result.disqualified) {
-                this.disqualified = true;
-                this.finished = true;
-                this.disqualifyReason = result.disqualifyReason
+                const reason = result.disqualifyReason
                     ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
                     ?? 'Đình chỉ sát hạch';
-                return result.toast;
+                return this.handleDisqualification(3, reason, result.toast);
             }
+            this.exam04ActiveDisqualification = null;
             if (result.completed) {
                 // Bài 4 hoàn thành — KHÔNG kết thúc exam. Chuyển sang trạng thái
                 // chờ xe chạm trigger South light để kích hoạt bài 5.
@@ -374,6 +336,8 @@ export class ExamEngine{
                 // early-return không kèm toast), nên HUD chỉ flash một lần.
                 if (!this.awaitingExam05) {
                     this.awaitingExam05 = true;
+                    // Nếu đèn đã bị kích hoạt quá sớm, mở lại cảm biến cho bài 5.
+                    this.southLight?.reset();
                     return result.toast ?? 'Hoàn thành bài 4';
                 }
                 return; // suppress toast lặp lại mỗi frame
@@ -398,12 +362,10 @@ export class ExamEngine{
             const result = this.intersectionExercise.update(input);
             for (const evt of result.penalties) this.applyPenaltyEvent(evt);
             if (result.disqualified) {
-                this.disqualified = true;
-                this.finished = true;
-                this.disqualifyReason = result.disqualifyReason
+                const reason = result.disqualifyReason
                     ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
                     ?? 'Đình chỉ sát hạch';
-                return result.toast;
+                return this.handleDisqualification(4, reason, result.toast);
             }
             if (result.completed) {
                 // Hiện tại Exam05South chưa wire endLine sensor (RULE_EX05_20) →
@@ -416,6 +378,40 @@ export class ExamEngine{
 
         // After all known exercises, the rest of the route is still under construction.
         return;
+    }
+    private handleDisqualification(index: number, reason: string, toast?: string): string | undefined {
+        if (this.scoringMode === 'normal') {
+            this.disqualified = true;
+            this.finished = true;
+            this.disqualifyReason = reason;
+            return toast;
+        }
+
+        if (index === 3) {
+            if (this.exam04ActiveDisqualification !== reason) {
+                this.applyPenaltyEvent({ at: performance.now(), points: 0, reason: `Bài 4: ${reason}` });
+                this.exam04ActiveDisqualification = reason;
+            }
+            return undefined;
+        }
+
+        // Lỗi đình chỉ không có số điểm trừ riêng: ghi nhận một lỗi để HUD
+        // hiện thông báo, rồi chuyển bài để các cảm biến tiếp tục chấm điểm.
+        this.applyPenaltyEvent({ at: performance.now(), points: 0, reason: `Bài ${index + 1}: ${reason}` });
+        this.startedAt = performance.now();
+        if (index === 0) {
+            this.activeIndex = 1;
+            this.pedestrianExercise.activate();
+        } else if (index === 1) {
+            this.pedestrianCompleted = true;
+            this.activeIndex = 2;
+            this.hillExercise.activate();
+        } else if (index === 2) {
+            this.activeIndex = 3;
+        } else {
+            this.activeIndex = 5;
+        }
+        return undefined;
     }
     applyLinePenalty(zoneIndex:number,now:number){
         const last=this.cooldown.get(zoneIndex)??-Infinity;

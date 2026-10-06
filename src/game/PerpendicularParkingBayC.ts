@@ -24,6 +24,10 @@ export interface PerpendicularParkingBayCOptions {
     x: number;
     z: number;
     rotationY?: number;
+    /** Viền ngang ở đầu local -X của đường chính. Mặc định true. */
+    capStart?: boolean;
+    /** Viền ngang ở đầu local +X của đường chính. Mặc định true. */
+    capEnd?: boolean;
     showDebug?: boolean;
     surfaceColor?: string;
     examBoundaryWidthM?: number;
@@ -77,6 +81,8 @@ export class PerpendicularParkingBayC {
     readonly physicalEdgeOffsetM: number;
     readonly curbWidthM: number;
     readonly curbHeightM: number;
+    readonly capStart: boolean;
+    readonly capEnd: boolean;
 
     constructor(options: PerpendicularParkingBayCOptions) {
         const rotationY = options.rotationY ?? 0;
@@ -84,6 +90,8 @@ export class PerpendicularParkingBayC {
         this.physicalEdgeOffsetM = options.physicalEdgeOffsetM ?? 0.25;
         this.curbWidthM = options.curbWidthM ?? 0.20;
         this.curbHeightM = options.curbHeightM ?? 0.05;
+        this.capStart = options.capStart ?? true;
+        this.capEnd = options.capEnd ?? true;
 
         if (this.examBoundaryWidthM <= 0) throw new Error('examBoundaryWidthM must be > 0');
         if (this.physicalEdgeOffsetM < 0) throw new Error('physicalEdgeOffsetM must be ≥ 0');
@@ -154,13 +162,14 @@ export class PerpendicularParkingBayC {
         const leftRoadLength = openingLeftX - controlStartX;
         const rightRoadLength = controlEndX - openingRightX;
 
-        this.addCenteredStrip(this.examBoundaryGroup, 'MainRoadLeft', (controlStartX + openingLeftX) / 2, roadOuterZ, leftRoadLength, this.examBoundaryWidthM, y, 0xe52521);
+        this.addCenteredStrip(this.examBoundaryGroup, 'MainRoadOuter', (controlStartX + controlEndX) / 2, roadOuterZ, controlEndX - controlStartX, this.examBoundaryWidthM, y, 0xe52521);
         this.addCenteredStrip(this.examBoundaryGroup, 'MainRoadInnerLeft', (controlStartX + openingLeftX) / 2, roadInnerZ, leftRoadLength, this.examBoundaryWidthM, y, 0xe52521);
         this.addCenteredStrip(this.examBoundaryGroup, 'EntryLeft', openingLeftX + inset, this.parkingDepthM / 2, this.examBoundaryWidthM, this.parkingDepthM, y, 0xe52521);
         this.addCenteredStrip(this.examBoundaryGroup, 'ParkingBottom', 0, this.parkingDepthM - inset, this.parkingWidthM, this.examBoundaryWidthM, y, 0xe52521);
         this.addCenteredStrip(this.examBoundaryGroup, 'EntryRight', openingRightX - inset, this.parkingDepthM / 2, this.examBoundaryWidthM, this.parkingDepthM, y, 0xe52521);
-        this.addCenteredStrip(this.examBoundaryGroup, 'MainRoadRight', (openingRightX + controlEndX) / 2, roadOuterZ, rightRoadLength, this.examBoundaryWidthM, y, 0xe52521);
         this.addCenteredStrip(this.examBoundaryGroup, 'MainRoadInnerRight', (openingRightX + controlEndX) / 2, roadInnerZ, rightRoadLength, this.examBoundaryWidthM, y, 0xe52521);
+        if (this.capStart) this.addCenteredStrip(this.examBoundaryGroup, 'MainRoadStartCapBoundary', controlStartX + inset, -this.clearRoadWidthM / 2, this.examBoundaryWidthM, this.clearRoadWidthM - 2 * inset, y, 0xe52521);
+        if (this.capEnd) this.addCenteredStrip(this.examBoundaryGroup, 'MainRoadEndCapBoundary', controlEndX - inset, -this.clearRoadWidthM / 2, this.examBoundaryWidthM, this.clearRoadWidthM - 2 * inset, y, 0xe52521);
     }
 
     private buildPhysicalEdges(): void {
@@ -172,13 +181,14 @@ export class PerpendicularParkingBayC {
         const roadOuterZ = -this.clearRoadWidthM;
         const roadInnerZ = 0;
 
-        this.addSegmentedCurb('MainRoadLeftCurb', (controlStartX + openingLeftX) / 2, roadOuterZ, openingLeftX - controlStartX, 'horizontal', y);
+        this.addSegmentedCurb('MainRoadOuterCurb', (controlStartX + controlEndX) / 2, roadOuterZ, controlEndX - controlStartX, 'horizontal', y);
         this.addSegmentedCurb('MainRoadInnerLeftCurb', (controlStartX + openingLeftX) / 2, roadInnerZ, openingLeftX - controlStartX, 'horizontal', y);
         this.addSegmentedCurb('ParkingLeftCurb', leftX, this.parkingDepthM / 2, this.parkingDepthM, 'vertical', y);
-        this.addSegmentedCurb('ParkingBottomCurb', 0, bottomZ, this.parkingWidthM + 2 * this.physicalEdgeOffsetM + this.curbWidthM, 'horizontal', y);
+        this.addSegmentedCurb('ParkingBottomCurb', 0, bottomZ, this.parkingWidthM + this.curbWidthM, 'horizontal', y);
         this.addSegmentedCurb('ParkingRightCurb', rightX, this.parkingDepthM / 2, this.parkingDepthM, 'vertical', y);
-        this.addSegmentedCurb('MainRoadRightCurb', (openingRightX + controlEndX) / 2, roadOuterZ, controlEndX - openingRightX, 'horizontal', y);
         this.addSegmentedCurb('MainRoadInnerRightCurb', (openingRightX + controlEndX) / 2, roadInnerZ, controlEndX - openingRightX, 'horizontal', y);
+        if (this.capStart) this.addSegmentedCurb('MainRoadStartCap', controlStartX, -this.clearRoadWidthM / 2, this.clearRoadWidthM, 'vertical', y);
+        if (this.capEnd) this.addSegmentedCurb('MainRoadEndCap', controlEndX, -this.clearRoadWidthM / 2, this.clearRoadWidthM, 'vertical', y);
     }
 
     private buildLogic(): void {

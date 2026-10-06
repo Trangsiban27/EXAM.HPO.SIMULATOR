@@ -1,7 +1,8 @@
 export const manualConfig = {
     biteStart: .5, biteOptimal: .3, biteFull: .2, optimalEngagement: .35,
-    pressRate: .5, releaseRate: .26, fastReleaseRate: 2,
-    idleRPM: 800, stallRPM: 500, stallDelay: .25, inertia: .28,
+    releaseRate: .26, fastReleaseRate: 2,
+    idleRPM: 800, idleTorqueLimit: 65, stallRPM: 500, stallDelay: .25, inertia: .28,
+    hillStartIdleTorqueLimit: 100, hillStartBiteEngagement: .55,
     clutchCapacity: 240, slipGain: .3, rideDelay: 3, rideSlipRPM: 350,
     mass: 1200, wheelRadius: .36, finalDrive: 4.1, efficiency: .9,
     ratios: [0, 3.5, 2, 1.3, 1, .8], reverseRatio: -3.4,

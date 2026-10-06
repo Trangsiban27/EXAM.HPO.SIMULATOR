@@ -109,7 +109,7 @@ export const VEHICLE_SPECS = {
  * Kích thước chuồng đỗ theo từng hạng.
  * Công thức: Lg = 1.5 * a, Rg = 1.25 * b
  * Theo spec threejs_exam_yard_specification_v2.md §19
- * Lưu ý: Hạng E có Lg = 17.5m (theo thông số thực tế)
+ * Lưu ý: Hạng D có Lg = 11.76667m và hạng E có Lg = 17.5m
  */
 export const PARKING_BAY_SIZES: Record<VehicleClass, {
     parkingLengthM: number;
@@ -117,7 +117,7 @@ export const PARKING_BAY_SIZES: Record<VehicleClass, {
     cornerRadiusM: number;
 }> = {
     B: { parkingLengthM: 6.615, parkingDepthM: 2.125, cornerRadiusM: 0.3 },   // Lg=1.5*4.41, Rg=1.25*1.7
-    D: { parkingLengthM: 10.59, parkingDepthM: 2.60, cornerRadiusM: 0.3 },    // Lg=1.5*7.06, Rg=1.25*2.08
+    D: { parkingLengthM: 11.76667, parkingDepthM: 2.60, cornerRadiusM: 0.3 },   // Lg theo bảng kích thước trên bản vẽ
     E: { parkingLengthM: 17.5, parkingDepthM: 3.125, cornerRadiusM: 0.3 },    // Lg=17.5, Rg=1.25*2.5
 } as const;
 

@@ -36,6 +36,26 @@ export interface FourLaneRoadOptions {
     dashGapM?: number;
     /** Có vẽ mũi tên chỉ hướng trên từng làn hay không. Mặc định true. */
     withArrows?: boolean;
+    /** Có vẽ vạch chia làn trên mặt đường hay không. Mặc định true. */
+    withLaneMarkings?: boolean;
+    /** Tô nổi bật mặt đường. Mặc định false. */
+    highlight?: boolean;
+    /** Chỉ hiển thị vạch chia làn và đường biên ngoài. Mặc định false. */
+    outlineOnly?: boolean;
+    /** Hiển thị số thứ tự trên từng làn. Mặc định false. */
+    withLaneNumbers?: boolean;
+    /** Các section nối tiếp theo local Z, từ -Z đến +Z. */
+    sections?: Array<{
+        lengthM: number;
+        laneCount: number;
+    }>;
+    /** Căn section hẹp về trái, giữa hoặc phải trong bề rộng lớn nhất. */
+    sectionAlignment?: 'left' | 'center' | 'right';
+    /**
+     * Phía của làn đi ngược chiều, ngăn bằng vạch liền. Mặc định 'right'
+     * (lane 01 ngoài cùng local +X); 'left' = làn ngoài cùng local -X.
+     */
+    dividerSide?: 'left' | 'right';
     /**
      * Xoay toàn bộ road quanh trục Y (radians). Mặc định 0 (trục đứng, song song world Z).
      * `Math.PI / 2` → trục ngang (song song world X).
@@ -53,19 +73,37 @@ export class FourLaneRoad {
     readonly rotationY: number;
     /** Tâm các lane theo local X. Chỉ số 0..laneCount-1 tương ứng lane ngoài cùng trái..ngoài cùng phải. */
     readonly laneCentersX: number[];
+    /** Index của làn đi ngược chiều (-Z). */
+    readonly oppositeLaneIndex: number;
+    /** Phần mặt đường thực (local), mỗi section một hình chữ nhật. */
+    readonly footprints: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }> = [];
 
     constructor(opts: FourLaneRoadOptions) {
-        const lengthM = opts.lengthM;
-        const laneCount = opts.laneCount ?? 5;
+        const sections = opts.sections;
+        const lengthM = sections
+            ? sections.reduce((total, section) => total + section.lengthM, 0)
+            : opts.lengthM;
+        const laneCount = sections
+            ? Math.max(...sections.map(section => section.laneCount))
+            : opts.laneCount ?? 5;
         const laneWidthM = opts.laneWidthM ?? 3.7;
         const dashLengthM = opts.dashLengthM ?? 1.5;
         const dashGapM = opts.dashGapM ?? 1.0;
         const withArrows = opts.withArrows ?? true;
+        const withLaneMarkings = opts.withLaneMarkings ?? true;
+        const highlight = opts.highlight ?? false;
+        const outlineOnly = opts.outlineOnly ?? false;
+        const withLaneNumbers = opts.withLaneNumbers ?? false;
+        const sectionAlignment = opts.sectionAlignment ?? 'left';
+        const dividerSide = opts.dividerSide ?? 'right';
         const rotationY = opts.rotationY ?? 0;
 
         if (lengthM <= 0) throw new Error('FourLaneRoad: lengthM must be > 0');
-        if (laneCount < 2) throw new Error('FourLaneRoad: laneCount must be >= 2');
+        if (laneCount < 1) throw new Error('FourLaneRoad: laneCount must be >= 1');
         if (laneWidthM <= 0) throw new Error('FourLaneRoad: laneWidthM must be > 0');
+        if (sections?.some(section => section.lengthM <= 0 || section.laneCount < 1)) {
+            throw new Error('FourLaneRoad: sections must have positive length and at least 1 lane');
+        }
 
         const widthM = laneCount * laneWidthM;
 
@@ -74,6 +112,7 @@ export class FourLaneRoad {
         this.laneCount = laneCount;
         this.widthM = widthM;
         this.rotationY = rotationY;
+        this.oppositeLaneIndex = dividerSide === 'left' ? 0 : laneCount - 1;
 
         // Tính tâm các lane theo local X.
         // Công thức (theo spec 6A §3.2): centerX = -roadWidth/2 + laneWidth/2 + index*laneWidth,
@@ -93,73 +132,172 @@ export class FourLaneRoad {
         root.rotation.y = rotationY;
         this.root = root;
 
-        // 1. Mặt đường (asphalt).
-        const surface = new THREE.Mesh(
-            new THREE.BoxGeometry(widthM, 0.08, lengthM),
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: 0.95 }),
-        );
-        surface.position.set(0, 0.02, 0);
-        surface.name = 'road-surface';
-        surface.receiveShadow = true;
-        root.add(surface);
-
-        // 2. Curb đỏ-trắng ở 2 biên ngoài cùng.
-        this.addCurbPattern(+halfW, lengthM, root);
-        this.addCurbPattern(-halfW, lengthM, root);
-
-        // 3. Vạch liền phân chia 2 chiều giữa lane 01 (ngoài cùng phải) và lane 02 (kế tiếp).
-        //    Vị trí = trung điểm cạnh phải của lane 02 ↔ cạnh trái của lane 01.
-        const centerRight = laneCentersX[laneCount - 1]; // lane 01
-        const centerNext  = laneCentersX[laneCount - 2]; // lane 02
-        const dividerX = (centerRight + centerNext) / 2;
-        const solidDivider = new THREE.Mesh(
-            new THREE.BoxGeometry(0.15, 0.008, lengthM),
-            new THREE.MeshStandardMaterial({ color: '#fcde59', roughness: 0.85 }),
-        );
-        solidDivider.position.set(dividerX, 0.067, 0);
-        solidDivider.name = 'direction-divider';
-        solidDivider.receiveShadow = true;
-        root.add(solidDivider);
-
-        // 4. Vạch đứt giữa các cặp lane cùng chiều (lane 02↔03, 03↔04, …, (N-1)↔N).
-        //    Mapping index → lane: laneCentersX[laneCount - i - 1] = lane i.
-        //    Cặp giữa lane i và lane i+1 có index = laneCount - i - 1 và laneCount - i - 2,
-        //    với i chạy 2..laneCount-1.
-        //    Tên lane-line theo quy ước: số nhỏ (phía phải) trước, số lớn (phía trái) sau.
-        const separatorPositions: Array<{ x: number; lanePair: string }> = [];
-        for (let i = 2; i <= laneCount - 1; i++) {
-            const rightIdx = laneCount - i;         // lane i   — phía phải (X lớn hơn)
-            const leftIdx  = laneCount - i - 1;     // lane i+1 — phía trái (X nhỏ hơn)
-            const x = (laneCentersX[leftIdx] + laneCentersX[rightIdx]) / 2;
-            const pair = `${String(i).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`;
-            separatorPositions.push({ x, lanePair: pair });
+        if (sections) {
+            let sectionStartZ = -lengthM / 2;
+            let previous: { minX: number; maxX: number } | null = null;
+            for (const section of sections) {
+                const sectionOffsetX = sectionAlignment === 'right'
+                    ? (laneCount - section.laneCount) * laneWidthM / 2
+                    : sectionAlignment === 'center'
+                        ? 0
+                        : -(laneCount - section.laneCount) * laneWidthM / 2;
+                const current = {
+                    minX: sectionOffsetX - section.laneCount * laneWidthM / 2,
+                    maxX: sectionOffsetX + section.laneCount * laneWidthM / 2,
+                };
+                // Bậc đổi bề rộng: curb ngang trên phần mép của section rộng hơn bị lộ ra.
+                if (previous && !outlineOnly) {
+                    const wider = previous.maxX - previous.minX > current.maxX - current.minX ? previous : current;
+                    const narrower = wider === previous ? current : previous;
+                    const curbZ = sectionStartZ + (wider === previous ? -0.1 : 0.1);
+                    this.addStepCurb(wider.minX, narrower.minX, curbZ, root);
+                    this.addStepCurb(narrower.maxX, wider.maxX, curbZ, root);
+                }
+                previous = current;
+                this.footprints.push({ ...current, minZ: sectionStartZ, maxZ: sectionStartZ + section.lengthM });
+                const sectionRoad = new FourLaneRoad({
+                    x: sectionOffsetX,
+                    z: sectionStartZ + section.lengthM / 2,
+                    lengthM: section.lengthM,
+                    laneCount: section.laneCount,
+                    laneWidthM,
+                    dashLengthM,
+                    dashGapM,
+                    withArrows,
+                    withLaneMarkings,
+                    highlight,
+                    outlineOnly,
+                    withLaneNumbers,
+                    sectionAlignment,
+                    dividerSide,
+                    rotationY: 0,
+                });
+                root.add(sectionRoad.root);
+                sectionStartZ += section.lengthM;
+            }
+            return;
         }
+
+        this.footprints.push({ minX: -halfW, maxX: halfW, minZ: -lengthM / 2, maxZ: lengthM / 2 });
+
+        if (outlineOnly) {
+            this.addOutlineLine(+halfW, lengthM, root);
+            this.addOutlineLine(-halfW, lengthM, root);
+        } else {
+            // 1. Mặt đường (asphalt).
+            const surface = new THREE.Mesh(
+                new THREE.BoxGeometry(widthM, 0.08, lengthM),
+                new THREE.MeshStandardMaterial({ color: highlight ? '#f2b84b' : '#2a2a2a', roughness: 0.95 }),
+            );
+            surface.position.set(0, 0.02, 0);
+            surface.name = 'road-surface';
+            surface.receiveShadow = true;
+            root.add(surface);
+
+            // 2. Curb đỏ-trắng ở 2 biên ngoài cùng.
+            this.addCurbPattern(+halfW, lengthM, root);
+            this.addCurbPattern(-halfW, lengthM, root);
+        }
+
+        if (withLaneMarkings) {
+            // 3. Vạch liền phân chia 2 chiều giữa làn ngược chiều và làn kề nó.
+            const dividerPairIndex = dividerSide === 'left' ? 0 : laneCount - 2;
+            if (laneCount >= 2) {
+                const dividerX = (laneCentersX[dividerPairIndex] + laneCentersX[dividerPairIndex + 1]) / 2;
+                const solidDivider = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.15, 0.008, lengthM),
+                    new THREE.MeshStandardMaterial({ color: '#fcde59', roughness: 0.85 }),
+                );
+                solidDivider.position.set(dividerX, 0.067, 0);
+                solidDivider.name = 'direction-divider';
+                solidDivider.receiveShadow = true;
+                root.add(solidDivider);
+            }
+
+            // 4. Vạch đứt giữa các cặp lane cùng chiều.
+            //    Mapping index → lane: laneCentersX[i] = lane (laneCount - i).
+            //    Tên lane-line theo quy ước: số nhỏ (phía phải) trước, số lớn (phía trái) sau.
+            const separatorPositions: Array<{ x: number; lanePair: string }> = [];
+            for (let leftIdx = 0; leftIdx < laneCount - 1; leftIdx++) {
+                if (leftIdx === dividerPairIndex) continue;
+                const x = (laneCentersX[leftIdx] + laneCentersX[leftIdx + 1]) / 2;
+                const rightLane = laneCount - leftIdx - 1;
+                const pair = `${String(rightLane).padStart(2, '0')}-${String(rightLane + 1).padStart(2, '0')}`;
+                separatorPositions.push({ x, lanePair: pair });
+            }
         const whiteDashed = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
 
-        for (const { x, lanePair } of separatorPositions) {
-            for (let start = 0; start < lengthM; start += dashLengthM + dashGapM) {
-                const dashLen = Math.min(dashLengthM, lengthM - start);
-                if (dashLen <= 0) break;
-                const dash = new THREE.Mesh(
-                    new THREE.BoxGeometry(0.15, 0.008, dashLen),
-                    whiteDashed,
-                );
-                dash.position.set(x, 0.067, -lengthM / 2 + start + dashLen / 2);
-                dash.name = `lane-line-${lanePair}`;
-                dash.receiveShadow = true;
-                root.add(dash);
+            for (const { x, lanePair } of separatorPositions) {
+                for (let start = 0; start < lengthM; start += dashLengthM + dashGapM) {
+                    const dashLen = Math.min(dashLengthM, lengthM - start);
+                    if (dashLen <= 0) break;
+                    const dash = new THREE.Mesh(
+                        new THREE.BoxGeometry(0.15, 0.008, dashLen),
+                        whiteDashed,
+                    );
+                    dash.position.set(x, 0.067, -lengthM / 2 + start + dashLen / 2);
+                    dash.name = `lane-line-${lanePair}`;
+                    dash.receiveShadow = true;
+                    root.add(dash);
+                }
+            }
+        }
+
+        if (withLaneNumbers) {
+            for (let i = 0; i < laneCount; i++) {
+                this.addLaneNumber(laneCentersX[i], 0, laneCount - i, root);
             }
         }
 
         // 5. Mũi tên chỉ hướng cho mỗi lane (giữa road theo trục Z).
-        if (withArrows) {
+        if (withArrows && !outlineOnly) {
             for (let i = 0; i < laneCount; i++) {
-                const isLane01 = i === laneCount - 1; // lane 01 = index cuối cùng (ngoài cùng phải)
-                // Đảo chiều: lane 01 giờ chĩa +Z (không xoay), các lane còn lại chĩa -Z (xoay π).
-                const isBackward = !isLane01;
+                // Đảo chiều: làn ngược chiều chĩa +Z (không xoay), các lane còn lại chĩa -Z (xoay π).
+                const isBackward = i !== this.oppositeLaneIndex;
                 this.addArrow(laneCentersX[i], 0, laneWidthM, lengthM, isBackward, root);
             }
         }
+    }
+
+    private addOutlineLine(edgeX: number, lengthM: number, parent: THREE.Group): void {
+        const line = new THREE.Mesh(
+            new THREE.BoxGeometry(0.12, 0.008, lengthM),
+            new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 }),
+        );
+        line.position.set(edgeX, 0.067, 0);
+        line.name = 'road-outline';
+        line.receiveShadow = true;
+        parent.add(line);
+    }
+
+    private addLaneNumber(x: number, z: number, laneNumber: number, parent: THREE.Group): void {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const context = canvas.getContext('2d');
+        if (!context) return;
+
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = '#ffffff';
+        context.font = 'bold 88px Arial, sans-serif';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(String(laneNumber), canvas.width / 2, canvas.height / 2);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const number = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.1, 1.1),
+            new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: true,
+                depthWrite: false,
+            }),
+        );
+        number.rotation.x = -Math.PI / 2;
+        number.position.set(x, 0.08, z);
+        number.name = `lane-number-${laneNumber}`;
+        parent.add(number);
     }
 
     /**
@@ -186,6 +324,28 @@ export class FourLaneRoad {
                 0.08 / 2 + curbHeight / 2 + 0.02,
                 -lengthM / 2 + i * segmentLen + length / 2,
             );
+            curb.name = 'red-white-curb';
+            curb.castShadow = true;
+            curb.receiveShadow = true;
+            parent.add(curb);
+        }
+    }
+
+    /** Curb đỏ-trắng chạy theo local X, từ `fromX` tới `toX`, tâm curb tại `z`. */
+    private addStepCurb(fromX: number, toX: number, z: number, parent: THREE.Group) {
+        const curbWidth = 0.2;
+        const curbHeight = 0.05;
+        const segmentLen = 0.8;
+        const length = toX - fromX;
+        const count = Math.ceil(length / segmentLen - 1e-6);
+        for (let i = 0; i < count; i++) {
+            const pieceLength = Math.min(segmentLen, length - i * segmentLen);
+            const curb = new THREE.Mesh(
+                new THREE.BoxGeometry(pieceLength, curbHeight, curbWidth),
+                new THREE.MeshStandardMaterial({ color: i % 2 === 0 ? 0xffffff : 0xd83b3b, roughness: 0.85 }),
+            );
+            curb.position.set(fromX + i * segmentLen + pieceLength / 2, 0.08 / 2 + curbHeight / 2 + 0.02, z);
+            curb.name = 'red-white-curb';
             curb.castShadow = true;
             curb.receiveShadow = true;
             parent.add(curb);
@@ -275,7 +435,7 @@ export class FourLaneRoad {
         if (index < 0 || index >= this.laneCount) {
             throw new Error(`FourLaneRoad: lane index ${index} out of range`);
         }
-        return index === this.laneCount - 1
+        return index === this.oppositeLaneIndex
             ? new THREE.Vector3(0, 0, -1)
             : new THREE.Vector3(0, 0, 1);
     }
@@ -285,14 +445,14 @@ export class FourLaneRoad {
  * Validate FourLaneRoad theo spec §25 (tương tự road_6A).
  */
 export function validateFourLaneRoad(road: FourLaneRoad): void {
-    if (road.laneCount !== 5) {
-        throw new Error('FourLaneRoad must have 5 lanes');
+    if (road.laneCount < 1) {
+        throw new Error('FourLaneRoad must have at least 1 lane');
     }
     if (road.laneWidthM !== 3.7) {
         throw new Error('FourLaneRoad: each lane must be 3.70 m');
     }
-    if (Math.abs(road.widthM - 18.5) > 1e-6) {
-        throw new Error('FourLaneRoad: road width must be 18.50 m');
+    if (Math.abs(road.widthM - road.laneCount * road.laneWidthM) > 1e-6) {
+        throw new Error('FourLaneRoad: width must equal laneCount × laneWidthM');
     }
     if (road.lengthM <= 0) {
         throw new Error('FourLaneRoad: lengthM must be > 0');
