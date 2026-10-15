@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { createStripedSignPost } from './StripedSignPost';
 
 /** Cache for the stop sign GLB — loaded once, cloned for each placement. */
 let _cache: THREE.Group | null = null;
@@ -9,9 +10,13 @@ export interface StopSignOptions {
     x: number;
     z: number;
     roadWidth?: number;
+    /** Distance from the road edge to the sign post. */
+    shoulderOffsetM?: number;
+    /** Extra height for the sign face; the striped post grows with it. */
+    heightOffsetM?: number;
     /**
      * Scale applied to the GLB model. Ignored when the canvas fallback is used.
-     * Default: 0.8
+     * Default: 0.012
      */
     scale?: number;
 }
@@ -25,19 +30,21 @@ export interface StopSignOptions {
 export class StopSign {
     readonly root = new THREE.Group();
 
-    constructor({ x, z, roadWidth = 8, scale = .012 }: StopSignOptions) {
+    constructor({ x, z, roadWidth = 8, shoulderOffsetM = 1.5, heightOffsetM = 0, scale = .012 }: StopSignOptions) {
         this.root.name = 'EX02_SIGN_STOP';
         this.root.position.set(x, 0, z);
         this.root.rotation.y = -Math.PI / 2;
 
-        const postX = roadWidth / 2 + 1.5;
+        const postX = roadWidth / 2 + shoulderOffsetM;
 
         if (_cache) {
-            // Clone cached GLB mesh. GLB already contains post + sign + base, so we
-            // do NOT add an extra procedural post here (would cause double post).
             const signRoot = _cache.clone(true);
             signRoot.scale.setScalar(scale);
-            signRoot.position.set(postX, 0, 0);
+            signRoot.position.set(postX, heightOffsetM, 0);
+            // Object_4 is the long metal pole in this GLB. Replace it with
+            // coloured bands while keeping the sign face and its fittings.
+            const embeddedPost = signRoot.getObjectByName('Object_4');
+            if (embeddedPost) embeddedPost.visible = false;
             // Enable shadows on every mesh inside the cloned GLB scene.
             signRoot.traverse(obj => {
                 if ((obj as THREE.Mesh).isMesh) {
@@ -47,6 +54,11 @@ export class StopSign {
                 }
             });
             this.root.add(signRoot);
+            // The STOP face is at local Z ≈ .247 and starts at Y ≈ 2.21.
+            // End the pole just inside its lower edge and keep it behind the face.
+            const post = createStripedSignPost(2.3 + heightOffsetM, .043);
+            post.position.set(postX + .101, 0, .18);
+            this.root.add(post);
         } else {
             // Fallback canvas sign (sync) — GLB sẽ được cache sau khi load xong.
             const canvas = document.createElement('canvas');
@@ -69,18 +81,12 @@ export class StopSign {
                 new THREE.PlaneGeometry(1.2, 1.2),
                 new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide })
             );
-            signMesh.scale.setScalar(scale);
-            signMesh.position.set(postX, 2.5 * scale, 0);
+            signMesh.position.set(postX, 2.5 + heightOffsetM, 0);
             signMesh.castShadow = true;
             this.root.add(signMesh);
 
-            // Procedural post only for canvas fallback — height proportional to scale.
-            const post = new THREE.Mesh(
-                new THREE.CylinderGeometry(.06, .06, 2.5 * scale, 12),
-                new THREE.MeshStandardMaterial({ color: 0xc7d0d5, metalness: .6, roughness: .4 })
-            );
-            post.position.set(postX, (2.5 * scale) / 2, 0);
-            post.castShadow = true;
+            const post = createStripedSignPost(2 + heightOffsetM, .06);
+            post.position.set(postX, 0, -.08);
             this.root.add(post);
         }
     }
@@ -99,4 +105,3 @@ export class StopSign {
         }
     }
 }
-

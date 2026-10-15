@@ -30,23 +30,76 @@
     max-height: calc(100dvh - 40px);
     overflow-y: auto;
 }
-.auto-lesson-card {
-    max-height: calc(100dvh - 40px);
-    overflow-y: auto;
+.auto-quiz.auto-lesson {
+    justify-items: start;
+    background: transparent;
+    backdrop-filter: none;
+    pointer-events: none;
 }
-.auto-lesson-steps {
-    max-height: min(48dvh, 460px);
+.auto-lesson-card {
+    max-height: calc(100dvh - var(--auto-lesson-top, 20px) - 20px);
     overflow-y: auto;
-    margin: 14px 0 20px;
+    pointer-events: auto;
+}
+/* Keep the lesson below the shoulder camera when the cabin view is visible. */
+body:has(.cabin-overlay:not([hidden])) .auto-quiz.auto-lesson {
+    --auto-lesson-top: calc(102px + clamp(75px, 10vw, 150px) + clamp(75px, 10vw, 150px));
+    align-items: start;
+    padding-top: var(--auto-lesson-top);
+}
+@media (max-width: 600px) {
+    body:has(.cabin-overlay:not([hidden])) .auto-quiz.auto-lesson {
+        --auto-lesson-top: 303px;
+    }
+}
+.auto-lesson-switcher {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    margin-top: 18px;
+    padding: 4px;
+    background: #111c28;
+    border: 1px solid #40566c;
+    border-radius: 999px;
+}
+.auto-lesson-switcher button {
+    min-width: 0;
+    padding: 10px 6px;
+    color: #b9c9d8;
+    background: transparent;
+    border: 0;
+    border-radius: 999px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.auto-lesson-switcher button[aria-pressed="true"] {
+    color: #142333;
+    background: #dce9f5;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .2);
+}
+.auto-lesson-switcher button:focus-visible {
+    outline: 2px solid #79c8ff;
+    outline-offset: 2px;
+}
+.auto-lesson-list[hidden] { display: none; }
+.auto-lesson-list {
+    max-height: min(42dvh, 400px);
+    overflow-y: auto;
+    margin: 18px 0 20px;
     padding-left: 25px;
     color: #d4e0eb;
     line-height: 1.55;
 }
-.auto-lesson-steps > li { margin-bottom: 12px; padding-left: 4px; }
-.auto-lesson-steps > li::marker { color: #79c8ff; font-weight: 800; }
+.auto-lesson-list > li { margin-bottom: 12px; padding-left: 4px; white-space: pre-line; }
+.auto-lesson-list > li::marker { color: #79c8ff; font-weight: 800; }
 .auto-lesson-steps ul { margin-top: 8px; padding-left: 20px; }
 .auto-lesson-steps ul li { margin-bottom: 6px; }
 .auto-lesson-continue { display: block; width: 100%; text-align: center; }
+.auto-lesson-continue[hidden] { display: none; }
+.auto-lesson-record { display: block; width: 100%; margin-bottom: 8px; text-align: center; }
+.auto-lesson-record[hidden] { display: none; }
 .auto-quiz-eyebrow {
     color: #79c8ff;
     font-size: 11px;

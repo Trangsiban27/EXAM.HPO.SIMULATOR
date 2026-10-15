@@ -4,6 +4,8 @@ import { Pedals } from './drivetrain/Pedals';
 import { manualConfig } from './drivetrain/config';
 import { notify } from '../ui/Notify';
 
+const SPEED_CAP_CLUTCH_PEDAL = .38;
+
 /** Simplified manual drivetrain; clutch release is gradual for keyboard controls. */
 export class ManualTransmission {
     car = new ManualCar();
@@ -23,14 +25,22 @@ export class ManualTransmission {
         // Preserve held keys so restarting does not retrigger ignition.
     }
 
-    update(dt: number, input: InputManager, speed: number, slope = 0): number {
+    update(dt: number, input: InputManager, speed: number, slope = 0,
+        speedLimitMps = Infinity): number {
         const pressed = (code: string) => {
             const down = input.isDown(code), fresh = down && !this.held.has(code);
             if (down) this.held.add(code); else this.held.delete(code);
             return fresh;
         };
         const pedal = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
-        const clutchTarget = pedal ? 1 : input.getAnalog('clutch') ?? 0;
+        const driverClutchTarget = pedal ? 1 : input.getAnalog('clutch') ?? 0;
+        // A course speed cap can be slower than first-gear idle. Slip the clutch
+        // while that artificial cap is active so it cannot stall the engine.
+        const cappedBelowIdle = this.running && this.gear !== 0
+            && Number.isFinite(speedLimitMps)
+            && Math.abs(this.car.gearbox.rpm(speedLimitMps)) < manualConfig.idleRPM;
+        const clutchTarget = Math.max(driverClutchTarget,
+            cappedBelowIdle ? SPEED_CAP_CLUTCH_PEDAL : 0);
         // Đạp côn là tức thời, nên phím Shift và Enter/số trong cùng khung hình vẫn hợp lệ.
         const effectiveClutch = Math.max(this.clutch, clutchTarget);
 
@@ -62,7 +72,7 @@ export class ManualTransmission {
         this.car.update(dt, this.pedals.gas,
             clutchTarget, input.isDown('KeyF'), this.pedals.brake, slope);
         if (this.car.stalled) this.status = 'Chết máy — về N, đạp hết côn rồi nhấn Enter';
-        else if (this.car.clutch.riding) this.status = 'Đang rà côn';
+        else if (this.car.clutch.riding && !cappedBelowIdle) this.status = 'Đang rà côn';
         else if (this.status === 'Đang rà côn') this.status = this.running ? 'Máy đang chạy' : 'Máy tắt';
         return this.car.physics.speed;
     }

@@ -13,6 +13,10 @@ import {
     EXAM_02_STOP_LINE_X,
     EXAM_03_STOP_LINE_X,
     EXAM_03_YELLOW_LINE_X,
+    EXAM_05_FINISH_CROSSWALK_X,
+    EXAM_05_FINISH_CROSSWALK_Z,
+    EXAM_05_FINISH_CROSSWALK_WIDTH_M,
+    EXAM_05_FINISH_CROSSWALK_DEPTH_M,
 } from './exam/examCourseGeometry';
 
 export interface ExamVehicleSnapshot {
@@ -172,16 +176,25 @@ export class ExamEngine{
             console.warn('[ExamEngine] wireExam05South: track has no trafficLight with markerId="SOUTH"');
             return;
         }
+        const stopBar = track.root.getObjectByName('exam-05-stop-bar');
+        if (!stopBar) throw new Error('Exam 5 stop bar is missing');
+        const stopBarBounds = new THREE.Box3().setFromObject(stopBar);
         this.southLight = light;
         this.intersectionExercise.attach({
             light,
             roadWidth,
             roadZ,
-            // Vạch hoàn thành bài 5: vùng xanh lá nhạt phía nam ngã tư (xem buildExamGround).
-            // Mesh `addTriggerZone(23, -45, 4, 6)` đặt tại làn X=21..25.
-            // Xe đi theo -Z qua vạch đèn tại Z=-28 rồi vào zone → COMPLETED.
-            completionZoneCenter: { x: 23, z: -45 },
-            completionZoneSize: { widthX: 4, lengthZ: 6 },
+            stopBar: {
+                minX: stopBarBounds.min.x,
+                maxX: stopBarBounds.max.x,
+                nearZ: stopBarBounds.max.z,
+            },
+            finishLine: {
+                x: EXAM_05_FINISH_CROSSWALK_X,
+                z: EXAM_05_FINISH_CROSSWALK_Z,
+                widthM: EXAM_05_FINISH_CROSSWALK_WIDTH_M,
+                depthM: EXAM_05_FINISH_CROSSWALK_DEPTH_M,
+            },
         });
 
         // Chỉ vào bài 5 sau khi bài 4 hoàn thành.
@@ -365,11 +378,9 @@ export class ExamEngine{
                 const reason = result.disqualifyReason
                     ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
                     ?? 'Đình chỉ sát hạch';
-                return this.handleDisqualification(4, reason, result.toast);
+                return this.handleDisqualification(4, reason, result.toast, true);
             }
             if (result.completed) {
-                // Hiện tại Exam05South chưa wire endLine sensor (RULE_EX05_20) →
-                // result.completed chỉ true sau khi wire COMPLETED trong tương lai.
                 this.finished = true;
                 return result.toast ?? 'Hoàn thành bài 5';
             }
@@ -379,8 +390,8 @@ export class ExamEngine{
         // After all known exercises, the rest of the route is still under construction.
         return;
     }
-    private handleDisqualification(index: number, reason: string, toast?: string): string | undefined {
-        if (this.scoringMode === 'normal') {
+    private handleDisqualification(index: number, reason: string, toast?: string, force = false): string | undefined {
+        if (force || this.scoringMode === 'normal') {
             this.disqualified = true;
             this.finished = true;
             this.disqualifyReason = reason;
@@ -413,6 +424,12 @@ export class ExamEngine{
         }
         return undefined;
     }
+    /** A curb touch ends the current normal-mode attempt, once. */
+    disqualifyForRedWhiteCurb(): boolean {
+        if (this.scoringMode !== 'normal' || this.finished) return false;
+        this.handleDisqualification(this.activeIndex, 'Chạm vạch đỏ trắng');
+        return true;
+    }
     applyLinePenalty(zoneIndex:number,now:number){
         const last=this.cooldown.get(zoneIndex)??-Infinity;
         if(now-last<3000)return null;
@@ -442,6 +459,7 @@ export class ExamEngine{
         return(performance.now()-this.startedAt)/1000;
     }
     get currentExerciseTitle(){
+        if (this.disqualified) return 'Đình chỉ sát hạch';
         if (this.finished) return 'Hoàn thành bài thi';
         if (this.awaitingExam05) return 'Chờ vào bài 5';
         if (this.activeIndex === 0) return this.startExercise.title;

@@ -13,10 +13,24 @@ export interface TrafficLightOptions {
     stopLineX?: number;
     /** Length of the yellow stop line along local X. Default `4`. */
     stopLineLength?: number;
+    /** Draw the yellow stop line as separate dashes. Default `false`. */
+    stopLineDashed?: boolean;
+    /** Show the stop-line mesh. Default `true`. */
+    showStopLine?: boolean;
+    /** Show the debug mesh for the trigger area. Detection stays active. Default `false`. */
+    showTriggerZone?: boolean;
     /** Local X where the trigger zone starts. Default `stopLineX - stopLineHalfWidth`. */
     triggerStartX?: number;
     /** Length of the trigger window along local X. Default `2 * stopLineHalfWidth`. */
     triggerLengthX?: number | any;
+    /** Road-side boundary of a curved trigger zone, expressed as local X for each local Z. */
+    triggerMaxXAtZ?: (localZ: number) => number;
+    /** Move only the physical pole and signal head along local X. */
+    poleOffsetX?: number;
+    /** Move only the physical pole and signal head along local Z. */
+    poleOffsetZ?: number;
+    /** Compact three-lens housing with a countdown display. */
+    realisticHead?: boolean;
     /** Marker ID surfaced to {@link TrafficLight.onMarkerTriggered} (e.g. `'A'`, `'START'`). Default `undefined`. */
     markerId?: string;
 }
@@ -40,6 +54,8 @@ export class TrafficLight {
     private readonly triggerStartX: number;
     /** Length of the trigger window along local X. */
     private readonly triggerLengthX: number | any;
+    private readonly triggerMaxXAtZ?: (localZ: number) => number;
+    private readonly realisticHead: boolean;
     /** Length of the yellow stop line along local X (matches the box() drawn in the constructor). */
     readonly stopLineLength: number;
     /** Optional callback fired the first time a vehicle enters the trigger zone. Receives the marker ID. */
@@ -105,23 +121,32 @@ export class TrafficLight {
         // triggerStartX/triggerLengthX for non-rectangular footprints.
         this.triggerStartX = options.triggerStartX ?? (this.stopLineX - this.stopLineHalfWidth);
         this.triggerLengthX = options.triggerLengthX ?? (this.stopLineHalfWidth * 2);
+        this.triggerMaxXAtZ = options.triggerMaxXAtZ;
+        this.realisticHead = options.realisticHead ?? false;
+        if (this.realisticHead) {
+            this.green.color.setHex(0x124943);
+            this.green.emissive.setHex(0x19ffe1);
+        }
 
         const dark = new THREE.MeshStandardMaterial({ color: 0x20272d, roughness: .6 });
         const metal = new THREE.MeshStandardMaterial({ color: 0x9da8b0, metalness: .6, roughness: .4 });
 
-        const box = (w: number, h: number, d: number, px: number, y: number, pz: number, material: THREE.Material) => {
+        const signalVisual = new THREE.Group();
+        signalVisual.name = 'traffic-light-visual';
+        signalVisual.position.z = options.poleOffsetZ ?? 0;
+        this.root.add(signalVisual);
+
+        const box = (w: number, h: number, d: number, px: number, y: number, pz: number,
+            material: THREE.Material, parent: THREE.Object3D = this.root) => {
             const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
             mesh.position.set(px, y, pz);
             mesh.castShadow = true;
             mesh.receiveShadow = true;
-            this.root.add(mesh);
+            parent.add(mesh);
         };
 
         // Road arrows place incoming traffic on local -X; keep the post outside that lane.
-        const poleX = -width / 2 - .55;
-
-        box(.16, 3.6, .16, poleX, 1.8, 0, metal);
-        box(.8, 1.6, .4, poleX, 3.45, 0, dark);
+        const poleX = -width / 2 - .55 + (options.poleOffsetX ?? 0);
 
         // The side panel faces inward from the roadside post toward the lane.
         const faces = [
@@ -130,55 +155,120 @@ export class TrafficLight {
             { offsetX: .411, offsetZ: 0, rotationY: Math.PI / 2, lensRadius: .18, timerSize: [.4, .2] }
         ] as const;
         
-        for (const face of faces) {
-            for (const [y, material] of [[3.8, this.red], [3.12, this.green]] as const) {
-                const lens = new THREE.Mesh(new THREE.CircleGeometry(face.lensRadius, 32), material);
-                lens.position.set(poleX + face.offsetX, y, face.offsetZ);
-                lens.rotation.y = face.rotationY;
-                this.root.add(lens);
+        if (this.realisticHead) {
+            box(.12, 3.7, .12, poleX, 1.85, 0, metal, signalVisual);
+            box(.48, 1.2, .32, poleX, 3.58, 0, dark, signalVisual);
+            const unlitAmber = new THREE.MeshStandardMaterial({ color: 0x392c0b, roughness: .5 });
+            const bezel = new THREE.MeshStandardMaterial({ color: 0x080d0e, roughness: .6 });
+            for (const [y, material] of [[3.94, this.red], [3.58, unlitAmber], [3.22, this.green]] as const) {
+                const rim = new THREE.Mesh(new THREE.CircleGeometry(.185, 40), bezel);
+                rim.position.set(poleX, y, .169);
+                signalVisual.add(rim);
+                const lens = new THREE.Mesh(new THREE.SphereGeometry(.15, 32, 16), material);
+                lens.scale.z = .2;
+                lens.position.set(poleX, y, .176);
+                signalVisual.add(lens);
+                box(.38, .025, .16, poleX, y + .19, .23, dark, signalVisual);
+            }
+        } else {
+            box(.16, 3.6, .16, poleX, 1.8, 0, metal, signalVisual);
+            box(.8, 1.6, .4, poleX, 3.45, 0, dark, signalVisual);
+            for (const face of faces) {
+                for (const [y, material] of [[3.8, this.red], [3.12, this.green]] as const) {
+                    const lens = new THREE.Mesh(new THREE.CircleGeometry(face.lensRadius, 32), material);
+                    lens.position.set(poleX + face.offsetX, y, face.offsetZ);
+                    lens.rotation.y = face.rotationY;
+                    signalVisual.add(lens);
+                }
             }
         }
         
-        // Yellow line position X honors stopLineX so callers can move the visible stop
-        // line (and its trigger zone) off the default `-width + 1` for rotated signals.
-        // Default (-width + 1) preserves the legacy visual.
-        box(stopLineLength, .012, .12, this.stopLineX, .09, stopLineZ,
-            new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .8 }));
+        // Keep every dash inside the requested stop-line span. Other signals
+        // retain their original solid marking unless explicitly configured.
+        if (options.showStopLine ?? true) {
+            const stopLineMaterial = new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .8 });
+            if (options.stopLineDashed) {
+                const dashLength = .45;
+                const dashGap = .25;
+                const dashCount = Math.max(1, Math.floor((stopLineLength + dashGap) / (dashLength + dashGap)));
+                const actualDashLength = Math.min(dashLength, stopLineLength / dashCount);
+                const paintedLength = dashCount * actualDashLength + (dashCount - 1) * dashGap;
+                const firstDashX = this.stopLineX - paintedLength / 2 + actualDashLength / 2;
+                for (let i = 0; i < dashCount; i++) {
+                    box(actualDashLength, .012, .12,
+                        firstDashX + i * (actualDashLength + dashGap), .09, stopLineZ,
+                        stopLineMaterial);
+                }
+            } else {
+                box(stopLineLength, .012, .12, this.stopLineX, .09, stopLineZ, stopLineMaterial);
+            }
+        }
 
         // Debug marker: paint the trigger zone in semi-transparent red so the
         // trigger footprint is visible in the scene. The X extent is the full
         // trigger window (triggerLengthX); the Z extent matches triggerStart..triggerLength.
         // When either axis collapses to 0 we still draw a thin slab so the
         // marker stays visible (helps spot mis-configured sensors).
-        const triggerWidth = this.stopLineHalfWidth;
-        const triggerDepth = Math.max(this.triggerLength, .5);
-        const triggerMarker = new THREE.Mesh(
-            new THREE.BoxGeometry(triggerWidth, .04, triggerDepth),
-            new THREE.MeshBasicMaterial({
+        if (options.showTriggerZone ?? false) {
+            const triggerWidth = Math.max(this.triggerLengthX, .5);
+            const triggerDepth = Math.max(this.triggerLength, .5);
+            const triggerMaterial = new THREE.MeshBasicMaterial({
                 color: 0xff2030,
                 transparent: true,
                 opacity: .35,
-                depthWrite: false
-            })
-        );
-        triggerMarker.name = 'traffic-light-trigger-zone';
-        triggerMarker.position.set(
-            this.triggerStartX + this.triggerLengthX / 2,
-            .07,
-            this.triggerStart + this.triggerLength / 2
-        );
-        this.root.add(triggerMarker);
+                depthWrite: false,
+                side: THREE.DoubleSide,
+            });
+            let triggerMarker: THREE.Mesh;
+            if (this.triggerMaxXAtZ) {
+                // Follow the same curb edge used by hit detection, so the visible
+                // zone reaches the bend without extending beneath the grass.
+                const outline = new THREE.Shape();
+                outline.moveTo(this.triggerStartX, -this.triggerStart);
+                const steps = 32;
+                for (let i = 0; i <= steps; i++) {
+                    const localZ = this.triggerStart + this.triggerLength * i / steps;
+                    outline.lineTo(this.triggerMaxXAtZ(localZ), -localZ);
+                }
+                outline.lineTo(this.triggerStartX, -(this.triggerStart + this.triggerLength));
+                outline.closePath();
+                const geometry = new THREE.ShapeGeometry(outline);
+                geometry.rotateX(-Math.PI / 2);
+                triggerMarker = new THREE.Mesh(geometry, triggerMaterial);
+                triggerMarker.position.y = .091;
+            } else {
+                triggerMarker = new THREE.Mesh(
+                    new THREE.BoxGeometry(triggerWidth, .04, triggerDepth),
+                    triggerMaterial,
+                );
+                triggerMarker.position.set(
+                    this.triggerStartX + this.triggerLengthX / 2,
+                    .07,
+                    this.triggerStart + this.triggerLength / 2
+                );
+            }
+            triggerMarker.name = 'traffic-light-trigger-zone';
+            this.root.add(triggerMarker);
+        }
 
         this.canvas.width = 256; this.canvas.height = 128;
         this.texture = new THREE.CanvasTexture(this.canvas);
         this.texture.colorSpace = THREE.SRGBColorSpace;
 
-        for (const face of faces) {
-            const timer = new THREE.Mesh(new THREE.PlaneGeometry(face.timerSize[0], face.timerSize[1]),
-                new THREE.MeshBasicMaterial({ map: this.texture, side: THREE.DoubleSide }));
-            timer.position.set(poleX + face.offsetX, 4.55, face.offsetZ * (face.offsetX === 0 ? 1.04 : 0));
-            timer.rotation.y = face.rotationY;
-            this.root.add(timer);
+        if (this.realisticHead) {
+            box(.52, .34, .3, poleX, 4.36, 0, dark, signalVisual);
+            const timer = new THREE.Mesh(new THREE.PlaneGeometry(.44, .26),
+                new THREE.MeshBasicMaterial({ map: this.texture }));
+            timer.position.set(poleX, 4.36, .156);
+            signalVisual.add(timer);
+        } else {
+            for (const face of faces) {
+                const timer = new THREE.Mesh(new THREE.PlaneGeometry(face.timerSize[0], face.timerSize[1]),
+                    new THREE.MeshBasicMaterial({ map: this.texture, side: THREE.DoubleSide }));
+                timer.position.set(poleX + face.offsetX, 4.55, face.offsetZ * (face.offsetX === 0 ? 1.04 : 0));
+                timer.rotation.y = face.rotationY;
+                signalVisual.add(timer);
+            }
         }
 
         this.refresh();
@@ -194,7 +284,8 @@ export class TrafficLight {
             // Z extent comes from triggerStart/triggerLength. Caller can shrink
             // either axis for non-rectangular detection footprints.
             if (this.probe.x >= this.triggerStartX
-                && this.probe.x < this.triggerStartX + this.triggerLengthX
+                && this.probe.x < (this.triggerMaxXAtZ?.(this.probe.z)
+                    ?? this.triggerStartX + this.triggerLengthX)
                 && this.probe.z >= this.triggerStart
                 && this.probe.z < this.triggerStart + this.triggerLength) {
                 this.active = true;
@@ -231,9 +322,17 @@ export class TrafficLight {
         if (key === this.display) return;
         this.display = key;
         const ctx = this.canvas.getContext('2d')!;
-        ctx.fillStyle = '#111820'; ctx.fillRect(0, 0, 256, 128);
-        ctx.fillStyle = this.phase === 'red' ? '#ff3542' : this.phase === 'green' ? '#24ff78' : '#85929e';
-        ctx.font = 'bold 100px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = this.realisticHead ? '#050b0d' : '#111820';
+        ctx.fillRect(0, 0, 256, 128);
+        ctx.fillStyle = this.phase === 'red' ? '#ff3542'
+            : this.phase === 'green' ? (this.realisticHead ? '#30ffe1' : '#24ff78')
+                : (this.realisticHead ? '#22575a' : '#85929e');
+        if (this.realisticHead) {
+            ctx.shadowColor = ctx.fillStyle;
+            ctx.shadowBlur = 18;
+        }
+        ctx.font = this.realisticHead ? 'bold 100px monospace' : 'bold 100px Arial';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(display, 128, 68);
         this.texture.needsUpdate = true;
     }

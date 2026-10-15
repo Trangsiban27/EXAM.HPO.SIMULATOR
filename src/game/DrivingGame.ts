@@ -10,12 +10,17 @@ import {CameraManager} from './CameraManager';
 import {ProbeController} from './ProbeController';
 import {FRONT_PROBE_OFFSET_M} from './startPosition';
 import {AutoDriveController} from './autoDrive/AutoDriveController';
-import {AUTO_DRIVE_LESSONS} from './autoDrive/autoDriveLessons';
+import {AUTO_DRIVE_LESSONS, EXAM_06_LESSON, EXAM_07_LESSON, EXAM_08_LESSON, EXAM_09_LESSON} from './autoDrive/autoDriveLessons';
+import {Exam04SpeedZone} from './exam/Exam04SpeedZone';
+import {ParkingBayBSpeedZone} from './exam/ParkingBayBSpeedZone';
+import {RedWhiteCurbContact} from './RedWhiteCurbContact';
 import type { ExamVehicleClass } from './exam/examRules';
 import {DevProbePanel} from '../ui/DevProbePanel';
 import type {Hud} from '../ui/Hud';
 
 const EXAM_VEHICLE_CLASSES: ExamVehicleClass[] = ['A1', 'A2', 'B', 'C1', 'C', 'D1', 'D2', 'D', 'E', 'Fc'];
+const EXAM_04_SPEED_LIMIT_KMH = 5;
+const PARKING_BAY_B_SPEED_LIMIT_KMH = 2;
 
 function getAutoDriveVehicleClass(): ExamVehicleClass {
 const requestedClass = new URLSearchParams(window.location.search).get('vehicleClass');
@@ -29,8 +34,12 @@ private renderer:THREE.WebGLRenderer;
 private input=new InputManager();
 private vehicle:Vehicle;
 private track=new Track();
+private redWhiteCurbContact=new RedWhiteCurbContact(this.track.root);
 private exam=new ExamEngine();
 private autoDrive!: AutoDriveController;
+private exam04SpeedZone!: Exam04SpeedZone;
+private sCurveSpeedZone!: Exam04SpeedZone;
+private parkingBayBSpeedZone!: ParkingBayBSpeedZone;
 private cameras!:CameraManager;
 private devProbePanel=new DevProbePanel();
 private probeCtrl?:ProbeController;
@@ -39,6 +48,7 @@ private animationId=0;
 private stopped=false;
 private lastCameraKey=false;
 private probe=new THREE.Vector3();
+private rearProbe=new THREE.Vector3();
 private wheelTmp=new THREE.Vector3();
 constructor(private host:HTMLDivElement,private hud:Hud,vehicle?:Vehicle,private develop=new URLSearchParams(window.location.search).get('develop')==='true'){
 const vehicleParam=new URLSearchParams(window.location.search).get('vehicle');
@@ -56,20 +66,63 @@ this.cameras.attach(this.renderer.domElement);
     this.scene.add(new THREE.HemisphereLight(0xddeeff,0x596347,2));
     // Wire up Exam04 sensors from the track (after buildExamGround ran in Track constructor)
     this.exam.wireExam04(this.track.wheelTrackCourseSensors);
+    this.exam04SpeedZone = new Exam04SpeedZone(this.track.wheelTrackCourseSensors);
+    this.sCurveSpeedZone = new Exam04SpeedZone(this.track.getWindingCourses().flatMap(({ course }) => {
+        const entryGate = course.root.getObjectByName('s-curve-entry-approach-yellow-dashed-line');
+        const exitGate = course.root.getObjectByName('s-curve-end-yellow-dashed-line');
+        if (!entryGate || !exitGate) return [];
+        course.root.updateWorldMatrix(true, true);
+        const sensor = (gate: THREE.Object3D) => {
+            const bounds = new THREE.Box3().setFromObject(gate);
+            bounds.min.y = -2;
+            bounds.max.y = 4;
+            return bounds;
+        };
+        return [{
+            startYellowSensor: sensor(entryGate),
+            endYellowSensor: sensor(exitGate),
+            exitForwardAxis: new THREE.Vector3(-1, 0, 0)
+                .applyQuaternion(course.root.getWorldQuaternion(new THREE.Quaternion())).normalize(),
+        }];
+    }));
+    this.parkingBayBSpeedZone = new ParkingBayBSpeedZone(this.track.root);
     // Wire up Exam05South với trafficLight South đã có sẵn (xem buildExamGround.ts).
     this.exam.wireExam05South(this.track);
     this.autoDrive = new AutoDriveController(
         AUTO_DRIVE_LESSONS,
-        lesson => this.hud.showAutoDriveLesson(lesson, () => this.autoDrive.continueLesson()),
+        lesson => this.hud.showAutoDriveLesson(lesson, () => this.autoDrive.continueLesson(),
+            this.autoDrive.canRecordExam05Continuation),
         () => {
             this.input.setAutomationEnabled(false);
             this.hud.setAutoDriveMode(false);
             this.hud.flash('Đã chạy hết lộ trình tự động', 'success');
         },
-        kind => this.hud.showWaypointStopPrompt(kind),
+        kind => {
+            if (kind === 'exam05') {
+                this.hud.showAutoDriveLesson(EXAM_06_LESSON, () => this.autoDrive.continueLesson(),
+                    this.autoDrive.canRecordExam05Continuation, this.autoDrive.hasSavedExam06Approach);
+            } else if (kind === 'exam07') {
+                this.hud.showAutoDriveLesson(EXAM_07_LESSON, () => this.autoDrive.continueLesson(),
+                    this.autoDrive.canRecordExam07Continuation, this.autoDrive.hasSavedExam08Approach);
+            } else if (kind === 'exam08') {
+                this.hud.showAutoDriveLesson(EXAM_08_LESSON, () => this.autoDrive.continueLesson(),
+                    this.autoDrive.canRecordExam08Continuation, this.autoDrive.hasSavedExam09Approach);
+            } else if (kind === 'exam09') {
+                this.hud.showAutoDriveLesson(EXAM_09_LESSON, () => this.autoDrive.continueLesson());
+            } else {
+                this.hud.showWaypointStopPrompt(kind);
+            }
+        },
         getAutoDriveVehicleClass(),
         this.track.wheelTrackCourseSensors[0].startYellowSensor,
+        this.track.getTrafficLight('SOUTH'),
+        this.track.getTrafficLight('EAST'),
+        this.track.root.getObjectByName('road-11a-railway-white-line'),
     );
+    this.hud.setExam06Selectable(this.autoDrive.hasSavedExam06Approach);
+    this.hud.setExam07Selectable(this.autoDrive.hasSavedExam07Approach);
+    this.hud.setExam08Selectable(this.autoDrive.hasExam08PopupWaypoint);
+    this.hud.setExam09Selectable(this.autoDrive.hasExam09PopupWaypoint);
 if(this.develop){
 this.probeCtrl=new ProbeController(this.cameras.camera,this.track,this.renderer.domElement,this.devProbePanel,true);
 }
@@ -84,7 +137,7 @@ sun.shadow.camera.bottom=-60;
 this.scene.add(sun);
 window.addEventListener('resize',this.resize);
 this.resize();
-this.hud.bind({onRestart:()=>this.restart(),onCamera:()=>{if(!this.develop)this.cameras.next()},onAnalog:(name,value)=>this.input.setAnalog(name,value),onVirtual:(c,a)=>this.input.setVirtual(c,a),onSignalChange:(state)=>this.vehicle.setSignal(state),onSeatBelt:(on)=>this.vehicle.seatBeltFastened=on,onAutoDriveToggle:()=>this.toggleAutoDrive(),onWaypointRecordingStart:()=>this.startWaypointRecording(),onWaypointRecordingFinish:()=>this.finishWaypointRecording()})
+this.hud.bind({onRestart:()=>this.restart(),onCamera:()=>{if(!this.develop)this.cameras.next()},onAnalog:(name,value)=>this.input.setAnalog(name,value),onVirtual:(c,a)=>this.input.setVirtual(c,a),onSignalChange:(state)=>this.vehicle.setSignal(state),onSeatBelt:(on)=>this.vehicle.seatBeltFastened=on,onAutoDriveToggle:()=>this.toggleAutoDrive(),onLessonSelect:(lessonId)=>this.selectAutoDriveLesson(lessonId),onWaypointRecordingStart:()=>this.startWaypointRecording(),onWaypointRecordingFinish:()=>this.finishWaypointRecording()})
 }
 start(){
 this.stopped=false;
@@ -97,6 +150,9 @@ const ck=this.input.isDown('KeyC');
 if(!this.develop&&ck&&!this.lastCameraKey)this.cameras.next();
 this.lastCameraKey=ck;
 this.vehicle.followSurface((x,z)=>this.track.getSurfaceHeight(x,z));
+const frontBeforeMove=this.probe.set(0,0,-FRONT_PROBE_OFFSET_M).applyQuaternion(this.vehicle.root.quaternion).add(this.vehicle.root.position);
+const rearBeforeMove=this.rearProbe.set(0,0,FRONT_PROBE_OFFSET_M).applyQuaternion(this.vehicle.root.quaternion).add(this.vehicle.root.position);
+this.updateCourseSpeedLimits(frontBeforeMove,rearBeforeMove,Object.values(this.getWheelPositions()));
 if(!this.develop||this.autoDrive.enabled){
 if(this.autoDrive.enabled&&this.autoDrive.isWaypointRecording){
 this.vehicle.update(dt,this.input);
@@ -112,16 +168,12 @@ this.vehicle.followSurface((x,z)=>this.track.getSurfaceHeight(x,z));
 this.track.update(dt,this.vehicle.root.position);
 const penaltyCount=this.exam.penalties.length;
 const frontPosition=this.probe.set(0,0,-FRONT_PROBE_OFFSET_M).applyQuaternion(this.vehicle.root.quaternion).add(this.vehicle.root.position).clone();
-
-// Populate wheel positions from Vehicle3.wheelAssembly if available
-const wheelPositions = this.vehicle instanceof Vehicle3 && this.vehicle.wheelAssembly
-    ? {
-        FL: this.vehicle.wheelAssembly.getWheel('FL').getWorldPosition(this.wheelTmp).clone(),
-        FR: this.vehicle.wheelAssembly.getWheel('FR').getWorldPosition(this.wheelTmp).clone(),
-        RL: this.vehicle.wheelAssembly.getWheel('RL').getWorldPosition(this.wheelTmp).clone(),
-        RR: this.vehicle.wheelAssembly.getWheel('RR').getWorldPosition(this.wheelTmp).clone(),
-      }
-    : undefined;
+const rearPosition=this.rearProbe.set(0,0,FRONT_PROBE_OFFSET_M).applyQuaternion(this.vehicle.root.quaternion).add(this.vehicle.root.position);
+const wheelPositions = this.getWheelPositions();
+this.updateCourseSpeedLimits(frontPosition,rearPosition,Object.values(wheelPositions));
+if(this.autoDrive.enabled)this.redWhiteCurbContact.reset();
+else if(this.exam.scoringMode==='normal'&&!this.exam.isFinished
+    &&this.redWhiteCurbContact.touches(wheelPositions))this.exam.disqualifyForRedWhiteCurb();
 
 const startToast=this.autoDrive.enabled ? undefined : this.exam.update({position:this.vehicle.root.position,frontPosition,wheelPositions,speedKmh:this.vehicle.getSpeedKmh(),rpm:this.vehicle.transmission.rpm,engineRunning:this.vehicle.transmission.running,stalled:this.vehicle.transmission.car.stalled,leftSignal:this.vehicle.signals.left,seatBeltFastened:this.vehicle.seatBeltFastened},this.track.startSignal?.phase??'idle',dt);
 const added=this.exam.penalties.slice(penaltyCount);
@@ -143,16 +195,21 @@ this.track.setStopDistanceLabel(0,'HIDDEN',0);
 }
 
 this.cameras.update(this.vehicle,dt,this.input);
-this.hud.update({speedKmh:this.vehicle.getSpeedKmh(),gasPedal:this.vehicle.transmission.pedals.gas,brakePedal:this.vehicle.transmission.pedals.brake,gearWarnings:this.vehicle.transmission.car.warnings,engineStatus:this.vehicle.transmission.status,gear:this.vehicle.transmission.gear,clutch:this.vehicle.transmission.clutch,rpm:this.vehicle.transmission.rpm,steeringWheelAngle:this.vehicle.steeringSystem.steeringWheelAngle,steering:THREE.MathUtils.radToDeg(this.vehicle.steering),signals:{left:this.vehicle.signals.left,right:this.vehicle.signals.right,hazard:this.vehicle.signals.hazard},seatBelt:this.vehicle.seatBeltFastened,startLamp:this.exam.startLampOn,disqualified:this.exam.disqualified,disqualifyReason:this.exam.disqualifyReason,score:this.exam.score,elapsed:this.exam.elapsedSeconds,currentExercise:this.autoDrive.enabled?this.autoDrive.currentExerciseTitle:this.exam.currentExerciseTitle,penalties:this.exam.penalties,cameraMode:this.cameras.mode},this.exam.isFinished,this.exam.scoringMode);
+const displaySteeringWheelAngle=this.autoDrive.enabled&&!this.autoDrive.isWaypointRecording
+    ?0:this.vehicle.steeringSystem.steeringWheelAngle;
+this.hud.update({speedKmh:this.vehicle.getSpeedKmh(),gasPedal:this.vehicle.transmission.pedals.gas,brakePedal:this.vehicle.transmission.pedals.brake,gearWarnings:this.vehicle.transmission.car.warnings,engineStatus:this.vehicle.transmission.status,gear:this.vehicle.transmission.gear,clutch:this.vehicle.transmission.clutch,rpm:this.vehicle.transmission.rpm,steeringWheelAngle:displaySteeringWheelAngle,steering:THREE.MathUtils.radToDeg(this.vehicle.steering),signals:{left:this.vehicle.signals.left,right:this.vehicle.signals.right,hazard:this.vehicle.signals.hazard},seatBelt:this.vehicle.seatBeltFastened,startLamp:this.exam.startLampOn,disqualified:this.exam.disqualified,disqualifyReason:this.exam.disqualifyReason,score:this.exam.score,elapsed:this.exam.elapsedSeconds,currentExercise:this.autoDrive.enabled?this.autoDrive.currentExerciseTitle:this.exam.currentExerciseTitle,penalties:this.exam.penalties,cameraMode:this.cameras.mode},this.exam.isFinished,this.exam.scoringMode);
+if(this.autoDrive.enabled)this.hud.setSelectedLesson(this.autoDrive.currentExamNumber);
 if(startToast){
 if(startToast==='Bắt đầu thi')this.track.startSignal?.goGreenNow();
 if(this.exam.scoringMode==='normal')this.hud.flash(startToast,startToast.startsWith('Chào mừng')?{kind:'exam',durationMs:7000}:'exam');
 if(startToast==='Lệnh xuất phát')try{speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance('Xuất phát'))}catch{}}
-this.cabin.render(this.renderer,this.scene,this.cameras.camera,this.vehicle,!this.develop&&this.cameras.mode===2)
+this.cabin.render(this.renderer,this.scene,this.cameras.camera,this.vehicle,
+    !this.develop&&this.cameras.mode===2,displaySteeringWheelAngle)
 };
 loop()
 }
 private handlePenalties(){
+if(this.exam.isFinished)return;
 if(this.exam.approaching)return;
 const now=performance.now(),p=this.vehicle.root.position;
 const locals=[new THREE.Vector3(-.95,0,1.25),new THREE.Vector3(.95,0,1.25),new THREE.Vector3(-.95,0,-1.3),new THREE.Vector3(.95,0,-1.3)];
@@ -160,13 +217,17 @@ for(const local of locals){
 this.probe.copy(local).applyQuaternion(this.vehicle.root.quaternion).add(p);
 for(let i=0;i<this.track.penaltyZones.length;i++){
 if(this.track.penaltyZones[i].containsPoint(this.probe)){
-const evt=this.exam.applyLinePenalty(i,now);
+const evt=this.exam.applyLinePenalty(this.track.penaltyZoneGroupIndices[i] ?? i,now);
 if(evt)this.hud.flash(evt.reason,'penalty')}}}}
 restart(){
 this.autoDrive?.stop();
+this.redWhiteCurbContact.reset();
 this.input.setAutomationEnabled(false);
 this.hud.setAutoDriveMode(false);
 this.vehicle.reset();
+this.exam04SpeedZone.reset();
+this.sCurveSpeedZone.reset();
+this.parkingBayBSpeedZone.reset();
 this.exam.reset();
 this.track.reset();
 this.input.clearVirtual();
@@ -174,29 +235,74 @@ this.hud.clearNotices();
 if(this.exam.scoringMode==='normal')this.hud.flash('Đã bắt đầu lại bài thi','exam')
 }
     private toggleAutoDrive(){
+this.redWhiteCurbContact.reset();
 if(this.autoDrive.enabled){
 this.autoDrive.stop();
 this.input.setAutomationEnabled(false);
 this.vehicle.reset();this.exam.reset();this.track.reset();this.input.clearVirtual();
+this.exam04SpeedZone.reset();
+this.sCurveSpeedZone.reset();
+this.parkingBayBSpeedZone.reset();
 this.hud.setAutoDriveMode(false);
 return;
 }
 this.vehicle.reset();this.exam.reset();this.track.reset();this.input.clearVirtual();
+this.exam04SpeedZone.reset();
+this.sCurveSpeedZone.reset();
+this.parkingBayBSpeedZone.reset();
 this.vehicle.seatBeltFastened=true;
 this.input.setAutomationEnabled(true);
 this.autoDrive.start(this.vehicle);
 this.hud.setAutoDriveMode(true);
 }
+private selectAutoDriveLesson(lessonId: number){
+if(lessonId===6?!this.autoDrive.hasSavedExam06Approach:
+    lessonId===7?!this.autoDrive.hasSavedExam07Approach:
+    lessonId===8?!this.autoDrive.hasExam08PopupWaypoint:
+    lessonId===9?!this.autoDrive.hasExam09PopupWaypoint:
+    !AUTO_DRIVE_LESSONS.some(lesson=>lesson.id===lessonId))return;
+this.redWhiteCurbContact.reset();
+this.hud.setAutoDriveMode(false);
+this.vehicle.reset();this.exam.reset();this.track.reset();this.input.clearVirtual();
+this.exam04SpeedZone.reset();
+this.sCurveSpeedZone.reset();
+this.parkingBayBSpeedZone.reset();
+this.vehicle.seatBeltFastened=true;
+this.input.setAutomationEnabled(true);
+this.autoDrive.start(this.vehicle);
+this.hud.setAutoDriveMode(true);
+this.autoDrive.jumpToLesson(lessonId,this.vehicle);
+this.hud.setSelectedLesson(lessonId);
+}
 private startWaypointRecording(){
+if(!this.autoDrive.beginWaypointRecording(this.vehicle))return false;
 this.input.clearVirtual();
 this.input.setAutomationEnabled(false);
-this.autoDrive.beginWaypointRecording(this.vehicle);
 this.hud.setWaypointRecordingCount(1);
+return true;
 }
 private finishWaypointRecording(){
 const route=this.autoDrive.finishWaypointRecording(this.vehicle);
 this.input.setAutomationEnabled(true);
 return route;
+}
+private getWheelPositions(): { FL: THREE.Vector3; FR: THREE.Vector3; RL: THREE.Vector3; RR: THREE.Vector3 } {
+if(this.vehicle instanceof Vehicle3 && this.vehicle.wheelAssembly)return {
+    FL:this.vehicle.wheelAssembly.getWheel('FL').getWorldPosition(this.wheelTmp).clone(),
+    FR:this.vehicle.wheelAssembly.getWheel('FR').getWorldPosition(this.wheelTmp).clone(),
+    RL:this.vehicle.wheelAssembly.getWheel('RL').getWorldPosition(this.wheelTmp).clone(),
+    RR:this.vehicle.wheelAssembly.getWheel('RR').getWorldPosition(this.wheelTmp).clone(),
+};
+const wheel=(x:number,z:number)=>new THREE.Vector3(x,0,z)
+    .applyQuaternion(this.vehicle.root.quaternion).add(this.vehicle.root.position);
+return {FL:wheel(-.95,-1.3),FR:wheel(.95,-1.3),RL:wheel(-.95,1.25),RR:wheel(.95,1.25)};
+}
+private updateCourseSpeedLimits(front:THREE.Vector3,rear:THREE.Vector3,wheels:readonly THREE.Vector3[]){
+const inExam04=this.exam04SpeedZone.update(front,rear);
+const inSCurve=this.sCurveSpeedZone.update(front,rear);
+const inParkingBayB=this.parkingBayBSpeedZone.update(wheels);
+this.vehicle.setSpeedLimitKmh(inParkingBayB?PARKING_BAY_B_SPEED_LIMIT_KMH:
+    inExam04||inSCurve?EXAM_04_SPEED_LIMIT_KMH:undefined);
 }
 private resize=()=>{
 const w=this.host.clientWidth,h=this.host.clientHeight;

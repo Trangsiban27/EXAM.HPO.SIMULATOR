@@ -12,6 +12,8 @@ export class Vehicle {
     protected wheels: THREE.Mesh[] = []; 
     protected frontPivots: THREE.Group[] = []; 
     speed = 0; steering = 0;
+    private speedLimitMps = Infinity;
+    get maxAllowedSpeedMps(): number { return this.speedLimitMps; }
     seatBeltFastened = false;
     private signalState = { left: false, right: false, hazard: false };
     get signals(): Readonly<{ left: boolean; right: boolean; hazard: boolean }> { return this.signalState; }
@@ -229,6 +231,7 @@ export class Vehicle {
         this.visual.rotation.set(0, 0, 0);
         this.slopeAngle = 0;
         this.speed = 0; this.steering = 0;
+        this.speedLimitMps = Infinity;
         this.seatBeltFastened = false;
         this.signalState = { left: false, right: false, hazard: false };
         for (const m of this.signalMaterials.turn) m.color.setHex(0x6a4a08);
@@ -241,6 +244,19 @@ export class Vehicle {
     }
     setSignal(next: { left: boolean; right: boolean; hazard: boolean }) {
         this.signalState = { ...next };
+    }
+    setSpeedLimitKmh(limitKmh?: number): void {
+        const limitMps = limitKmh === undefined ? Infinity : limitKmh / 3.6;
+        if (this.speedLimitMps === limitMps) return;
+        this.speedLimitMps = limitMps;
+        this.speed = THREE.MathUtils.clamp(this.speed, -limitMps, limitMps);
+        this.transmission.car.physics.speed = THREE.MathUtils.clamp(
+            this.transmission.car.physics.speed, -limitMps, limitMps);
+    }
+    protected capManualSpeed(speed: number): number {
+        const limited = THREE.MathUtils.clamp(speed, -this.speedLimitMps, this.speedLimitMps);
+        this.transmission.car.physics.speed = limited;
+        return limited;
     }
     // Standard automotive cadence: ~1.1 Hz blink (~550 ms on, ~550 ms off).
     protected updateSignalBlink() {
@@ -276,7 +292,7 @@ export class Vehicle {
         this.steeringSystem.update(dt, 0, this.speed,
             THREE.MathUtils.clamp(steeringInput, -1, 1) * steeringConfig.maxSteeringWheelAngle);
         this.steering = this.steeringSystem.centerSteerAngle;
-        this.speed = Math.max(0, speed);
+        this.speed = THREE.MathUtils.clamp(speed, -this.speedLimitMps, this.speedLimitMps);
         const pose = advanceVehicle(this.root.position.x, this.root.position.z, this.root.rotation.y, this.speed, this.steering, dt);
         this.root.position.x = pose.x; this.root.position.z = pose.z; this.root.rotation.y = pose.heading;
         for (const pivot of this.frontPivots) pivot.rotation.y = -(pivot.position.x < 0 ? this.steeringSystem.frontLeftAngle : this.steeringSystem.frontRightAngle);
@@ -289,7 +305,8 @@ export class Vehicle {
             this.steeringSystem.update(dt, Number(right) - Number(left), this.speed,
                 dragging ? ((input.getAnalog('steering') ?? .5) * 2 - 1) * steeringConfig.maxSteeringWheelAngle : undefined);
             this.steering = this.steeringSystem.centerSteerAngle;
-            this.speed = this.transmission.update(dt, input, this.speed, this.slopeAngle);
+            this.speed = this.capManualSpeed(this.transmission.update(dt, input, this.speed,
+                this.slopeAngle, this.speedLimitMps));
             const pose = advanceVehicle(this.root.position.x, this.root.position.z, this.root.rotation.y, this.speed, this.steering, dt);
             this.root.position.x = pose.x; this.root.position.z = pose.z; this.root.rotation.y = pose.heading;
             for (const pivot of this.frontPivots) pivot.rotation.y = -(pivot.position.x < 0 ? this.steeringSystem.frontLeftAngle : this.steeringSystem.frontRightAngle);

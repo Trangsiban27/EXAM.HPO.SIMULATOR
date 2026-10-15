@@ -35,8 +35,8 @@ export class CabinInterior {
         this.rpm=this.root.querySelector('.interior-rpm')!;
         this.gear=this.root.querySelector('.interior-gear')!;
     }
-    update(vehicle: Vehicle) {
-        this.wheel.setAttribute('transform',`rotate(${vehicle.steeringSystem.steeringWheelAngle} 760 785)`);
+    update(vehicle: Vehicle, steeringWheelAngle: number) {
+        this.wheel.setAttribute('transform',`rotate(${steeringWheelAngle} 760 785)`);
         this.speed.textContent=String(Math.round(vehicle.getSpeedKmh()));
         this.rpm.textContent=String(vehicle.transmission.rpm);
         this.gear.textContent=vehicle.transmission.gear===0?'N':vehicle.transmission.gear<0?'R':String(vehicle.transmission.gear);

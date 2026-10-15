@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 
 /**
  * PARALLEL PARKING BAY SPEC — CHUỒNG GHÉP XE NGANG HẠNG B
@@ -65,6 +66,7 @@ export const PARALLEL_PARKING_B = {
     parkingLengthM: 6.615,
     parkingDepthM: 2.125,
     cornerRadiusM: 0.3,
+    asphaltCornerRadiusM: 1,
     examBoundaryWidthM: 0.10,
     physicalEdgeOffsetM: 0.25,
 } as const;
@@ -132,8 +134,16 @@ export interface ParallelParkingBayBOptions {
     rotationY?: number;
     /** Bán kính bo góc đầu xa (m). Mặc định theo vehicleClass. Phải 0 < R ≤ depth. */
     cornerRadiusM?: number;
+    /** Bán kính hai góc ngoài của mặt nhựa ở đầu sâu trong chuồng. Mặc định 1 m. */
+    asphaltCornerRadiusM?: number;
     /** Độ dày vạch đỏ sát hạch (m). Mặc định 0.10. */
     examBoundaryWidthM?: number;
+    /** Điểm bắt đầu hai nhánh vạch đỏ tính từ cửa chuồng (m). Mặc định bằng physicalEdgeOffsetM. */
+    examBoundaryStartM?: number;
+    /** Vẽ vạch vàng đứt dọc cửa chuồng. Mặc định false. */
+    yellowDashedEntrance?: boolean;
+    /** Kéo hai đầu curb đỏ-trắng của chuồng tới curb đường chính. Mặc định false. */
+    joinRoadCurb?: boolean;
     /** Khoảng cách từ mép ngoài vạch đỏ sát hạch đến mép trong curb đen (m). Mặc định 0.25. */
     physicalEdgeOffsetM?: number;
     /** Bề dày dải curb đen (m). Mặc định 0.15. */
@@ -180,7 +190,10 @@ export class ParallelParkingBayB {
     readonly lengthM: number;
     readonly depthM: number;
     readonly cornerRadiusM: number;
+    readonly asphaltCornerRadiusM: number;
     readonly examBoundaryWidthM: number;
+    readonly examBoundaryStartM: number;
+    readonly joinRoadCurb: boolean;
     readonly physicalEdgeOffsetM: number;
     readonly curbWidthM: number;
     readonly curbHeightM: number;
@@ -205,10 +218,12 @@ export class ParallelParkingBayB {
         const lengthM = opts.parkingLengthM ?? sizeConfig.parkingLengthM;
         const depthM = opts.parkingDepthM ?? sizeConfig.parkingDepthM;
         const cornerRadiusM = opts.cornerRadiusM ?? sizeConfig.cornerRadiusM;
+        const asphaltCornerRadiusM = opts.asphaltCornerRadiusM ?? PARALLEL_PARKING_B.asphaltCornerRadiusM;
         const examBoundaryWidthM = opts.examBoundaryWidthM ?? PARALLEL_PARKING_B.examBoundaryWidthM;
         const physicalEdgeOffsetM = opts.physicalEdgeOffsetM ?? PARALLEL_PARKING_B.physicalEdgeOffsetM;
+        const examBoundaryStartM = opts.examBoundaryStartM ?? physicalEdgeOffsetM;
         const curbWidthM = opts.curbWidthM ?? 0.15;
-        const curbHeightM = opts.curbHeightM ?? 0.05;
+        const curbHeightM = opts.curbHeightM ?? CURB_VISUAL_HEIGHT_M;
         const curbPattern = opts.curbPattern ?? 'red-white';
         const curbSegmentLengthM = opts.curbSegmentLengthM ?? 0.8;
         const curbColor = opts.curbColor ?? '#2c2c2e';
@@ -228,8 +243,17 @@ export class ParallelParkingBayB {
         if (cornerRadiusM <= 0 || cornerRadiusM > depthM) {
             throw new Error('ParallelParkingBayB: invalid corner radius (must be 0 < R ≤ depth)');
         }
+        const asphaltDepthM = depthM + physicalEdgeOffsetM + curbWidthM + 0.10;
+        const asphaltLengthM = lengthM + 2 * (physicalEdgeOffsetM + curbWidthM + 0.10);
+        if (asphaltCornerRadiusM <= 0
+            || asphaltCornerRadiusM > Math.min(asphaltDepthM, asphaltLengthM / 2)) {
+            throw new Error('ParallelParkingBayB: asphalt corner radius must fit the surface');
+        }
         if (examBoundaryWidthM <= 0) {
             throw new Error('ParallelParkingBayB: examBoundaryWidthM must be > 0');
+        }
+        if (examBoundaryStartM < 0 || examBoundaryStartM >= depthM - cornerRadiusM) {
+            throw new Error('ParallelParkingBayB: examBoundaryStartM must be between 0 and depthM - cornerRadiusM');
         }
         if (physicalEdgeOffsetM < 0) {
             throw new Error('ParallelParkingBayB: physicalEdgeOffsetM must be ≥ 0');
@@ -242,7 +266,10 @@ export class ParallelParkingBayB {
         this.lengthM = lengthM;
         this.depthM = depthM;
         this.cornerRadiusM = cornerRadiusM;
+        this.asphaltCornerRadiusM = asphaltCornerRadiusM;
         this.examBoundaryWidthM = examBoundaryWidthM;
+        this.examBoundaryStartM = examBoundaryStartM;
+        this.joinRoadCurb = opts.joinRoadCurb ?? false;
         this.physicalEdgeOffsetM = physicalEdgeOffsetM;
         this.curbWidthM = curbWidthM;
         this.curbHeightM = curbHeightM;
@@ -286,6 +313,7 @@ export class ParallelParkingBayB {
         // Xây dựng các lớp hình học
         this.buildSurface();
         this.buildExamBoundary();
+        if (opts.yellowDashedEntrance) this.buildYellowDashedEntrance();
         this.buildPhysicalCurb();
         this.buildLogic();
         this.buildDebug();
@@ -308,15 +336,39 @@ export class ParallelParkingBayB {
         const sideSign = this.side === 'LEFT' ? -1 : 1;
         const totalDepth = this.depthM + this.physicalEdgeOffsetM + this.curbWidthM + 0.10;
         const totalLength = this.lengthM + 2 * (this.physicalEdgeOffsetM + this.curbWidthM + 0.10);
+        const halfLength = totalLength / 2;
+        const radius = this.asphaltCornerRadiusM;
+        const surfaceShape = new THREE.Shape();
+        surfaceShape.moveTo(0, -halfLength);
+        surfaceShape.lineTo(totalDepth - radius, -halfLength);
+        const appendArc = (centerZ: number, startAngle: number, endAngle: number) => {
+            for (let i = 1; i <= 16; i++) {
+                const angle = startAngle + (endAngle - startAngle) * i / 16;
+                surfaceShape.lineTo(
+                    totalDepth - radius + radius * Math.cos(angle),
+                    -(centerZ + radius * Math.sin(angle)),
+                );
+            }
+        };
+        appendArc(halfLength - radius, Math.PI / 2, 0);
+        surfaceShape.lineTo(totalDepth, halfLength - radius);
+        appendArc(-halfLength + radius, 0, -Math.PI / 2);
+        surfaceShape.lineTo(0, halfLength);
+        surfaceShape.closePath();
+        const surfaceGeometry = new THREE.ExtrudeGeometry(surfaceShape, {
+            depth: 0.08, bevelEnabled: false,
+        });
+        surfaceGeometry.rotateX(-Math.PI / 2);
 
         const surfaceMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(totalDepth, 0.08, totalLength),
+            surfaceGeometry,
             new THREE.MeshStandardMaterial({
                 color: this.surfaceColor,
                 roughness: 0.95,
             })
         );
-        surfaceMesh.position.set(sideSign * (totalDepth / 2), 0.02, 0);
+        surfaceMesh.scale.x = sideSign;
+        surfaceMesh.position.y = -0.02;
         surfaceMesh.name = 'parking-surface';
         surfaceMesh.receiveShadow = true;
         this.surfaceGroup.add(surfaceMesh);
@@ -325,47 +377,44 @@ export class ParallelParkingBayB {
     /**
      * Vạch đỏ sát hạch (Spec §5, §6, §11, §12).
      * Gồm 3 thành phần con theo Spec §6 và §21:
-     *   - TopRedLine: đoạn thẳng song song trục X tại Z = +L/2, từ X = offset đến X = D - R
+     *   - TopRedLine: đoạn thẳng song song trục X tại Z = +L/2, từ X = start đến X = D - R
      *   - FarEndRedLine: nối top và bottom gồm 2 cung tròn chuẩn R và đoạn thẳng đáy X = D
-     *   - BottomRedLine: đoạn thẳng song song trục X tại Z = -L/2, từ X = offset đến X = D - R
-     * Hard constraint: KHÔNG CÓ vạch nào ở open side (X ∈ [0, offset]).
-     * Đoạn [0, offset] được cắt bỏ để không đè lên phần vạch/mép của đường chính.
+     *   - BottomRedLine: đoạn thẳng song song trục X tại Z = -L/2, từ X = start đến X = D - R
+     * Cửa chuồng vẫn mở; examBoundaryStartM quyết định chỗ hai nhánh đỏ gặp mép đường.
      */
     private buildExamBoundary(): void {
         const sideSign = this.side === 'LEFT' ? -1 : 1;
         const L = this.lengthM;
         const D = this.depthM;
         const R = this.cornerRadiusM;
-        const offset = this.physicalEdgeOffsetM;
+        const start = this.examBoundaryStartM;
         const W = this.examBoundaryWidthM;
         const H = 0.008;
         const Y = 0.06 + H / 2; // Nằm ngay trên mặt đường asphalt (Y=0.06)
 
         const redMat = new THREE.MeshStandardMaterial({
-            color: '#e52521',
+            color: '#f6d34c',
             roughness: 0.6,
             side: THREE.DoubleSide,
         });
 
-        // 1. TopRedLine: thẳng từ X=offset đến X=D-R tại Z=+L/2.
-        // Phần sát open side (X ∈ [0, offset]) được cắt bỏ để không đè lên vạch/phần của đường chính.
-        const straightLen = (D - R) - offset;
+        // Hai nhánh đỏ chạm mép đường khi start = 0; D/E giữ khoảng lùi mặc định.
+        const straightLen = (D - R) - start;
         const topRedLine = new THREE.Mesh(
             new THREE.BoxGeometry(straightLen, H, W),
             redMat
         );
-        topRedLine.position.set(sideSign * (offset + straightLen / 2), Y, +L / 2);
+        topRedLine.position.set(sideSign * (start + straightLen / 2), Y, +L / 2);
         topRedLine.name = 'TopRedLine';
         topRedLine.receiveShadow = true;
         this.examBoundaryGroup.add(topRedLine);
 
-        // 2. BottomRedLine: thẳng từ X=offset đến X=D-R tại Z=-L/2.
-        // Phần sát open side (X ∈ [0, offset]) cũng được cắt bỏ.
+        // 2. BottomRedLine: cùng điểm bắt đầu, ở đầu còn lại của chuồng.
         const bottomRedLine = new THREE.Mesh(
             new THREE.BoxGeometry(straightLen, H, W),
             redMat
         );
-        bottomRedLine.position.set(sideSign * (offset + straightLen / 2), Y, -L / 2);
+        bottomRedLine.position.set(sideSign * (start + straightLen / 2), Y, -L / 2);
         bottomRedLine.name = 'BottomRedLine';
         bottomRedLine.receiveShadow = true;
         this.examBoundaryGroup.add(bottomRedLine);
@@ -422,11 +471,33 @@ export class ParallelParkingBayB {
         this.examBoundaryGroup.add(farEndGroup);
     }
 
+    /** Vạch vàng đứt dọc miệng chuồng, nằm giữa hai đầu vạch đỏ. */
+    private buildYellowDashedEntrance(): void {
+        const sideSign = this.side === 'LEFT' ? -1 : 1;
+        const dashLengthM = Math.min(.48, this.lengthM);
+        const dashGapM = .25;
+        const dashCount = Math.max(1, Math.floor((this.lengthM + dashGapM) / (dashLengthM + dashGapM)));
+        const paintedLengthM = dashCount * dashLengthM + (dashCount - 1) * dashGapM;
+        const startZ = -paintedLengthM / 2 + dashLengthM / 2;
+        const material = new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .8 });
+        const line = new THREE.Group();
+        line.name = 'EntranceYellowDashedLine';
+        for (let i = 0; i < dashCount; i++) {
+            const dash = new THREE.Mesh(new THREE.BoxGeometry(.1, .008, dashLengthM), material);
+            dash.name = `EntranceYellowDash_${i}`;
+            dash.position.set(sideSign * this.examBoundaryStartM, .071,
+                startZ + i * (dashLengthM + dashGapM));
+            dash.receiveShadow = true;
+            line.add(dash);
+        }
+        this.examBoundaryGroup.add(line);
+    }
+
     /**
      * Dải mép vật lý / Curb viền phía ngoài.
      * Mặc định là dải viền xen kẽ đỏ-trắng (0xffffff và 0xd83b3b) như đường viền của Road.
      * Cửa vào phía road (X=0) hoàn toàn mở, không có curb (Spec §15).
-     * Phần curb sát open side (X ∈ [0, offset]) bị cắt bỏ để không đè lên mặt đường chính.
+     * Khi joinRoadCurb bật, hai đầu curb kéo tới mép đường chính.
      * Gồm:
      *   - TopCurb: các phân đoạn xen kẽ dọc trục X từ X=offset đến X=D-R, tại Z = +(L/2 + offset + W/2)
      *   - FarEndCurb: cung trên bo cong + cạnh xa dọc Z tại X = D+offset+W/2 + cung dưới bo cong
@@ -437,8 +508,11 @@ export class ParallelParkingBayB {
         const L = this.lengthM;
         const D = this.depthM;
         const R = this.cornerRadiusM;
-        const offset = this.physicalEdgeOffsetM;
-        const W = this.curbWidthM;
+        const W = this.curbPattern === 'red-white'
+            ? Math.min(this.curbWidthM, CURB_VISUAL_WIDTH_M)
+            : this.curbWidthM;
+        // Keep the physical envelope; paint only the outermost visible strip.
+        const offset = this.physicalEdgeOffsetM + this.curbWidthM - W;
         const H = this.curbHeightM;
         const Y = 0.06 + H / 2; // Đặt trên mặt đường (surface top = 0.06)
 
@@ -465,10 +539,9 @@ export class ParallelParkingBayB {
 
         let runningIndex = 0;
 
-        // 1. TopCurb: chạy dọc X từ `offset` (cách mép road một khoảng `physicalEdgeOffsetM`)
+        // 1. TopCurb: chạy dọc X từ mép đường (hoặc offset mặc định)
         // đến D-R tại Z = +L/2 + offset + W/2.
-        // Phần sát open side (từ X=0 đến X=offset) được cắt bỏ vì trùng với mặt đường chính.
-        const topStraightStart = offset;
+        const topStraightStart = this.joinRoadCurb ? -W / 2 : offset;
         const topStraightEnd = D - R;
         const straightLen = topStraightEnd - topStraightStart;
         const topCurbZ = +L / 2 + offset + W / 2;
@@ -576,8 +649,7 @@ export class ParallelParkingBayB {
 
         this.physicalEdgeGroup.add(farEndCurbGroup);
 
-        // 3. BottomCurb: chạy dọc X từ D-R về `offset` tại Z = -L/2 - offset - W/2.
-        // Phần sát open side (từ X=0 đến X=offset) được cắt bỏ vì trùng với mặt đường chính.
+        // 3. BottomCurb: chạy dọc X từ D-R về điểm bắt đầu của TopCurb.
         const bottomCurbZ = -L / 2 - offset - W / 2;
         const bottomCurbGroup = new THREE.Group();
         bottomCurbGroup.name = 'BottomCurb';
@@ -590,7 +662,7 @@ export class ParallelParkingBayB {
                 new THREE.BoxGeometry(botSegLen, H, W),
                 getMat(runningIndex++)
             );
-            // Đi từ góc bo D-R về phía cửa vào, dừng lại tại X = offset (bỏ đoạn 0 → offset)
+            // Đi từ góc bo D-R về phía cửa vào, dừng tại topStraightStart.
             const xMid = topStraightEnd - (i + 0.5) * botSegLen;
             segMesh.position.set(sideSign * xMid, 0, 0);
             segMesh.name = `BottomCurbSeg_${i}`;

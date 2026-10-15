@@ -1,5 +1,5 @@
 export const steeringConfig = {
-    maxSteeringWheelAngle: 540, maxRoadWheelAngle: 34,
+    maxSteeringWheelAngle: 540, maxRoadWheelAngle: 38,
     steeringSpeed: 750, steeringReturnStrength: .8,
     wheelBase: 2.55, trackWidth: 1.88, wheelRadius: .36,
 };

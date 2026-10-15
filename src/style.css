@@ -134,6 +134,31 @@ button:active {
 .exercise small {
   color: #a8b0ba;
 }
+.lesson-picker {
+  position: relative;
+  z-index: 1001;
+  pointer-events: auto;
+}
+.lesson-picker label {
+  color: #a8b0ba;
+  font-size: 11px;
+  font-weight: 800;
+}
+.lesson-picker select {
+  max-width: 108px;
+  padding: 6px 26px 6px 8px;
+  color: #eef5ff;
+  background: #253444;
+  border: 1px solid #40566c;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lesson-picker select:focus-visible {
+  outline: 2px solid #79c8ff;
+  outline-offset: 2px;
+}
 .develop-pill {
   color: #f0c94a;
   letter-spacing: .12em;

@@ -1,30 +1,45 @@
 import * as THREE from 'three';
+import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
+import { createGrassSurfaceTexture } from './grassSurface';
 import { Bridge } from './Bridge';
 import { RailwayCrossingRoad, type RailwayCrossingRoadOptions } from './RailwayCrossingRoad';
 import { TrafficLight, type TrafficLightOptions } from './TrafficLight';
-import { ExerciseSign } from './ExerciseSign';
-import { PedestrianSign, type PedestrianSignOptions } from './PedestrianSign';
-import { StopSign, type StopSignOptions } from './StopSign';
+import { ExerciseSign } from './signs/ExerciseSign';
+import { PedestrianSign, type PedestrianSignOptions } from './signs/PedestrianSign';
+import { StopSign, type StopSignOptions } from './signs/StopSign';
 import { SCurveTrack, type SCurveTrackOptions } from './WindingCourse';
 import { WheelTrackCourse, type WheelTrackCourseOptions } from './WheelTrackCourse';
 import { startPosition } from './startPosition';
 import { FourLaneRoad, type FourLaneRoadOptions } from './FourLaneRoad';
 import { FourLaneBidirectionalRoad, type FourLaneBidirectionalRoadOptions } from './FourLaneBidirectionalRoad';
 import { RoadCornerCurveR8R9, type RoadCornerCurveR8R9Options } from './RoadCornerCurveR8R9';
-import { isPointInPolygon } from './roundedPath';
+import { isPointInPolygon, offsetPath, splitByPattern, type Point } from './roundedPath';
 import { ParallelParkingBayB, type ParallelParkingBayBOptions } from './ParallelParkingBayB';
 import { PerpendicularParkingBayB, type PerpendicularParkingBayBOptions } from './PerpendicularParkingBayB';
 import { PerpendicularParkingBayC, type PerpendicularParkingBayCOptions } from './PerpendicularParkingBayC';
 import { RoadStraight955, type RoadStraight955Options } from './RoadStraight955';
 import type { ExamVehicleClass } from './exam/examRules';
 import { getWindingCourseSpec, validateWindingCourseSpec } from './WindingCourseSpec';
+import {
+    createRoadArrowTexture,
+    STRAIGHT_ROAD_ARROW_LENGTH_M,
+    STRAIGHT_ROAD_ARROW_WIDTH_M,
+} from './straightRoadArrow';
 
-type ArrowType = 'straight' | 'left' | 'right' | 'none';
+type ArrowType = 'straight' | 'straight-right' | 'left' | 'right' | 'diagonal-left' | 'diagonal-right' | 'none';
 type RoadDirection = 'vertical' | 'horizontal';
 type LaneCount = 1 | 2 | 3;
 type CenterLineType = 'white-dashed' | 'white-solid' | 'yellow-dashed' | 'yellow-solid';
 type RoadRect = { minX: number; maxX: number; minZ: number; maxZ: number };
-export type RoadSegment = { group: THREE.Group; x: number; z: number; direction: RoadDirection; bounds: RoadRect };
+export type RoadSegment = {
+    group: THREE.Group;
+    x: number;
+    z: number;
+    direction: RoadDirection;
+    bounds: RoadRect;
+    /** Actual rectangle in group coordinates; avoids false cuts from a rotated road's world AABB. */
+    localFootprint?: RoadRect;
+};
 export type AutoDriveWaypointStop = { id: string; root: THREE.Group; widthM: number; lengthM: number; laneOffsetM: number };
 export type WindingCourseEntry = {
     course: SCurveTrack;
@@ -38,6 +53,8 @@ export type WindingCourseEntry = {
 export class TrackObjects{
     readonly root=new THREE.Group();
     readonly penaltyZones:THREE.Box3[]=[];
+    /** Các đoạn vạch trong cùng một chuồng S dùng chung thời gian chờ báo lỗi. */
+    readonly penaltyZoneGroupIndices: number[] = [];
     private readonly bridges: Bridge[] = [];
     /** Tất cả traffic lights trong scene. Exposed để ExamEngine tra cứu theo markerId. */
     readonly trafficLights: TrafficLight[] = [];
@@ -85,6 +102,143 @@ export class TrackObjects{
     private readonly roadCornerCurves: RoadCornerCurveR8R9[] = [];
     private readonly parallelParkingBays: ParallelParkingBayB[] = [];
 
+    /** Round the grass heads between the approach road and the four exam-4 entrances. */
+    addWheelTrackEntryIslandCaps(
+        entries: Array<{ entryWorld: THREE.Vector3; roadWidthM: number; courseRoot: THREE.Group }>,
+        roadEdgeX: number,
+        radiiM: readonly number[],
+    ): void {
+        const ordered = [...entries].sort((a, b) => b.entryWorld.z - a.entryWorld.z);
+        const island = new THREE.Group();
+        island.name = 'wheel-track-entry-island-caps';
+        this.root.add(island);
+        const asphalt = new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide });
+        const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
+            new THREE.MeshStandardMaterial({ color, roughness: .85 }));
+        const shape = (points: Point[]) =>
+            new THREE.Shape(points.map(([x, z]) => new THREE.Vector2(x, -z)));
+        const addAsphalt = (outline: Point[]) => {
+            const geometry = new THREE.ShapeGeometry(shape(outline));
+            geometry.rotateX(-Math.PI / 2);
+            const mesh = new THREE.Mesh(geometry, asphalt);
+            mesh.name = 'wheel-track-entry-cap-asphalt';
+            mesh.position.y = .061;
+            mesh.receiveShadow = true;
+            island.add(mesh);
+        };
+        const trimStraightCurb = (courseRoot: THREE.Group, edgeZ: number, tangentX: number, grassSide: number) => {
+            courseRoot.updateMatrixWorld(true);
+            const obsolete: THREE.Mesh[] = [];
+            let remainingEndX = -Infinity;
+            courseRoot.traverse(child => {
+                if (!(child instanceof THREE.Mesh) || child.name !== 'red-white-curb') return;
+                const box = new THREE.Box3().setFromObject(child);
+                if (Math.abs(box.getCenter(new THREE.Vector3()).z - edgeZ) > .3) return;
+                if (box.max.x > tangentX + .005 && box.min.x < roadEdgeX + .3) obsolete.push(child);
+                else if (box.max.x <= tangentX + .005) remainingEndX = Math.max(remainingEndX, box.max.x);
+            });
+            for (const curb of obsolete) {
+                curb.removeFromParent();
+                curb.geometry.dispose();
+            }
+            const gap = tangentX - remainingEndX;
+            if (gap > .01 && gap < 1) {
+                const bridge = new THREE.Mesh(new THREE.BoxGeometry(
+                    gap, CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M), curbMaterials[0]);
+                bridge.position.set(remainingEndX + gap / 2, .085,
+                    edgeZ + grassSide * CURB_VISUAL_WIDTH_M / 2);
+                bridge.name = 'red-white-curb';
+                bridge.castShadow = true;
+                bridge.receiveShadow = true;
+                island.add(bridge);
+            }
+        };
+
+        for (let i = 0; i < ordered.length - 1; i++) {
+            const upper = ordered[i];
+            const lower = ordered[i + 1];
+            const zMin = lower.entryWorld.z + lower.roadWidthM / 2;
+            const zMax = upper.entryWorld.z - upper.roadWidthM / 2;
+            const width = zMax - zMin;
+            if (width <= 0) continue;
+            const radius = Math.min(radiiM[i] ?? width / 2, width / 2);
+            const tangentX = roadEdgeX - radius;
+            const segments = Math.max(8, Math.ceil(radius * 8));
+            const lowerArc: Point[] = [];
+            const upperArc: Point[] = [];
+            for (let j = 0; j <= segments; j++) {
+                const lowerAngle = -Math.PI / 2 + j * Math.PI / (2 * segments);
+                lowerArc.push([
+                    tangentX + radius * Math.cos(lowerAngle),
+                    zMin + radius + radius * Math.sin(lowerAngle),
+                ]);
+                const upperAngle = j * Math.PI / (2 * segments);
+                upperArc.push([
+                    tangentX + radius * Math.cos(upperAngle),
+                    zMax - radius + radius * Math.sin(upperAngle),
+                ]);
+            }
+            addAsphalt([[roadEdgeX, zMin], ...lowerArc.slice().reverse()]);
+            addAsphalt([[roadEdgeX, zMax - radius], [roadEdgeX, zMax], ...upperArc.slice().reverse()]);
+
+            const curbPath: Point[] = [...lowerArc];
+            if (width > 2 * radius + 1e-6) curbPath.push(upperArc[0]);
+            curbPath.push(...upperArc.slice(1));
+            const lowerArcLength = radius * Math.PI / 2;
+            const upperArcStart = lowerArcLength + width - 2 * radius;
+            const upperIsApproachRoad = upper.courseRoot.name === 'road';
+            const smoothstep = (value: number) => {
+                const t = THREE.MathUtils.clamp(value, 0, 1);
+                return t * t * (3 - 2 * t);
+            };
+            let distanceAlongCurb = 0;
+            splitByPattern(curbPath, [.8]).forEach((piece, index) => {
+                const shifted = offsetPath(piece, 1);
+                const roadSide: Point[] = [];
+                const grassSide: Point[] = [];
+                piece.forEach(([x, z], pointIndex) => {
+                    if (pointIndex > 0) {
+                        const previous = piece[pointIndex - 1];
+                        distanceAlongCurb += Math.hypot(x - previous[0], z - previous[1]);
+                    }
+                    // Course curbs extend into grass; the main-road curb extends
+                    // into asphalt. Move the visible band across the arc so both
+                    // tangent ends meet their existing straight curb flush.
+                    const side = distanceAlongCurb < lowerArcLength
+                        ? 1 - 2 * smoothstep(distanceAlongCurb / lowerArcLength)
+                        : distanceAlongCurb < upperArcStart || upperIsApproachRoad
+                            ? -1
+                            : -1 + 2 * smoothstep((distanceAlongCurb - upperArcStart) / lowerArcLength);
+                    const normalX = shifted[pointIndex][0] - x;
+                    const normalZ = shifted[pointIndex][1] - z;
+                    const offset = -CURB_VISUAL_WIDTH_M / 2 * (1 - side);
+                    roadSide.push([x + normalX * offset, z + normalZ * offset]);
+                    grassSide.push([x + normalX * (offset + CURB_VISUAL_WIDTH_M),
+                        z + normalZ * (offset + CURB_VISUAL_WIDTH_M)]);
+                });
+                const outline = roadSide.concat(grassSide.reverse());
+                const geometry = new THREE.ExtrudeGeometry(shape(outline), {
+                    depth: CURB_VISUAL_HEIGHT_M, bevelEnabled: false,
+                });
+                geometry.rotateX(-Math.PI / 2);
+                const curb = new THREE.Mesh(geometry, curbMaterials[index % 2]);
+                curb.position.y = .06;
+                curb.name = 'red-white-curb';
+                curb.castShadow = true;
+                curb.receiveShadow = true;
+                island.add(curb);
+            });
+
+            // Remove the old straight curb of the main road across this cap.
+            this.roadObstacles.push({
+                group: island, x: roadEdgeX, z: (zMin + zMax) / 2, direction: 'vertical',
+                bounds: { minX: roadEdgeX - .3, maxX: roadEdgeX + .3, minZ: zMin, maxZ: zMax },
+            });
+            trimStraightCurb(lower.courseRoot, zMin, tangentX, 1);
+            trimStraightCurb(upper.courseRoot, zMax, tangentX, upperIsApproachRoad ? 1 : -1);
+        }
+    }
+
     /** Làn nhập đường 3,7 m trước bốn lối ra, cùng các đầu bãi cỏ bo theo CAD. */
     addWheelTrackExitApron(
         exits: Array<{ exitWorld: THREE.Vector3; roadWidthM: number; courseRoot: THREE.Group }>,
@@ -121,9 +275,14 @@ export class TrackObjects{
                 const inner = Array.from({ length: 5 }, (_, j) => point((i + j / 4) / stripeCount));
                 const outline: Array<[number, number]> = [
                     ...inner.map(p => [p.x, p.z] as [number, number]),
-                    ...inner.slice().reverse().map(p => [p.x + .2 * p.nx, p.z + .2 * p.nz] as [number, number]),
+                    ...inner.slice().reverse().map(p => [
+                        p.x + CURB_VISUAL_WIDTH_M * p.nx,
+                        p.z + CURB_VISUAL_WIDTH_M * p.nz,
+                    ] as [number, number]),
                 ];
-                const geometry = new THREE.ExtrudeGeometry(shape(outline), { depth: .05, bevelEnabled: false });
+                const geometry = new THREE.ExtrudeGeometry(shape(outline), {
+                    depth: CURB_VISUAL_HEIGHT_M, bevelEnabled: false,
+                });
                 geometry.rotateX(-Math.PI / 2);
                 const curb = new THREE.Mesh(geometry, curbMaterials[i % 2]);
                 curb.position.y = .06;
@@ -153,9 +312,10 @@ export class TrackObjects{
             const gap = nextCurbX - tangentX;
             if (gap > .01 && gap < 1) {
                 const bridge = new THREE.Mesh(
-                    new THREE.BoxGeometry(gap, .05, .2), curbMaterials[0],
+                    new THREE.BoxGeometry(gap, CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M), curbMaterials[0],
                 );
-                bridge.position.set(tangentX + gap / 2, .085, edgeZ + grassSide * .1);
+                bridge.position.set(tangentX + gap / 2, .085,
+                    edgeZ + grassSide * CURB_VISUAL_WIDTH_M / 2);
                 bridge.name = 'red-white-curb';
                 bridge.castShadow = true;
                 bridge.receiveShadow = true;
@@ -165,8 +325,8 @@ export class TrackObjects{
 
         // Phủ kín khoảng còn thiếu giữa đường một làn và miệng các chuồng.
         addAsphalt([
-            [roadEdgeX - .2, lowerZ], [apronEndX, lowerZ],
-            [apronEndX, upperZ], [roadEdgeX - .2, upperZ],
+            [roadEdgeX - CURB_VISUAL_WIDTH_M, lowerZ], [apronEndX, lowerZ],
+            [apronEndX, upperZ], [roadEdgeX - CURB_VISUAL_WIDTH_M, upperZ],
         ]);
         // Mở liên tục bó vỉa cũ của đường chính trên toàn chiều rộng lối nhập.
         this.roadObstacles.push({
@@ -210,13 +370,14 @@ export class TrackObjects{
             const cos = Math.cos(angle);
             const sin = Math.sin(angle);
             // Curb của FourLaneRoad nằm *trong* mép roadEdgeX. Đưa đầu cung
-            // vào 0,2 m để mép ngoài cung trùng mép ngoài đoạn thẳng.
+            // vào đúng bề rộng curb để mép ngoài cung trùng mép ngoài đoạn thẳng.
             const blend = t * t * (3 - 2 * t);
-            const dx = -outerRadius * sin * Math.PI / 2 - .2 * 6 * t * (1 - t);
+            const dx = -outerRadius * sin * Math.PI / 2
+                - CURB_VISUAL_WIDTH_M * 6 * t * (1 - t);
             const dz = outerRadius * cos * Math.PI / 2;
             const tangentLength = Math.hypot(dx, dz);
             return {
-                x: outerCenterX + outerRadius * cos - .2 * blend,
+                x: outerCenterX + outerRadius * cos - CURB_VISUAL_WIDTH_M * blend,
                 z: outerCenterZ + outerRadius * sin,
                 nx: -dz / tangentLength, nz: dx / tangentLength,
             };
@@ -229,6 +390,287 @@ export class TrackObjects{
             group: apron, x: roadEdgeX, z: outerCenterZ, direction: 'horizontal',
             bounds: { minX: roadEdgeX - .3, maxX: roadEdgeX + .2, minZ: outerCenterZ, maxZ: lowerZ },
         });
+    }
+
+    /** Bo R2 góc trên bên trái đường một làn tại lối ra hạng B. */
+    addWheelTrackExitUpperCorner(
+        road: FourLaneRoad,
+        exit: { exitWorld: THREE.Vector3; roadWidthM: number },
+        radiusM: number,
+    ): void {
+        const topSection = road.footprints[road.footprints.length - 1];
+        const leftX = road.root.position.x + topSection.minX;
+        const rightX = road.root.position.x + topSection.maxX;
+        const roadTopZ = road.root.position.z + topSection.maxZ;
+        const exitTopZ = exit.exitWorld.z + exit.roadWidthM / 2;
+        const centerX = leftX + radiusM;
+        const centerZ = exitTopZ - radiusM;
+        const group = new THREE.Group();
+        group.name = 'wheel-track-exit-b-upper-r2-corner';
+        this.root.add(group);
+
+        const shape = (points: Point[]) =>
+            new THREE.Shape(points.map(([x, z]) => new THREE.Vector2(x, -z)));
+        const addGrass = (outline: Point[]) => {
+            const geometry = new THREE.ShapeGeometry(shape(outline));
+            geometry.rotateX(-Math.PI / 2);
+            const grass = new THREE.Mesh(
+                geometry,
+                new THREE.MeshStandardMaterial({
+                    map: createGrassSurfaceTexture(), roughness: 1, side: THREE.DoubleSide,
+                }),
+            );
+            grass.name = 'wheel-track-exit-corner-grass';
+            grass.position.y = .07;
+            grass.receiveShadow = true;
+            group.add(grass);
+        };
+        const arcPoint = (t: number, radius: number): Point => {
+            const angle = Math.PI / 2 + t * Math.PI / 2;
+            return [centerX + radius * Math.cos(angle), centerZ + radius * Math.sin(angle)];
+        };
+        const arc = Array.from({ length: 33 }, (_, i) => arcPoint(i / 32, radiusM));
+        addGrass([[leftX, exitTopZ], ...arc, [leftX, centerZ]]);
+        // The one-lane road ends slightly past the exit curb; cover that thin strip.
+        if (roadTopZ > exitTopZ) {
+            addGrass([
+                [leftX, exitTopZ], [rightX, exitTopZ],
+                [rightX, roadTopZ], [leftX, roadTopZ],
+            ]);
+        }
+
+        const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
+            new THREE.MeshStandardMaterial({ color, roughness: .85 }));
+        const arcLength = radiusM * Math.PI / 2;
+        const arcStripes = Math.ceil(arcLength / .8);
+        const curbPoint = (t: number, grassSide: boolean): Point => {
+            const blend = t * t * (3 - 2 * t);
+            // The main road curb sits inside its left edge, while the B-exit
+            // curb sits outside its upper edge. Shift the band across the arc
+            // so both tangents join the existing straight curbs flush.
+            const radius = grassSide
+                ? radiusM + CURB_VISUAL_WIDTH_M * (1 - blend)
+                : radiusM - CURB_VISUAL_WIDTH_M * blend;
+            return arcPoint(t, radius);
+        };
+        for (let i = 0; i < arcStripes; i++) {
+            const asphaltSide = Array.from({ length: 5 }, (_, j) =>
+                curbPoint((i + j / 4) / arcStripes, false));
+            const grassSide = Array.from({ length: 5 }, (_, j) =>
+                curbPoint((i + (4 - j) / 4) / arcStripes, true));
+            const geometry = new THREE.ExtrudeGeometry(shape([...asphaltSide, ...grassSide]), {
+                depth: CURB_VISUAL_HEIGHT_M, bevelEnabled: false,
+            });
+            geometry.rotateX(-Math.PI / 2);
+            const curb = new THREE.Mesh(geometry, curbMaterials[i % 2]);
+            curb.name = 'red-white-curb';
+            curb.position.y = .06;
+            curb.castShadow = true;
+            curb.receiveShadow = true;
+            group.add(curb);
+        }
+
+        // Continue the top curb to the existing straight curb on the B exit.
+        const bridgeLength = exit.exitWorld.x - centerX;
+        for (let offset = 0, stripe = 0; offset < bridgeLength; offset += .8, stripe++) {
+            const length = Math.min(.8, bridgeLength - offset);
+            const curb = new THREE.Mesh(
+                new THREE.BoxGeometry(length, CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M),
+                curbMaterials[(arcStripes + stripe) % 2],
+            );
+            curb.name = 'red-white-curb';
+            curb.position.set(centerX + offset + length / 2, .085,
+                exitTopZ + CURB_VISUAL_WIDTH_M / 2);
+            curb.castShadow = true;
+            curb.receiveShadow = true;
+            group.add(curb);
+        }
+
+        // Cut only the former straight curb on the left edge of this corner.
+        this.roadObstacles.push({
+            group, x: leftX, z: exitTopZ, direction: 'vertical',
+            bounds: {
+                minX: leftX - .2, maxX: leftX + .25,
+                minZ: centerZ, maxZ: roadTopZ + .2,
+            },
+        });
+    }
+
+    /** Nối hai mép đường kết thúc vào đúng cạnh của section 1 và 3 làn. */
+    addFinishRoadJunctionCorners(
+        finishRoad: THREE.Group,
+        splitRoad: FourLaneRoad,
+        oneLaneRadiusM: number,
+        threeLaneRadiusM: number,
+        yellowLineEnd: Point,
+    ): void {
+        const finishSurface = finishRoad.getObjectByName('road-surface');
+        if (!finishSurface || splitRoad.footprints.length < 2) return;
+        finishRoad.updateMatrixWorld(true);
+        const finishBounds = new THREE.Box3().setFromObject(finishSurface);
+        const sections = [...splitRoad.footprints].sort((a, b) => b.maxZ - a.maxZ);
+        const corners = [
+            {
+                name: 'one-lane',
+                edgeX: splitRoad.root.position.x + sections[0].minX,
+                edgeZ: finishBounds.max.z,
+                zSide: 1,
+                radius: oneLaneRadiusM,
+            },
+            {
+                name: 'three-lane',
+                edgeX: splitRoad.root.position.x + sections[sections.length - 1].minX,
+                edgeZ: finishBounds.min.z,
+                zSide: -1,
+                radius: threeLaneRadiusM,
+            },
+        ];
+        const group = new THREE.Group();
+        group.name = 'finish-road-section-junction-corners';
+        this.root.add(group);
+        const asphaltMaterial = new THREE.MeshStandardMaterial({
+            color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide,
+        });
+        const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
+            new THREE.MeshStandardMaterial({ color, roughness: .85 }));
+        const shape = (points: Point[]) =>
+            new THREE.Shape(points.map(([x, z]) => new THREE.Vector2(x, -z)));
+
+        for (const { name, edgeX, edgeZ, zSide, radius } of corners) {
+            const centerX = edgeX - radius;
+            const centerZ = edgeZ + zSide * radius;
+            const arcPoint = (t: number, r: number): Point => {
+                const angle = -zSide * (1 - t) * Math.PI / 2;
+                return [centerX + r * Math.cos(angle), centerZ + r * Math.sin(angle)];
+            };
+            const arc = Array.from({ length: 49 }, (_, i) => arcPoint(i / 48, radius));
+            const asphaltGeometry = new THREE.ShapeGeometry(shape([[edgeX, edgeZ], ...arc]));
+            asphaltGeometry.rotateX(-Math.PI / 2);
+            const asphalt = new THREE.Mesh(asphaltGeometry, asphaltMaterial);
+            asphalt.name = `finish-road-${name}-corner-asphalt`;
+            asphalt.position.y = .061;
+            asphalt.receiveShadow = true;
+            group.add(asphalt);
+
+            if (name === 'one-lane') {
+                // The CAD 5A marking has a straight top and two opposing
+                // rounded sides that meet at the lower tangent. Its outside
+                // edge is R6.9; the existing R7 curb is the other side.
+                const outerRadius = radius - .1;
+                const outerArc: Point[] = Array.from({ length: 49 }, (_, i) => {
+                    const angle = i / 48 * Math.PI / 2;
+                    return [
+                        centerX + outerRadius * Math.cos(angle),
+                        edgeZ - zSide * outerRadius + zSide * outerRadius * Math.sin(angle),
+                    ];
+                });
+                const wedge: Point[] = [...arc, ...outerArc.slice(0, -1)];
+                const wedgeGeometry = new THREE.ShapeGeometry(shape(wedge));
+                wedgeGeometry.rotateX(-Math.PI / 2);
+                const stripePaint = new THREE.ShaderMaterial({
+                    side: THREE.DoubleSide,
+                    uniforms: {
+                        centerX: { value: centerX },
+                        edgeZ: { value: edgeZ },
+                        radius: { value: radius },
+                        outerRadius: { value: outerRadius },
+                        zSide: { value: zSide },
+                    },
+                    vertexShader: `
+                        varying vec2 ground;
+                        void main() {
+                            vec4 world = modelMatrix * vec4(position, 1.0);
+                            ground = world.xz;
+                            gl_Position = projectionMatrix * viewMatrix * world;
+                        }
+                    `,
+                    fragmentShader: `
+                        uniform float centerX;
+                        uniform float edgeZ;
+                        uniform float radius;
+                        uniform float outerRadius;
+                        uniform float zSide;
+                        varying vec2 ground;
+                        void main() {
+                            float u = (ground.x - centerX) / radius;
+                            float v = zSide * (ground.y - edgeZ) / radius;
+                            float diagonal = (u + v) * radius * 0.70710678;
+                            float band = mod(diagonal + 0.19, 0.8);
+                            float boundary = min(
+                                (1.0 - u) * radius,
+                                length(vec2(
+                                    ground.x - centerX,
+                                    zSide * (ground.y - edgeZ) + outerRadius
+                                )) - outerRadius
+                            );
+                            if (band > 0.38 && boundary > 0.055) discard;
+                            gl_FragColor = vec4(1.0);
+                        }
+                    `,
+                });
+                const hatching = new THREE.Mesh(wedgeGeometry, stripePaint);
+                hatching.name = 'finish-road-one-lane-hatching';
+                hatching.position.y = .083;
+                group.add(hatching);
+
+                // The left edge of this single straight strip follows the
+                // hatch's straight A-to-B edge from the R7 curb to the stop bar.
+                const lineWidth = .15;
+                const lineStartZ = edgeZ + radius;
+                const lineStartX = edgeX + lineWidth / 2;
+                const lineDx = yellowLineEnd[0] - lineStartX;
+                const lineDz = yellowLineEnd[1] - lineStartZ;
+                const lineLength = Math.hypot(lineDx, lineDz);
+                if (lineLength > .001) {
+                    const yellowLine = new THREE.Mesh(
+                        new THREE.BoxGeometry(lineWidth, .004, lineLength),
+                        new THREE.MeshStandardMaterial({
+                            color: 0xf6d34c, roughness: .8, side: THREE.DoubleSide,
+                        }),
+                    );
+                    yellowLine.name = 'finish-road-one-lane-hatching-yellow-extension';
+                    yellowLine.position.set((lineStartX + yellowLineEnd[0]) / 2, .089,
+                        (lineStartZ + yellowLineEnd[1]) / 2);
+                    yellowLine.rotation.y = Math.atan2(lineDx, lineDz);
+                    group.add(yellowLine);
+                }
+            }
+
+            const stripeCount = Math.ceil(radius * Math.PI / 2 / .8);
+            for (let i = 0; i < stripeCount; i++) {
+                const inner = Array.from({ length: 5 }, (_, j) =>
+                    arcPoint((i + j / 4) / stripeCount, radius));
+                const outer = Array.from({ length: 5 }, (_, j) =>
+                    arcPoint((i + (4 - j) / 4) / stripeCount, radius + CURB_VISUAL_WIDTH_M));
+                const geometry = new THREE.ExtrudeGeometry(shape([...inner, ...outer]), {
+                    depth: CURB_VISUAL_HEIGHT_M, bevelEnabled: false,
+                });
+                geometry.rotateX(-Math.PI / 2);
+                const curb = new THREE.Mesh(geometry, curbMaterials[i % 2]);
+                curb.name = 'red-white-curb';
+                curb.position.y = .06;
+                curb.castShadow = true;
+                curb.receiveShadow = true;
+                group.add(curb);
+            }
+
+            // Keep the two tangent points clear of the original straight curbs.
+            this.roadObstacles.push({
+                group, x: centerX, z: edgeZ, direction: 'horizontal',
+                bounds: {
+                    minX: centerX, maxX: edgeX + .01,
+                    minZ: edgeZ - .25, maxZ: edgeZ + .25,
+                },
+            });
+            this.roadObstacles.push({
+                group, x: edgeX, z: centerZ, direction: 'vertical',
+                bounds: {
+                    minX: edgeX - .25, maxX: edgeX + .25,
+                    minZ: Math.min(edgeZ, centerZ),
+                    maxZ: Math.max(edgeZ, centerZ),
+                },
+            });
+        }
     }
 
     /** Bo góc bồn cỏ ở giao giữa đường dọc và đường ngang về phía đông-bắc. */
@@ -271,10 +713,10 @@ export class TrackObjects{
             const samples = Array.from({ length: 5 }, (_, j) =>
                 arcPoint((i + j / 4) / stripeCount, radiusM));
             const outside = Array.from({ length: 5 }, (_, j) =>
-                arcPoint((i + (4 - j) / 4) / stripeCount, radiusM + .2));
+                arcPoint((i + (4 - j) / 4) / stripeCount, radiusM + CURB_VISUAL_WIDTH_M));
             const curbGeometry = new THREE.ExtrudeGeometry(
                 toShape([...samples, ...outside]),
-                { depth: .05, bevelEnabled: false },
+                { depth: CURB_VISUAL_HEIGHT_M, bevelEnabled: false },
             );
             curbGeometry.rotateX(-Math.PI / 2);
             const curb = new THREE.Mesh(curbGeometry, curbMaterials[i % 2]);
@@ -295,6 +737,344 @@ export class TrackObjects{
             bounds: { minX: cornerX - .25, maxX: centerX, minZ: cornerZ - .25, maxZ: centerZ },
         });
         return group;
+    }
+
+    /** Bo góc từ mép bắc hoặc nam đường ngang vào mép đường dọc. */
+    addRoadJunctionCorner(
+        cornerX: number,
+        horizontalRoadEdgeZ: number,
+        radiusM: number,
+        side: 'east' | 'west',
+        edge: 'north' | 'south',
+        curbColorOffset = 0,
+        curbWidthM = CURB_VISUAL_WIDTH_M,
+        connectorCurbPlacement: 'inside' | 'centered' = 'inside',
+    ): THREE.Group {
+        curbWidthM = Math.min(curbWidthM, CURB_VISUAL_WIDTH_M);
+        const direction = side === 'east' ? 1 : -1;
+        const zDirection = edge === 'north' ? 1 : -1;
+        const centerX = cornerX + direction * radiusM;
+        const centerZ = horizontalRoadEdgeZ + zDirection * radiusM;
+        const group = new THREE.Group();
+        group.name = `road-junction-${edge}-${side}-r${radiusM}-corner`;
+        this.root.add(group);
+
+        const shape = (points: Array<[number, number]>) =>
+            new THREE.Shape(points.map(([x, z]) => new THREE.Vector2(x, -z)));
+        const arcPoint = (t: number, radius: number): [number, number] => {
+            const angle = side === 'east'
+                ? Math.PI + zDirection * t * Math.PI / 2
+                : -zDirection * t * Math.PI / 2;
+            return [centerX + radius * Math.cos(angle), centerZ + radius * Math.sin(angle)];
+        };
+        const arc = Array.from({ length: 65 }, (_, i) => arcPoint(i / 64, radiusM));
+        const asphaltGeometry = new THREE.ShapeGeometry(shape([
+            [cornerX, horizontalRoadEdgeZ], ...arc, [centerX, horizontalRoadEdgeZ],
+        ]));
+        asphaltGeometry.rotateX(-Math.PI / 2);
+        const asphalt = new THREE.Mesh(asphaltGeometry,
+            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide }));
+        asphalt.name = 'road-junction-corner-asphalt';
+        asphalt.position.y = .061;
+        asphalt.receiveShadow = true;
+        group.add(asphalt);
+
+        const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
+            new THREE.MeshStandardMaterial({ color, roughness: .85, side: THREE.DoubleSide }));
+        const stripeCount = Math.ceil(radiusM * Math.PI / 2 / .8);
+        const curbArcPoint = (t: number, outer: boolean): [number, number] => {
+            const connectorOffset = connectorCurbPlacement === 'centered'
+                ? -curbWidthM * (1 - t) / 2 : 0;
+            return arcPoint(t, radiusM + connectorOffset + (outer ? curbWidthM : 0));
+        };
+        for (let i = 0; i < stripeCount; i++) {
+            const inside = Array.from({ length: 5 }, (_, j) =>
+                curbArcPoint((i + j / 4) / stripeCount, false));
+            const outside = Array.from({ length: 5 }, (_, j) =>
+                curbArcPoint((i + (4 - j) / 4) / stripeCount, true));
+            const geometry = new THREE.ExtrudeGeometry(shape([...inside, ...outside]), {
+                depth: CURB_VISUAL_HEIGHT_M, bevelEnabled: false,
+            });
+            geometry.rotateX(-Math.PI / 2);
+            const curb = new THREE.Mesh(geometry, curbMaterials[(i + curbColorOffset) % 2]);
+            curb.name = 'red-white-curb';
+            curb.position.y = .06;
+            curb.castShadow = true;
+            curb.receiveShadow = true;
+            group.add(curb);
+        }
+
+        // Hai dải cắt chỉ tác động lên curb cũ; mặt đường thẳng vẫn nguyên.
+        this.roadObstacles.push({
+            group, x: cornerX, z: (centerZ + horizontalRoadEdgeZ) / 2,
+            direction: 'vertical',
+            bounds: {
+                minX: cornerX - .25, maxX: cornerX + .25,
+                minZ: Math.min(centerZ, horizontalRoadEdgeZ),
+                maxZ: Math.max(centerZ, horizontalRoadEdgeZ),
+            },
+        });
+        this.roadObstacles.push({
+            group, x: (cornerX + centerX) / 2, z: horizontalRoadEdgeZ,
+            direction: 'horizontal',
+            bounds: {
+                minX: Math.min(cornerX, centerX), maxX: Math.max(cornerX, centerX),
+                minZ: horizontalRoadEdgeZ - .25, maxZ: horizontalRoadEdgeZ + .25,
+            },
+        });
+        return group;
+    }
+
+    /** Bo mép connector nghiêng để nối tiếp tuyến với bó vỉa đường ngang. */
+    addAngledRoadJunctionCorner(
+        edgePoint: THREE.Vector3,
+        sidePoint: THREE.Vector3,
+        radiusM: number,
+        side: 'east' | 'west',
+    ): { sideTangent: THREE.Vector3; horizontalTangent: THREE.Vector3 } {
+        const dz = sidePoint.z - edgePoint.z;
+        if (dz <= 0 || radiusM <= 0) {
+            throw new Error('Angled road corner needs an upward side and a positive radius');
+        }
+        const slope = (sidePoint.x - edgePoint.x) / dz;
+        const grassSide = side === 'east' ? 1 : -1;
+        const normalLength = Math.hypot(1, slope);
+        const centerX = edgePoint.x + slope * radiusM + grassSide * radiusM * normalLength;
+        const centerZ = edgePoint.z + radiusM;
+        const sideTangent = new THREE.Vector3(
+            centerX - grassSide * radiusM / normalLength,
+            0,
+            centerZ + grassSide * radiusM * slope / normalLength,
+        );
+        const horizontalTangent = new THREE.Vector3(centerX, 0, edgePoint.z);
+        const rawStartAngle = Math.atan2(sideTangent.z - centerZ, sideTangent.x - centerX);
+        const startAngle = side === 'east' && rawStartAngle < 0
+            ? rawStartAngle + 2 * Math.PI : rawStartAngle;
+        const endAngle = side === 'east' ? 3 * Math.PI / 2 : -Math.PI / 2;
+        const arcPoint = (t: number, radius: number): [number, number] => {
+            const angle = startAngle + (endAngle - startAngle) * t;
+            return [centerX + radius * Math.cos(angle), centerZ + radius * Math.sin(angle)];
+        };
+        const shape = (points: Array<[number, number]>) =>
+            new THREE.Shape(points.map(([x, z]) => new THREE.Vector2(x, -z)));
+        const group = new THREE.Group();
+        group.name = `road-junction-angled-${side}-r${radiusM}-corner`;
+        this.root.add(group);
+
+        const arc = Array.from({ length: 65 }, (_, i) => arcPoint(i / 64, radiusM));
+        const asphaltGeometry = new THREE.ShapeGeometry(shape([
+            [edgePoint.x, edgePoint.z], ...arc, [horizontalTangent.x, horizontalTangent.z],
+        ]));
+        asphaltGeometry.rotateX(-Math.PI / 2);
+        const asphalt = new THREE.Mesh(asphaltGeometry,
+            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide }));
+        asphalt.name = 'road-junction-corner-asphalt';
+        asphalt.position.y = .061;
+        asphalt.receiveShadow = true;
+        group.add(asphalt);
+
+        const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
+            new THREE.MeshStandardMaterial({ color, roughness: .85, side: THREE.DoubleSide }));
+        const stripeCount = Math.ceil(radiusM * Math.abs(endAngle - startAngle) / .8);
+        for (let i = 0; i < stripeCount; i++) {
+            const inside = Array.from({ length: 5 }, (_, j) =>
+                arcPoint((i + j / 4) / stripeCount, radiusM));
+            const outside = Array.from({ length: 5 }, (_, j) =>
+                arcPoint((i + (4 - j) / 4) / stripeCount, radiusM + CURB_VISUAL_WIDTH_M));
+            const geometry = new THREE.ExtrudeGeometry(shape([...inside, ...outside]), {
+                depth: CURB_VISUAL_HEIGHT_M, bevelEnabled: false,
+            });
+            geometry.rotateX(-Math.PI / 2);
+            const curb = new THREE.Mesh(geometry, curbMaterials[i % 2]);
+            curb.name = 'red-white-curb';
+            curb.position.y = .06;
+            curb.castShadow = true;
+            curb.receiveShadow = true;
+            group.add(curb);
+        }
+
+        // Curb của connector dừng ở sideTangent; curb ngang cũ dừng ở horizontalTangent.
+        this.roadObstacles.push({
+            group,
+            x: (edgePoint.x + horizontalTangent.x) / 2,
+            z: edgePoint.z,
+            direction: 'horizontal',
+            bounds: {
+                minX: Math.min(edgePoint.x, horizontalTangent.x),
+                maxX: Math.max(edgePoint.x, horizontalTangent.x),
+                minZ: edgePoint.z - .25,
+                maxZ: edgePoint.z + .25,
+            },
+        });
+        return { sideTangent, horizontalTangent };
+    }
+
+    /** Bo R cho mép tây của lối vào hướng nam khi mép bắc đường ngang đang chạy chéo. */
+    addWestRoadJunctionCornerToSlopedNorthEdge(
+        connectorWestX: number,
+        northEdge: THREE.Vector3[],
+        radiusM: number,
+        curbColorOffset = 0,
+        connectorCurbPlacement: 'inside' | 'centered' = 'inside',
+    ): { group: THREE.Group; roadTangent: THREE.Vector3 } {
+        if (radiusM <= 0 || northEdge.length < 2) {
+            throw new Error('Sloped junction needs a positive radius and a road edge');
+        }
+        const segmentAtX = (x: number) => {
+            for (let i = 0; i < northEdge.length - 1; i++) {
+                const from = northEdge[i];
+                const to = northEdge[i + 1];
+                if (to.x <= from.x || x < from.x || x > to.x) continue;
+                const t = (x - from.x) / (to.x - from.x);
+                return { index: i, point: new THREE.Vector3(x, 0,
+                    from.z + t * (to.z - from.z)) };
+            }
+            throw new Error('Connector does not reach the sloped road edge');
+        };
+        const intersection = segmentAtX(connectorWestX);
+        const centerX = connectorWestX - radiusM;
+        let tangent: { index: number; point: THREE.Vector3; centerZ: number } | undefined;
+        for (let i = 0; i <= intersection.index; i++) {
+            const from = northEdge[i];
+            const to = northEdge[i + 1];
+            const dx = to.x - from.x;
+            const dz = to.z - from.z;
+            if (dx <= 0) continue;
+            const length = Math.hypot(dx, dz);
+            const normalX = -dz / length;
+            const normalZ = dx / length;
+            const t = (centerX - from.x - radiusM * normalX) / dx;
+            if (t < 0 || t > 1) continue;
+            const point = new THREE.Vector3(from.x + dx * t, 0, from.z + dz * t);
+            if (point.x >= connectorWestX) continue;
+            tangent = { index: i, point, centerZ: point.z + radiusM * normalZ };
+        }
+        if (!tangent) throw new Error('Cannot fit R corner to the sloped north road edge');
+
+        const centerZ = tangent.centerZ;
+        const endAngle = Math.atan2(tangent.point.z - centerZ, tangent.point.x - centerX);
+        const arcPoint = (t: number, radius: number): [number, number] => {
+            const angle = endAngle * t;
+            return [centerX + radius * Math.cos(angle), centerZ + radius * Math.sin(angle)];
+        };
+        const shape = (points: Array<[number, number]>) =>
+            new THREE.Shape(points.map(([x, z]) => new THREE.Vector2(x, -z)));
+        const group = new THREE.Group();
+        group.name = `road-junction-sloped-north-west-r${radiusM}-corner`;
+        this.root.add(group);
+        const arc = Array.from({ length: 65 }, (_, i) => arcPoint(i / 64, radiusM));
+        const roadEdgeBetween = northEdge.slice(tangent.index + 1, intersection.index + 1)
+            .map(point => [point.x, point.z] as [number, number]);
+        const asphaltGeometry = new THREE.ShapeGeometry(shape([
+            [intersection.point.x, intersection.point.z], ...arc,
+            ...roadEdgeBetween, [intersection.point.x, intersection.point.z],
+        ]));
+        asphaltGeometry.rotateX(-Math.PI / 2);
+        const asphalt = new THREE.Mesh(asphaltGeometry,
+            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide }));
+        asphalt.name = 'road-junction-corner-asphalt';
+        asphalt.position.y = .061;
+        asphalt.receiveShadow = true;
+        group.add(asphalt);
+
+        const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
+            new THREE.MeshStandardMaterial({ color, roughness: .85, side: THREE.DoubleSide }));
+        const stripeCount = Math.ceil(radiusM * Math.abs(endAngle) / .8);
+        const curbArcPoint = (t: number, outer: boolean): [number, number] => {
+            const connectorOffset = connectorCurbPlacement === 'centered'
+                ? -CURB_VISUAL_WIDTH_M * (1 - t) / 2 : 0;
+            return arcPoint(t, radiusM + connectorOffset + (outer ? CURB_VISUAL_WIDTH_M : 0));
+        };
+        for (let i = 0; i < stripeCount; i++) {
+            const inside = Array.from({ length: 5 }, (_, j) =>
+                curbArcPoint((i + j / 4) / stripeCount, false));
+            const outside = Array.from({ length: 5 }, (_, j) =>
+                curbArcPoint((i + (4 - j) / 4) / stripeCount, true));
+            const geometry = new THREE.ExtrudeGeometry(shape([...inside, ...outside]), {
+                depth: CURB_VISUAL_HEIGHT_M, bevelEnabled: false,
+            });
+            geometry.rotateX(-Math.PI / 2);
+            const curb = new THREE.Mesh(geometry, curbMaterials[(i + curbColorOffset) % 2]);
+            curb.name = 'red-white-curb';
+            curb.position.y = .06;
+            curb.castShadow = true;
+            curb.receiveShadow = true;
+            group.add(curb);
+        }
+
+        this.roadObstacles.push({
+            group, x: connectorWestX,
+            z: (centerZ + intersection.point.z) / 2,
+            direction: 'vertical',
+            bounds: {
+                minX: connectorWestX - .25, maxX: connectorWestX + .25,
+                minZ: Math.min(centerZ, intersection.point.z),
+                maxZ: Math.max(centerZ, intersection.point.z),
+            },
+        });
+        this.roadObstacles.push({
+            group, x: (tangent.point.x + connectorWestX) / 2,
+            z: (tangent.point.z + intersection.point.z) / 2,
+            direction: 'horizontal',
+            bounds: {
+                minX: tangent.point.x - .25, maxX: connectorWestX + .25,
+                minZ: Math.min(tangent.point.z, intersection.point.z) - .25,
+                maxZ: Math.max(tangent.point.z, intersection.point.z) + .25,
+            },
+        });
+        return { group, roadTangent: tangent.point };
+    }
+
+    /** Nối curb thẳng giữa hai góc bo; có thể mở thêm curb cũ tới miệng connector. */
+    connectRoadJunctionCurbs(startX: number, endX: number, edgeZ: number, openingEndX: number): void {
+        if (endX <= startX) throw new Error('Junction curb bridge needs endX > startX');
+        if (openingEndX < endX) throw new Error('Junction curb opening must reach the connector');
+        const group = new THREE.Group();
+        group.name = 'road-junction-curb-bridge';
+        this.root.add(group);
+        const materials = [0xffffff, 0xd83b3b].map(color =>
+            new THREE.MeshStandardMaterial({ color, roughness: .85 }));
+        const overlapM = .005;
+        const fromX = startX - overlapM;
+        const toX = endX + overlapM;
+        for (let x = fromX, stripe = 0; x < toX - .0001; stripe++) {
+            const length = Math.min(.8, toX - x);
+            const curb = new THREE.Mesh(new THREE.BoxGeometry(
+                length, CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M), materials[stripe % 2]);
+            curb.name = 'red-white-curb';
+            curb.position.set(x + length / 2, .085, edgeZ - CURB_VISUAL_WIDTH_M / 2);
+            curb.castShadow = true;
+            curb.receiveShadow = true;
+            group.add(curb);
+            x += length;
+        }
+        this.roadObstacles.push({
+            group,
+            x: (startX + endX) / 2,
+            z: edgeZ,
+            direction: 'horizontal',
+            bounds: {
+                minX: fromX,
+                maxX: toX,
+                minZ: edgeZ - .25,
+                maxZ: edgeZ + .25,
+            },
+        });
+        // Cắt curb cũ nằm phía sau góc bo, trong nửa mặt đường ngang.
+        if (openingEndX > endX + .0001) {
+            this.roadObstacles.push({
+                group,
+                x: (endX + openingEndX) / 2,
+                z: edgeZ - .1,
+                direction: 'horizontal',
+                bounds: {
+                    minX: endX,
+                    maxX: openingEndX,
+                    minZ: edgeZ - .25,
+                    maxZ: edgeZ + .01,
+                },
+            });
+        }
     }
 
     /** Đảo tam giác kẻ sọc cyan tại góc nối đường ngang với làn nhập, mép cong R5. */
@@ -352,7 +1132,9 @@ export class TrackObjects{
         const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
             new THREE.MeshStandardMaterial({ color, roughness: .85, side: THREE.DoubleSide }));
         const addCurbBand = (outline: THREE.Vector2[], materialIndex: number) => {
-            const geometry = new THREE.ExtrudeGeometry(new THREE.Shape(outline), { depth: .05, bevelEnabled: false });
+            const geometry = new THREE.ExtrudeGeometry(new THREE.Shape(outline), {
+                depth: CURB_VISUAL_HEIGHT_M, bevelEnabled: false,
+            });
             geometry.rotateX(-Math.PI / 2);
             const curb = new THREE.Mesh(geometry, curbMaterials[materialIndex % curbMaterials.length]);
             curb.position.y = .06;
@@ -370,7 +1152,7 @@ export class TrackObjects{
                 outline.push(arcPoint(cornerRadius, (i + j / 4) / stripeCount));
             }
             for (let j = 4; j >= 0; j--) {
-                outline.push(arcPoint(cornerRadius + .2, (i + j / 4) / stripeCount));
+                outline.push(arcPoint(cornerRadius + CURB_VISUAL_WIDTH_M, (i + j / 4) / stripeCount));
             }
             addCurbBand(outline, i);
         }
@@ -438,91 +1220,34 @@ export class TrackObjects{
     }
 
 
-    private createArrowTexture(type: 'straight' | 'left' | 'right') {
-        const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 512;
-
-        const ctx = canvas.getContext('2d')!;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        ctx.fillStyle = 'white';
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 28;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        const cx = canvas.width / 2;
-
-        if (type === 'straight') {
-            // thân mũi tên
-            ctx.beginPath();
-            ctx.moveTo(cx, 420);
-            ctx.lineTo(cx, 140);
-            ctx.stroke();
-
-            // đầu mũi tên
-            ctx.beginPath();
-            ctx.moveTo(cx, 90);
-            ctx.lineTo(cx - 55, 165);
-            ctx.lineTo(cx - 20, 165);
-            ctx.lineTo(cx - 20, 250);
-            ctx.lineTo(cx + 20, 250);
-            ctx.lineTo(cx + 20, 165);
-            ctx.lineTo(cx + 55, 165);
-            ctx.closePath();
-            ctx.fill();
-        }
-
-        if (type === 'left' || type === 'right') {
-            // Solid, square elbow and broad arrowhead, matching the road marking reference.
-            ctx.save();
-            if (type === 'left') {
-                ctx.translate(canvas.width, 0);
-                ctx.scale(-1, 1);
-            }
-            ctx.beginPath();
-            ctx.moveTo(55, 430);
-            ctx.lineTo(115, 430);
-            ctx.lineTo(115, 205);
-            ctx.lineTo(165, 205);
-            ctx.lineTo(165, 270);
-            ctx.lineTo(240, 165);
-            ctx.lineTo(165, 60);
-            ctx.lineTo(165, 125);
-            ctx.lineTo(55, 125);
-            ctx.closePath();
-            ctx.fill();
-            ctx.restore();
-        }
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        return texture;
-    }
-
     private addRoadArrow(
         x: number,
         z: number,
         w: number,
         d: number,
-        type: 'straight' | 'left' | 'right',
+        type: Exclude<ArrowType, 'none'>,
         parent: THREE.Group,
         rotationY = 0,
+        thinStroke = false,
+        diagonalAngleRad = Math.PI / 4,
     ) {
-        const texture = this.createArrowTexture(type);
+        const texture = createRoadArrowTexture(type, diagonalAngleRad);
+
+        const arrowWidthM = Math.min(w * (thinStroke ? .42 : .5), STRAIGHT_ROAD_ARROW_WIDTH_M);
+        const arrowLengthM = Math.min(d * .35, STRAIGHT_ROAD_ARROW_LENGTH_M);
 
         const arrow = new THREE.Mesh(
-            new THREE.PlaneGeometry(Math.min(w * 0.32, type === 'straight' ? 1.2 : 1.9), Math.min(d * 0.35, 3.4)),
+            new THREE.PlaneGeometry(arrowWidthM, arrowLengthM),
             new THREE.MeshBasicMaterial({
             map: texture,
-            transparent: true
+            transparent: true,
+            depthWrite: false,
             })
         );
 
         arrow.rotation.x = -Math.PI / 2;
         arrow.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), rotationY);
-        arrow.position.set(x, 0.081, z); // nhấc nhẹ lên để tránh z-fighting
+        arrow.position.set(x, 0.09, z); // tách khỏi mặt đường để tránh nhấp nháy khi camera di chuyển
         parent.add(arrow);
         return arrow;
     }
@@ -541,6 +1266,17 @@ export class TrackObjects{
         return arrow;
     }
 
+    /** Mũi tên đi thẳng có thêm nhánh rẽ chéo phải. */
+    addStraightRightRoadArrow(
+        x: number,
+        z: number,
+        laneWidthM: number,
+        roadLengthM: number,
+        rotationY = 0,
+    ): THREE.Mesh {
+        return this.addRoadArrow(x, z, laneWidthM, roadLengthM, 'straight-right', this.root, rotationY);
+    }
+
     /** Mũi tên rẽ đặt trên đoạn đường thẳng trước khi vào cua. */
     addTurnRoadArrow(
         x: number,
@@ -553,6 +1289,25 @@ export class TrackObjects{
         return this.addRoadArrow(x, z, laneWidthM, roadLengthM, turn, this.root, rotationY);
     }
 
+    /** Mũi tên rẽ chéo; đảo 180° cho làn chạy theo chiều +Z. */
+    addDiagonalTurnRoadArrow(
+        x: number,
+        z: number,
+        laneWidthM: number,
+        roadLengthM: number,
+        turn: 'left' | 'right' = 'right',
+        reverse = false,
+        rotationY = 0,
+        thinStroke = false,
+        diagonalAngleRad = Math.PI / 4,
+    ): THREE.Mesh {
+        const arrow = this.addRoadArrow(x, z, laneWidthM, roadLengthM,
+            turn === 'left' ? 'diagonal-left' : 'diagonal-right', this.root,
+            rotationY, thinStroke, diagonalAngleRad);
+        if (reverse) arrow.rotateZ(Math.PI);
+        return arrow;
+    }
+
     private addRoadEdgePattern(
         x: number,
         z: number,
@@ -561,10 +1316,10 @@ export class TrackObjects{
         side: 'left' | 'right',
         parent: THREE.Group,
         curbOutside = false,
-        curbWidth = 0.20,
+        curbWidth = CURB_VISUAL_WIDTH_M,
         curbGap = 0,
     ) {
-        const curbHeight = 0.05;
+        const curbHeight = CURB_VISUAL_HEIGHT_M;
         const segmentLen = 0.8;     // độ dài mỗi đoạn đỏ/trắng
         const gap = 0.0;
 
@@ -626,11 +1381,11 @@ export class TrackObjects{
         d: number, // Chiều dài / chiều sâu của đoạn đường
         direction: RoadDirection = 'vertical', // Dọc theo Z hoặc ngang theo X
         arrowType: ArrowType = 'straight', // Loại mũi tên chỉ hướng: thẳng / trái / phải / không có
-        centerLine: CenterLineType = 'white-dashed',
+        centerLine: CenterLineType | readonly CenterLineType[] = 'white-dashed',
         lanes: LaneCount = 2, // w remains the total road width, regardless of lane count.
         rotationY = 0, // Optional: xoay thêm quanh trục Y (radian), áp dụng sau rotation do `direction` thiết lập.
         curbOutside = false,
-        curbWidthM = 0.20,
+        curbWidthM = CURB_VISUAL_WIDTH_M,
         curbGapM = 0,
     ) {
         // Dựng theo trục Z rồi xoay cả đoạn, bao gồm viền và mũi tên.
@@ -650,6 +1405,7 @@ export class TrackObjects{
             x,
             z,
             direction: Math.abs(Math.sin(segment.rotation.y)) > 0.5 ? 'horizontal' : 'vertical',
+            localFootprint: { minX: -envelopeWidth / 2, maxX: envelopeWidth / 2, minZ: -d / 2, maxZ: d / 2 },
             bounds: {
                 minX: worldBox.min.x,
                 maxX: worldBox.max.x,
@@ -681,7 +1437,7 @@ export class TrackObjects{
             'left',
             segment,
             curbOutside,
-            curbOutside ? 0.10 : curbWidthM,
+            curbOutside ? CURB_VISUAL_WIDTH_M : Math.min(curbWidthM, CURB_VISUAL_WIDTH_M),
             curbOutside ? 0.10 : curbGapM,
         );
         this.addRoadEdgePattern(
@@ -692,21 +1448,26 @@ export class TrackObjects{
             'right',
             segment,
             curbOutside,
-            curbOutside ? 0.10 : curbWidthM,
+            curbOutside ? CURB_VISUAL_WIDTH_M : Math.min(curbWidthM, CURB_VISUAL_WIDTH_M),
             curbOutside ? 0.10 : curbGapM,
         );
 
-        // 3. Vạch giữa chia đường thành hai làn bằng nhau.
-        const { material, spans } = this.centerLineSegments(d, centerLine, lanes);
+        // 3. Vạch phân làn; có thể đặt kiểu riêng cho từng vạch theo thứ tự local X.
         const separatorX = lanes === 1
             ? []
             : lanes === 2
                 ? [0]
                 : [-w / 6, w / 6];
 
-        for (const xOffset of separatorX) {
+        if (typeof centerLine !== 'string' && centerLine.length !== separatorX.length) {
+            throw new Error('Number of road center-line styles must match lane separators');
+        }
+        for (const [index, xOffset] of separatorX.entries()) {
+            const lineStyle = typeof centerLine === 'string' ? centerLine : centerLine[index];
+            const { material, spans } = this.centerLineSegments(d, lineStyle, lanes);
             for (const [from, to] of spans) {
                 const line = new THREE.Mesh(new THREE.BoxGeometry(.15, .008, to - from), material);
+                line.name = 'road-center-line';
                 line.position.set(xOffset, .067, -d / 2 + (from + to) / 2);
                 line.receiveShadow = true;
                 segment.add(line);
@@ -720,9 +1481,12 @@ export class TrackObjects{
                 : lanes === 2
                     ? [-w / 4, w / 4]
                     : [-w / 3, 0, w / 3];
+            const hasYellowSeparator = typeof centerLine === 'string'
+                ? centerLine.startsWith('yellow')
+                : centerLine.some(style => style.startsWith('yellow'));
             for (const laneX of laneCenters) {
                 const arrow = this.addRoadArrow(laneX, 0, w / lanes, d, arrowType, segment);
-                if (centerLine === 'yellow-dashed' && lanes > 1 && laneX < 0) {
+                if (hasYellowSeparator && lanes > 1 && laneX < 0) {
                     // Làn trái (local X < 0) đi ngược chiều xe → xoay 180°.
                     arrow.rotateZ(Math.PI);
                 }
@@ -881,6 +1645,37 @@ export class TrackObjects{
         return road;
     }
 
+    /** Cắt chính xác phần curb thẳng cuối nhánh 8A trước điểm tiếp tuyến góc bo. */
+    trimRoadCornerCurveEndCurb(road: RoadCornerCurveR8R9, northEdgeZ: number, tangentX: number): void {
+        road.root.updateMatrixWorld(true);
+        for (const child of [...road.root.children]) {
+            if (!(child instanceof THREE.Mesh) || child.name !== 'red-white-curb') continue;
+            const bounds = new THREE.Box3().setFromObject(child);
+            if (Math.abs(bounds.getCenter(new THREE.Vector3()).z - northEdgeZ) > .25
+                || bounds.max.x <= tangentX + .0001) continue;
+
+            const keptLengthM = tangentX - bounds.min.x;
+            if (keptLengthM > .001) {
+                const remaining = new THREE.Mesh(new THREE.BoxGeometry(
+                    keptLengthM,
+                    bounds.max.y - bounds.min.y,
+                    bounds.max.z - bounds.min.z,
+                ), child.material);
+                remaining.position.copy(road.root.worldToLocal(new THREE.Vector3(
+                    (bounds.min.x + tangentX) / 2,
+                    (bounds.min.y + bounds.max.y) / 2,
+                    (bounds.min.z + bounds.max.z) / 2,
+                )));
+                remaining.name = 'red-white-curb';
+                remaining.castShadow = child.castShadow;
+                remaining.receiveShadow = child.receiveShadow;
+                road.root.add(remaining);
+            }
+            child.removeFromParent();
+            child.geometry.dispose();
+        }
+    }
+
     /**
      * Thêm một chuồng ghép xe ngang hạng B (B-class parallel parking bay) theo
      * spec/road/parallel_parking_bay_B_spec.md.
@@ -901,10 +1696,18 @@ export class TrackObjects{
 
         // Tính world bounds từ local bbox (bao gồm curb mở rộng).
         const sideSign = bay.side === 'LEFT' ? -1 : 1;
-        const localXMin = sideSign > 0 ? 0 : -(bay.depthM + bay.physicalEdgeOffsetM + bay.curbWidthM);
-        const localXMax = sideSign > 0 ? (bay.depthM + bay.physicalEdgeOffsetM + bay.curbWidthM) : 0;
-        const localZMin = -bay.lengthM / 2;
-        const localZMax = +bay.lengthM / 2;
+        // Với chuồng nối curb, mở curb đường tới tâm hai đoạn curb ngang của chuồng.
+        const visibleCurbWidthM = bay.curbPattern === 'red-white'
+            ? Math.min(bay.curbWidthM, CURB_VISUAL_WIDTH_M) : bay.curbWidthM;
+        const entranceCurbReachM = bay.joinRoadCurb ? visibleCurbWidthM + .02 : 0;
+        const curbEndOffsetM = bay.joinRoadCurb
+            ? bay.physicalEdgeOffsetM + bay.curbWidthM - visibleCurbWidthM / 2 : 0;
+        const localXMin = sideSign > 0 ? -entranceCurbReachM
+            : -(bay.depthM + bay.physicalEdgeOffsetM + bay.curbWidthM);
+        const localXMax = sideSign > 0 ? (bay.depthM + bay.physicalEdgeOffsetM + bay.curbWidthM)
+            : entranceCurbReachM;
+        const localZMin = -bay.lengthM / 2 - curbEndOffsetM;
+        const localZMax = +bay.lengthM / 2 + curbEndOffsetM;
         bay.root.updateMatrix();
         const localBox = new THREE.Box3(
             new THREE.Vector3(localXMin, 0, localZMin),
@@ -964,7 +1767,7 @@ export class TrackObjects{
 
         const { controlStartX, controlEndX } = bay.geometry;
         const localBox = new THREE.Box3(
-            new THREE.Vector3(controlStartX, 0, -bay.clearRoadWidthM),
+            new THREE.Vector3(controlStartX, 0, -bay.outerEnvelopeWidthM),
             new THREE.Vector3(
                 controlEndX,
                 0,
@@ -1029,6 +1832,38 @@ export class TrackObjects{
                 maxZ: other.bounds.maxZ + reachZ,
             };
         };
+        const overlapsFootprint = (mesh: THREE.Mesh, other: RoadSegment, curb: boolean): boolean => {
+            if (!other.localFootprint || mesh.geometry instanceof THREE.PlaneGeometry) return true;
+            mesh.geometry.computeBoundingBox();
+            const box = mesh.geometry.boundingBox!;
+            const meshCorners = [
+                [box.min.x, box.min.z], [box.max.x, box.min.z],
+                [box.max.x, box.max.z], [box.min.x, box.max.z],
+            ].map(([x, z]) => new THREE.Vector3(x, 0, z).applyMatrix4(mesh.matrixWorld));
+            const footprint = other.localFootprint;
+            const reach = curb ? curbReachM : 0;
+            const roadCorners = [
+                [footprint.minX, footprint.minZ - reach],
+                [footprint.maxX, footprint.minZ - reach],
+                [footprint.maxX, footprint.maxZ + reach],
+                [footprint.minX, footprint.maxZ + reach],
+            ].map(([x, z]) => new THREE.Vector3(x, 0, z).applyMatrix4(other.group.matrixWorld));
+            for (const polygon of [meshCorners, roadCorners]) {
+                for (let i = 0; i < 2; i++) {
+                    const from = polygon[i];
+                    const to = polygon[i + 1];
+                    const axisX = -(to.z - from.z);
+                    const axisZ = to.x - from.x;
+                    const project = (corners: THREE.Vector3[]) =>
+                        corners.map(point => point.x * axisX + point.z * axisZ);
+                    const a = project(meshCorners);
+                    const b = project(roadCorners);
+                    if (Math.max(...a) <= Math.min(...b) + 1e-5
+                        || Math.max(...b) <= Math.min(...a) + 1e-5) return false;
+                }
+            }
+            return true;
+        };
         for (const [index, road] of this.roads.entries()) {
             const intersecting = this.roads.filter(other => other.group !== road.group && overlap(road.bounds, reached(other)));
             const intersectsObstacle = this.roadObstacles.some(obstacle => overlap(road.bounds, obstacle.bounds));
@@ -1076,14 +1911,16 @@ export class TrackObjects{
                 log('child_mesh', { roadIndex: index, childName: child.name, childType: child.geometry?.constructor?.name });
                 // Only crossing roads open curbs/markings. Later surfaces are trimmed against
                 // all earlier roads as well, eliminating coplanar overlapping asphalt.
-                const crossingRoads = intersecting.filter(other => child.name === 'road-surface'
-                    ? this.roads.indexOf(other) < index : other.direction !== road.direction);
+                const isCurb = child.name === 'red-white-curb';
+                const crossingRoads = intersecting.filter(other =>
+                    (child.name === 'road-surface'
+                        ? this.roads.indexOf(other) < index : other.direction !== road.direction)
+                    && overlapsFootprint(child, other, isCurb));
                 // Chỉ curb đỏ-trắng của đường 4 làn bị cắt theo footprint của parking bay.
                 // Mặt asphalt và vạch làn vẫn liền mạch qua vị trí giao.
                 const obstacleCuts = this.roadObstacles
                     .filter(obstacle => child.name === 'red-white-curb' && overlap(road.bounds, obstacle.bounds))
                     .map(obstacle => localRect(obstacle.bounds));
-                const isCurb = child.name === 'red-white-curb';
                 const cuts = [
                     ...crossingRoads.map(other => localRect(isCurb ? reached(other) : other.bounds)),
                     ...obstacleCuts,
@@ -1137,12 +1974,58 @@ export class TrackObjects{
             }
         }
         const center = new THREE.Vector3();
-        const openings = [...this.roadObstacles, ...this.roads];
+        const joinedBayRoots = new Set(this.parallelParkingBays
+            .filter(bay => bay.joinRoadCurb).map(bay => bay.root));
+        const openings = [
+            ...this.roadObstacles.filter(obstacle => !joinedBayRoots.has(obstacle.group)),
+            ...this.roads,
+        ];
         // Curb nằm sát miệng lối vào (trong khoảng bề rộng curb) cũng chặn lối vào.
         const reach = 0.25;
         for (const corner of this.roadCornerCurves) {
             const curbs = corner.root.children.filter(child => child.name === 'red-white-curb');
             for (const curb of curbs) {
+                let trimmedForBay = false;
+                for (const bay of this.parallelParkingBays) {
+                    if (!bay.joinRoadCurb || !(curb instanceof THREE.Mesh)) continue;
+                    const visibleWidthM = bay.curbPattern === 'red-white'
+                        ? Math.min(bay.curbWidthM, CURB_VISUAL_WIDTH_M) : bay.curbWidthM;
+                    const halfOpeningM = bay.lengthM / 2 + bay.physicalEdgeOffsetM
+                        + bay.curbWidthM - visibleWidthM / 2;
+                    const toBay = bay.root.matrixWorld.clone().invert().multiply(curb.matrixWorld);
+                    const positions = curb.geometry.getAttribute('position');
+                    const bounds = new THREE.Box3().makeEmpty();
+                    const point = new THREE.Vector3();
+                    for (let i = 0; i < positions.count; i++) {
+                        bounds.expandByPoint(point.fromBufferAttribute(positions, i).applyMatrix4(toBay));
+                    }
+                    // Cửa chuồng nằm trên đoạn thẳng: giữ chính xác hai mảnh curb
+                    // bên ngoài thay vì bỏ nguyên đoạn 0,8 m theo vị trí tâm.
+                    if (bounds.min.x < -0.25 || bounds.max.x > 0.15
+                        || bounds.max.x - bounds.min.x > 0.16
+                        || bounds.max.z <= -halfOpeningM || bounds.min.z >= halfOpeningM) continue;
+                    for (const [from, to] of [
+                        [bounds.min.z, Math.min(bounds.max.z, -halfOpeningM)],
+                        [Math.max(bounds.min.z, halfOpeningM), bounds.max.z],
+                    ]) {
+                        if (to - from <= 1e-5) continue;
+                        const piece = new THREE.Mesh(
+                            new THREE.BoxGeometry(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, to - from),
+                            curb.material,
+                        );
+                        piece.name = 'red-white-curb';
+                        piece.position.set((bounds.min.x + bounds.max.x) / 2,
+                            (bounds.min.y + bounds.max.y) / 2, (from + to) / 2);
+                        piece.castShadow = curb.castShadow;
+                        piece.receiveShadow = curb.receiveShadow;
+                        bay.physicalEdgeGroup.add(piece);
+                    }
+                    curb.removeFromParent();
+                    curb.geometry.dispose();
+                    trimmedForBay = true;
+                    break;
+                }
+                if (trimmedForBay) continue;
                 new THREE.Box3().setFromObject(curb).getCenter(center);
                 if (openings.some(({ bounds }) => center.x > bounds.minX - reach && center.x < bounds.maxX + reach
                     && center.z > bounds.minZ - reach && center.z < bounds.maxZ + reach)) {
@@ -1159,6 +2042,7 @@ export class TrackObjects{
                     if (isPointInPolygon([center.x, center.z], corner.surfaceOutline)) curb.removeFromParent();
                 }
             }
+            corner.restoreInnerCurbAfterJunctions();
         }
         // Nhánh cong của FourLaneBidirectionalRoad không nằm trong roads[] bounds
         // (bounds chỉ bao đoạn thẳng). Cắt curb tại miệng chuồng, giữ chính xác
@@ -1167,7 +2051,11 @@ export class TrackObjects{
             const worldToBay = bay.root.matrixWorld.clone().invert();
             const curbSideMinX = bay.side === 'RIGHT' ? -0.3 : -0.05;
             const curbSideMaxX = bay.side === 'RIGHT' ? 0.05 : 0.3;
-            const halfOpening = bay.lengthM / 2;
+            const visibleCurbWidthM = bay.curbPattern === 'red-white'
+                ? Math.min(bay.curbWidthM, CURB_VISUAL_WIDTH_M) : bay.curbWidthM;
+            // Cắt curb đường chính tới mép curb chuồng, không dừng ở vạch đỏ.
+            const halfOpening = bay.lengthM / 2 + (bay.joinRoadCurb
+                ? bay.physicalEdgeOffsetM + bay.curbWidthM - visibleCurbWidthM / 2 : 0);
             const openingStartWorld = bay.root.localToWorld(new THREE.Vector3(0, 0, -halfOpening));
             const openingEndWorld = bay.root.localToWorld(new THREE.Vector3(0, 0, halfOpening));
             for (const road of this.roads) {
@@ -1311,8 +2199,8 @@ export class TrackObjects{
         for (let i = 0; i < curbCount; i++) {
             const from = Math.PI + i * Math.PI / (2 * curbCount);
             const to = Math.PI + (i + 1) * Math.PI / (2 * curbCount);
-            arcBand(arcCenterX, arcCenterZ, radius - .2, radius,
-                from, to, .06, curbMaterials[i % 2], .05).name = 'red-white-curb';
+            arcBand(arcCenterX, arcCenterZ, radius - CURB_VISUAL_WIDTH_M, radius,
+                from, to, .06, curbMaterials[i % 2], CURB_VISUAL_HEIGHT_M).name = 'red-white-curb';
         }
 
         // Tâm đường đi theo cung tròn, chia vạch theo chiều dài cung như đường thẳng.
@@ -1330,7 +2218,7 @@ export class TrackObjects{
 
     addRoadCurve(x: number, z: number, width: number, radius: number,
         centerLine: CenterLineType = 'white-dashed', lanes: LaneCount = 2,
-        rotationY = 0, sweepAngle = Math.PI / 2) {
+        rotationY = 0, sweepAngle = Math.PI / 2, innerCurbStartSweep = 0) {
         const innerRadius = radius - width / 2;
         const outerRadius = radius + width / 2;
         if (innerRadius <= 0) throw new Error('Road curve radius must exceed half its width');
@@ -1376,12 +2264,17 @@ export class TrackObjects{
 
         const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
             new THREE.MeshStandardMaterial({ color, roughness: .85 }));
-        for (const [inner, outer] of [[innerRadius, innerRadius + .2], [outerRadius - .2, outerRadius]]) {
-            const count = Math.ceil((end - start) * (inner + outer) / 2 / .8);
+        for (const [inner, outer] of [
+            [innerRadius, innerRadius + CURB_VISUAL_WIDTH_M],
+            [outerRadius - CURB_VISUAL_WIDTH_M, outerRadius],
+        ]) {
+            const curbStart = inner === innerRadius ? start + innerCurbStartSweep : start;
+            const count = Math.ceil((end - curbStart) * (inner + outer) / 2 / .8);
             for (let i = 0; i < count; i++) {
-                const from = start + (end - start) * i / count;
-                const to = start + (end - start) * (i + 1) / count;
-                sector(inner, outer, from, to, .05, .11, curbMaterials[i % 2], 'red-white-curb').castShadow = true;
+                const from = curbStart + (end - curbStart) * i / count;
+                const to = curbStart + (end - curbStart) * (i + 1) / count;
+                sector(inner, outer, from, to, CURB_VISUAL_HEIGHT_M, .11,
+                    curbMaterials[i % 2], 'red-white-curb').castShadow = true;
             }
         }
 
@@ -1560,13 +2453,11 @@ export class TrackObjects{
         const exitLocal = course.exit.clone();
         const exitWorld = exitLocal.applyMatrix4(transform);
 
-        // World-space forward axis (unit) — hướng xe chạy khi ra khỏi course
-        // sau khi đảo hướng start/end (xe ra về phía start ban đầu).
-        //   'horizontal' → (1, 0, 0)  — xe chạy về world +X (hướng start)
-        //   'vertical'   → (0, 0, 1)  — xe chạy về world +Z (hướng start)
+        // World-space forward axis (unit) of the exit leg (local -Z).
+        //   'horizontal' → world -X; 'vertical' → world -Z.
         const exitForwardAxis = direction === 'horizontal'
-            ? new THREE.Vector3(1, 0, 0)
-            : new THREE.Vector3(0, 0, 1);
+            ? new THREE.Vector3(-1, 0, 0)
+            : new THREE.Vector3(0, 0, -1);
 
         // Transform all sensors to world space and return for Exam04 use.
         const startYellowSensor = course.startYellowSensorLocal.clone().applyMatrix4(transform);
@@ -1618,8 +2509,10 @@ export class TrackObjects{
     addSCurveTrack(options: SCurveTrackOptions): SCurveTrack {
         const track = new SCurveTrack(options);
         this.root.add(track.root);
+        const coursePenaltyGroupIndex = this.penaltyZones.length;
         for (const zone of track.penaltyZones) {
-            this.penaltyZones.push(zone.clone().applyMatrix4(track.root.matrix));
+            const index = this.penaltyZones.push(zone.clone().applyMatrix4(track.root.matrix)) - 1;
+            this.penaltyZoneGroupIndices[index] = coursePenaltyGroupIndex;
         }
         return track;
     }
@@ -1632,6 +2525,7 @@ export class TrackObjects{
         exitLength = 6,
         vehicleClass = 'B',
         rotationY = Math.PI / 2,
+        withArrows = true,
     }: {
         x: number;
         z: number;
@@ -1641,6 +2535,8 @@ export class TrackObjects{
         vehicleClass?: ExamVehicleClass;
         /** Hướng của chữ S và hai đoạn entry/exit (radian). */
         rotationY?: number;
+        /** Vẽ mũi tên mặc định ở đường vào và đường ra. Mặc định true. */
+        withArrows?: boolean;
     }): WindingCourseEntry {
         const spec = getWindingCourseSpec(vehicleClass);
         validateWindingCourseSpec(spec);
@@ -1665,30 +2561,34 @@ export class TrackObjects{
         const entryRoadIndex = this.roads.length;
         this.addRoad(entryRoadCenterX, entryRoadCenterZ, winding.width, entryLength,
             'vertical', 'none', 'white-solid', 1, roadRotationY, false, 0.10);
-        this.addRoadArrow(
-            entryRoadCenterX,
-            entryRoadCenterZ,
-            winding.width,
-            6,
-            'straight',
-            this.root,
-            roadRotationY,
-        ).rotateZ(Math.PI);
+        if (withArrows) {
+            this.addRoadArrow(
+                entryRoadCenterX,
+                entryRoadCenterZ,
+                winding.width,
+                6,
+                'straight',
+                this.root,
+                roadRotationY,
+            ).rotateZ(Math.PI);
+        }
         const windingExit = winding.exit.clone().applyMatrix4(winding.root.matrix);
         const exitRoadCenterX = windingExit.x - roadDirectionX * exitLength / 2;
         const exitRoadCenterZ = windingExit.z - roadDirectionZ * exitLength / 2;
         const exitRoadIndex = this.roads.length;
         this.addRoad(exitRoadCenterX, exitRoadCenterZ, winding.width, exitLength,
             'vertical', 'none', 'white-solid', 1, roadRotationY, false, 0.10);
-        this.addRoadArrow(
-            exitRoadCenterX,
-            exitRoadCenterZ,
-            winding.width,
-            exitLength,
-            'straight',
-            this.root,
-            roadRotationY,
-        ).rotateZ(Math.PI);
+        if (withArrows) {
+            this.addRoadArrow(
+                exitRoadCenterX,
+                exitRoadCenterZ,
+                winding.width,
+                exitLength,
+                'straight',
+                this.root,
+                roadRotationY,
+            ).rotateZ(Math.PI);
+        }
         const windingEntry = {
             course: winding,
             entryRoadIndex,

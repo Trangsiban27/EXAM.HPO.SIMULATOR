@@ -1,4 +1,10 @@
 import * as THREE from 'three';
+import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
+import {
+    createRoadArrowTexture,
+    STRAIGHT_ROAD_ARROW_LENGTH_M,
+    STRAIGHT_ROAD_ARROW_WIDTH_M,
+} from './straightRoadArrow';
 import { ROAD_CORNER_CURVE_R8_R9 } from './RoadCornerCurveR8R9';
 import { offsetPath, roundCorners, splitByPattern, type Point } from './roundedPath';
 
@@ -44,6 +50,18 @@ export interface FourLaneBidirectionalRoadOptions {
     dashGapM?: number;
     /** Có vẽ mũi tên chỉ hướng trên từng làn hay không. Mặc định true. */
     withArrows?: boolean;
+    /** Hiển thị số 1–4 trên bốn làn của đoạn thẳng. Mặc định false. */
+    withLaneNumbers?: boolean;
+    /** Hiển thị số làn 2–4 trên nhánh cong local +X. Mặc định false. */
+    withPositiveXCornerLaneNumbers?: boolean;
+    /** Kiểu mũi tên ở làn 3 và 4 của nhánh local +X. Mặc định đi thẳng. */
+    positiveXCornerInnerArrowType?: 'straight' | 'diagonal-right';
+    /** Dịch mũi tên làn 3 và 4 trên nhánh theo local X (m). */
+    positiveXCornerInnerArrowShiftXM?: number;
+    /** Kiểu mũi tên riêng cho làn 2 của nhánh local +X. Mặc định đi thẳng. */
+    positiveXCornerLane2ArrowType?: 'straight' | 'diagonal-left';
+    /** Dịch mũi tên làn 2 của nhánh theo local X (m). */
+    positiveXCornerLane2ArrowShiftXM?: number;
     /**
      * Bo 90° ở đầu local -Z. Bán kính đo từ mép trong road;
      * không truyền thì road vẫn là đoạn thẳng.
@@ -98,6 +116,7 @@ export class FourLaneBidirectionalRoad {
         const dashLengthM = opts.dashLengthM ?? 1.5;
         const dashGapM = opts.dashGapM ?? 1.0;
         const withArrows = opts.withArrows ?? true;
+        const withLaneNumbers = opts.withLaneNumbers ?? false;
         const rotationY = opts.rotationY ?? 0;
         const negativeZCurveRadiusM = opts.negativeZCurveRadiusM;
         const negativeZCurveSide = opts.negativeZCurveSide ?? 'negative-x';
@@ -161,11 +180,16 @@ export class FourLaneBidirectionalRoad {
         // 6. Mũi tên chỉ hướng
         if (withArrows) {
             // LANE_01 và LANE_02 đi xuống (-Z) → mũi tên xoay 180°
-            this.addArrow(this.laneCentersX[0], lengthM, laneWidthM, true, root);
-            this.addArrow(this.laneCentersX[1], lengthM, laneWidthM, true, root);
+            this.addArrow(this.laneCentersX[0], true, root);
+            this.addArrow(this.laneCentersX[1], true, root);
             // LANE_03 và LANE_04 đi lên (+Z) → mũi tên hướng lên (không xoay)
-            this.addArrow(this.laneCentersX[2], lengthM, laneWidthM, false, root);
-            this.addArrow(this.laneCentersX[3], lengthM, laneWidthM, false, root);
+            this.addArrow(this.laneCentersX[2], false, root);
+            this.addArrow(this.laneCentersX[3], false, root);
+        }
+        if (withLaneNumbers) {
+            for (let laneIndex = 0; laneIndex < this.laneCentersX.length; laneIndex++) {
+                this.addLaneNumber(this.laneCentersX[laneIndex], 5, laneIndex + 1, root);
+            }
         }
 
         if (negativeZCurveRadiusM !== undefined && negativeZCurveSide === 'positive-x') {
@@ -179,6 +203,11 @@ export class FourLaneBidirectionalRoad {
                 lengthM,
                 dashLengthM,
                 dashGapM,
+                opts.withPositiveXCornerLaneNumbers ?? false,
+                opts.positiveXCornerInnerArrowType ?? 'straight',
+                opts.positiveXCornerInnerArrowShiftXM ?? 0,
+                opts.positiveXCornerLane2ArrowType ?? 'straight',
+                opts.positiveXCornerLane2ArrowShiftXM ?? 0,
                 root,
             );
         } else if (negativeZCurveRadiusM !== undefined) {
@@ -214,6 +243,11 @@ export class FourLaneBidirectionalRoad {
         lengthM: number,
         dashLengthM: number,
         dashGapM: number,
+        withLaneNumbers: boolean,
+        innerArrowType: 'straight' | 'diagonal-right',
+        innerArrowShiftXM: number,
+        lane2ArrowType: 'straight' | 'diagonal-left',
+        lane2ArrowShiftXM: number,
         parent: THREE.Group,
     ): void {
         const halfW = 2 * laneWidthM;
@@ -261,9 +295,12 @@ export class FourLaneBidirectionalRoad {
         // Đoạn curb thẳng sát điểm nối có index 0 màu trắng → bên cung bắt đầu màu đỏ.
         const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
         const red = new THREE.MeshStandardMaterial({ color: 0xd83b3b, roughness: 0.85 });
-        for (const [edge, width] of [[outer, 0.2], [inner, -0.2]] as const) {
+        for (const [edge, width] of [
+            [outer, CURB_VISUAL_WIDTH_M],
+            [inner, -CURB_VISUAL_WIDTH_M],
+        ] as const) {
             splitByPattern(edge, [0.8]).forEach((piece, index) => {
-                const curb = this.addRibbon(piece, 0, width, 0.06, 0.05,
+                const curb = this.addRibbon(piece, 0, width, 0.06, CURB_VISUAL_HEIGHT_M,
                     index % 2 === 0 ? red : white, 'red-white-curb', group);
                 curb.castShadow = true;
             });
@@ -292,12 +329,24 @@ export class FourLaneBidirectionalRoad {
             [innerZ - laneWidthM * 1.5, true],
             [innerZ - laneWidthM / 2, true],
         ];
-        for (const [laneZ, isBackward] of arrowLanes) {
+        for (const [index, [laneZ, isBackward]] of arrowLanes.entries()) {
             const arrowGroup = new THREE.Group();
-            arrowGroup.position.set(arrowX, 0, laneZ);
+            arrowGroup.position.set(arrowX + (index > 0 ? innerArrowShiftXM : lane2ArrowShiftXM), 0, laneZ);
             arrowGroup.rotation.y = Math.PI / 2;
-            this.addArrow(0, legLengthM - innerRadiusM, laneWidthM, isBackward, arrowGroup);
+            this.addArrow(0, isBackward, arrowGroup, index > 0 ? innerArrowType : lane2ArrowType);
             group.add(arrowGroup);
+        }
+
+        if (withLaneNumbers) {
+            // L1 kết thúc ở đầu nhánh; ba làn còn lại nối tiếp theo thứ tự L2–L4.
+            const numberX = endX - 3;
+            arrowLanes.forEach(([laneZ, isBackward], index) => {
+                const numberGroup = new THREE.Group();
+                numberGroup.position.set(numberX, 0, laneZ);
+                numberGroup.rotation.y = isBackward ? Math.PI / 2 : -Math.PI / 2;
+                this.addLaneNumber(0, 0, index + 2, numberGroup);
+                group.add(numberGroup);
+            });
         }
     }
 
@@ -412,7 +461,9 @@ export class FourLaneBidirectionalRoad {
         surface.receiveShadow = true;
         parent.add(surface);
 
-        this.addCurvedCurbPattern(radiusM - 0.1, radiusM + 0.1, centerX, centerZ, startAngle, endAngle, parent);
+        this.addCurvedCurbPattern(
+            radiusM, radiusM + CURB_VISUAL_WIDTH_M,
+            centerX, centerZ, startAngle, endAngle, parent);
         this.addVariableCurvedCurb(outerAt, centerX, centerZ, startAngle, endAngle, parent);
         // L4/L3 giữ vạch trắng, dịch từ bề rộng làn thẳng sang 3.70 m.
         this.addVariableCurvedDashedLine(
@@ -451,19 +502,19 @@ export class FourLaneBidirectionalRoad {
         endAngle: number,
         parent: THREE.Group,
     ): void {
-        const band = 0.1;
+        const band = CURB_VISUAL_WIDTH_M;
         const count = Math.max(8, Math.ceil(Math.abs(endAngle - startAngle) * 12));
         for (let index = 0; index < count; index++) {
             const from = startAngle + (endAngle - startAngle) * index / count;
             const to = startAngle + (endAngle - startAngle) * (index + 1) / count;
             const shape = new THREE.Shape();
             shape.moveTo(
-                centerX + (radiusAt(from) + band) * Math.cos(from),
-                centerZ + (radiusAt(from) + band) * Math.sin(from),
+                centerX + radiusAt(from) * Math.cos(from),
+                centerZ + radiusAt(from) * Math.sin(from),
             );
             shape.lineTo(
-                centerX + (radiusAt(to) + band) * Math.cos(to),
-                centerZ + (radiusAt(to) + band) * Math.sin(to),
+                centerX + radiusAt(to) * Math.cos(to),
+                centerZ + radiusAt(to) * Math.sin(to),
             );
             shape.lineTo(
                 centerX + (radiusAt(to) - band) * Math.cos(to),
@@ -475,7 +526,7 @@ export class FourLaneBidirectionalRoad {
             );
             shape.closePath();
             const geometry = new THREE.ExtrudeGeometry(shape, {
-                depth: 0.05,
+                depth: CURB_VISUAL_HEIGHT_M,
                 bevelEnabled: false,
                 curveSegments: 1,
             });
@@ -598,7 +649,7 @@ export class FourLaneBidirectionalRoad {
             shape.absarc(centerX, centerZ, innerRadius, to, from, true);
             shape.closePath();
             const geometry = new THREE.ExtrudeGeometry(shape, {
-                depth: 0.05,
+                depth: CURB_VISUAL_HEIGHT_M,
                 bevelEnabled: false,
                 curveSegments: 8,
             });
@@ -719,8 +770,8 @@ export class FourLaneBidirectionalRoad {
      * Curb dày 0.2 m, cao 0.05 m, mỗi đoạn 0.8 m xen kẽ trắng/đỏ.
      */
     private addCurbPattern(edgeX: number, lengthM: number, parent: THREE.Group) {
-        const curbWidth = 0.2;
-        const curbHeight = 0.05;
+        const curbWidth = CURB_VISUAL_WIDTH_M;
+        const curbHeight = CURB_VISUAL_HEIGHT_M;
         const segmentLen = 0.8;
         const curbCenterX = edgeX - Math.sign(edgeX) * (curbWidth / 2);
         const count = Math.ceil(lengthM / segmentLen);
@@ -763,23 +814,45 @@ export class FourLaneBidirectionalRoad {
         parent.add(solidLine);
     }
 
+    /** Số làn tạm thời, đặt cạnh mũi tên trên mặt đường. */
+    private addLaneNumber(x: number, z: number, laneNumber: number, parent: THREE.Group): void {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const context = canvas.getContext('2d');
+        if (!context) return;
+
+        context.fillStyle = '#ffffff';
+        context.font = 'bold 88px Arial, sans-serif';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(String(laneNumber), canvas.width / 2, canvas.height / 2);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const number = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.1, 1.1),
+            new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }),
+        );
+        number.rotation.x = -Math.PI / 2;
+        number.position.set(x, 0.08, z);
+        number.name = `lane-number-${laneNumber}`;
+        parent.add(number);
+    }
+
     /**
      * Vẽ mũi tên chỉ hướng tại tâm lane.
      * @param isBackward true nếu đi xuống (-Z), cần xoay 180°
      */
     private addArrow(
         x: number,
-        lengthM: number,
-        laneWidthM: number,
         isBackward: boolean,
-        parent: THREE.Group
+        parent: THREE.Group,
+        type: 'straight' | 'diagonal-left' | 'diagonal-right' = 'straight',
     ) {
-        const texture = this.createStraightArrowTexture();
-
-        const arrowWidth = Math.min(laneWidthM * 0.32, 1.2);
-        const arrowLength = Math.min(lengthM * 0.35, 3.4);
+        const texture = createRoadArrowTexture(type);
         const arrow = new THREE.Mesh(
-            new THREE.PlaneGeometry(arrowWidth, arrowLength),
+            new THREE.PlaneGeometry(STRAIGHT_ROAD_ARROW_WIDTH_M, STRAIGHT_ROAD_ARROW_LENGTH_M),
             new THREE.MeshBasicMaterial({ map: texture, transparent: true }),
         );
         arrow.rotation.x = -Math.PI / 2;
@@ -790,49 +863,6 @@ export class FourLaneBidirectionalRoad {
         }
         arrow.name = isBackward ? 'arrow-backward' : 'arrow-forward';
         parent.add(arrow);
-    }
-
-    /**
-     * Tạo canvas texture vẽ mũi tên thẳng (đầu nhọn chĩa lên trong canvas).
-     * Khi `rotation.x = -PI/2`, mũi tên chĩa về +Z trong world.
-     */
-    private createStraightArrowTexture(): THREE.CanvasTexture {
-        const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 512;
-
-        const ctx = canvas.getContext('2d')!;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        ctx.fillStyle = 'white';
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 28;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        const cx = canvas.width / 2;
-
-        // thân mũi tên
-        ctx.beginPath();
-        ctx.moveTo(cx, 420);
-        ctx.lineTo(cx, 140);
-        ctx.stroke();
-
-        // đầu mũi tên
-        ctx.beginPath();
-        ctx.moveTo(cx, 90);
-        ctx.lineTo(cx - 55, 165);
-        ctx.lineTo(cx - 20, 165);
-        ctx.lineTo(cx - 20, 250);
-        ctx.lineTo(cx + 20, 250);
-        ctx.lineTo(cx + 20, 165);
-        ctx.lineTo(cx + 55, 165);
-        ctx.closePath();
-        ctx.fill();
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        return texture;
     }
 
     /**

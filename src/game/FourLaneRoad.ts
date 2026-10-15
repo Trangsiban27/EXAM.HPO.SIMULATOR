@@ -1,4 +1,10 @@
 import * as THREE from 'three';
+import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
+import {
+    createStraightRoadArrowTexture,
+    STRAIGHT_ROAD_ARROW_LENGTH_M,
+    STRAIGHT_ROAD_ARROW_WIDTH_M,
+} from './straightRoadArrow';
 
 /**
  * FourLaneRoad
@@ -34,6 +40,10 @@ export interface FourLaneRoadOptions {
     dashLengthM?: number;
     /** Khoảng cách giữa hai nét đứt (m). Mặc định 1.0. */
     dashGapM?: number;
+    /** Khoảng trống từ đầu local -Z đến nét đứt đầu tiên (m). Mặc định 0. */
+    dashStartInsetM?: number;
+    /** Số làn thấp hơn của cặp không vẽ vạch đứt: 1 là giữa làn 1 và 2. */
+    hiddenLaneSeparators?: readonly number[];
     /** Có vẽ mũi tên chỉ hướng trên từng làn hay không. Mặc định true. */
     withArrows?: boolean;
     /** Có vẽ vạch chia làn trên mặt đường hay không. Mặc định true. */
@@ -44,10 +54,15 @@ export interface FourLaneRoadOptions {
     outlineOnly?: boolean;
     /** Hiển thị số thứ tự trên từng làn. Mặc định false. */
     withLaneNumbers?: boolean;
+    /** Dịch hàng số làn dọc theo đường, theo local Z (m). */
+    laneNumberOffsetM?: number;
     /** Các section nối tiếp theo local Z, từ -Z đến +Z. */
     sections?: Array<{
         lengthM: number;
         laneCount: number;
+        dashStartInsetM?: number;
+        hiddenLaneSeparators?: readonly number[];
+        laneNumberOffsetM?: number;
     }>;
     /** Căn section hẹp về trái, giữa hoặc phải trong bề rộng lớn nhất. */
     sectionAlignment?: 'left' | 'center' | 'right';
@@ -56,6 +71,8 @@ export interface FourLaneRoadOptions {
      * (lane 01 ngoài cùng local +X); 'left' = làn ngoài cùng local -X.
      */
     dividerSide?: 'left' | 'right';
+    /** Màu vạch liền chia hai chiều. Mặc định vàng. */
+    dividerColor?: THREE.ColorRepresentation;
     /**
      * Xoay toàn bộ road quanh trục Y (radians). Mặc định 0 (trục đứng, song song world Z).
      * `Math.PI / 2` → trục ngang (song song world X).
@@ -89,20 +106,30 @@ export class FourLaneRoad {
         const laneWidthM = opts.laneWidthM ?? 3.7;
         const dashLengthM = opts.dashLengthM ?? 1.5;
         const dashGapM = opts.dashGapM ?? 1.0;
+        const dashStartInsetM = opts.dashStartInsetM ?? 0;
+        const hiddenLaneSeparators = opts.hiddenLaneSeparators ?? [];
         const withArrows = opts.withArrows ?? true;
         const withLaneMarkings = opts.withLaneMarkings ?? true;
         const highlight = opts.highlight ?? false;
         const outlineOnly = opts.outlineOnly ?? false;
         const withLaneNumbers = opts.withLaneNumbers ?? false;
+        const laneNumberOffsetM = opts.laneNumberOffsetM ?? 0;
         const sectionAlignment = opts.sectionAlignment ?? 'left';
         const dividerSide = opts.dividerSide ?? 'right';
+        const dividerColor = opts.dividerColor ?? '#fcde59';
         const rotationY = opts.rotationY ?? 0;
 
         if (lengthM <= 0) throw new Error('FourLaneRoad: lengthM must be > 0');
         if (laneCount < 1) throw new Error('FourLaneRoad: laneCount must be >= 1');
         if (laneWidthM <= 0) throw new Error('FourLaneRoad: laneWidthM must be > 0');
+        if (!Number.isFinite(dashStartInsetM) || dashStartInsetM < 0) {
+            throw new Error('FourLaneRoad: dashStartInsetM must be >= 0');
+        }
         if (sections?.some(section => section.lengthM <= 0 || section.laneCount < 1)) {
             throw new Error('FourLaneRoad: sections must have positive length and at least 1 lane');
+        }
+        if (hiddenLaneSeparators.some(lane => !Number.isInteger(lane) || lane < 1 || lane >= laneCount)) {
+            throw new Error('FourLaneRoad: hidden lane separator is out of range');
         }
 
         const widthM = laneCount * laneWidthM;
@@ -163,13 +190,17 @@ export class FourLaneRoad {
                     laneWidthM,
                     dashLengthM,
                     dashGapM,
+                    dashStartInsetM: section.dashStartInsetM ?? dashStartInsetM,
+                    hiddenLaneSeparators: section.hiddenLaneSeparators ?? hiddenLaneSeparators,
                     withArrows,
                     withLaneMarkings,
                     highlight,
                     outlineOnly,
                     withLaneNumbers,
+                    laneNumberOffsetM: section.laneNumberOffsetM ?? laneNumberOffsetM,
                     sectionAlignment,
                     dividerSide,
+                    dividerColor,
                     rotationY: 0,
                 });
                 root.add(sectionRoad.root);
@@ -206,7 +237,7 @@ export class FourLaneRoad {
                 const dividerX = (laneCentersX[dividerPairIndex] + laneCentersX[dividerPairIndex + 1]) / 2;
                 const solidDivider = new THREE.Mesh(
                     new THREE.BoxGeometry(0.15, 0.008, lengthM),
-                    new THREE.MeshStandardMaterial({ color: '#fcde59', roughness: 0.85 }),
+                    new THREE.MeshStandardMaterial({ color: dividerColor, roughness: 0.85 }),
                 );
                 solidDivider.position.set(dividerX, 0.067, 0);
                 solidDivider.name = 'direction-divider';
@@ -222,13 +253,14 @@ export class FourLaneRoad {
                 if (leftIdx === dividerPairIndex) continue;
                 const x = (laneCentersX[leftIdx] + laneCentersX[leftIdx + 1]) / 2;
                 const rightLane = laneCount - leftIdx - 1;
+                if (hiddenLaneSeparators.includes(rightLane)) continue;
                 const pair = `${String(rightLane).padStart(2, '0')}-${String(rightLane + 1).padStart(2, '0')}`;
                 separatorPositions.push({ x, lanePair: pair });
             }
-        const whiteDashed = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
+            const whiteDashed = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
 
             for (const { x, lanePair } of separatorPositions) {
-                for (let start = 0; start < lengthM; start += dashLengthM + dashGapM) {
+                for (let start = dashStartInsetM; start < lengthM; start += dashLengthM + dashGapM) {
                     const dashLen = Math.min(dashLengthM, lengthM - start);
                     if (dashLen <= 0) break;
                     const dash = new THREE.Mesh(
@@ -245,7 +277,7 @@ export class FourLaneRoad {
 
         if (withLaneNumbers) {
             for (let i = 0; i < laneCount; i++) {
-                this.addLaneNumber(laneCentersX[i], 0, laneCount - i, root);
+                this.addLaneNumber(laneCentersX[i], laneNumberOffsetM, laneCount - i, root);
             }
         }
 
@@ -254,7 +286,7 @@ export class FourLaneRoad {
             for (let i = 0; i < laneCount; i++) {
                 // Đảo chiều: làn ngược chiều chĩa +Z (không xoay), các lane còn lại chĩa -Z (xoay π).
                 const isBackward = i !== this.oppositeLaneIndex;
-                this.addArrow(laneCentersX[i], 0, laneWidthM, lengthM, isBackward, root);
+                this.addArrow(laneCentersX[i], 0, isBackward, root);
             }
         }
     }
@@ -302,11 +334,11 @@ export class FourLaneRoad {
 
     /**
      * Vẽ dải curb đỏ-trắng ở một biên. `edgeX` là local X của mép ngoài curb.
-     * Curb dày 0.2 m, cao 0.05 m, mỗi đoạn 0.8 m xen kẽ trắng/đỏ.
+     * Curb hiển thị rộng 0.10 m, cao 0.05 m, mỗi đoạn 0.8 m xen kẽ trắng/đỏ.
      */
     private addCurbPattern(edgeX: number, lengthM: number, parent: THREE.Group) {
-        const curbWidth = 0.2;
-        const curbHeight = 0.05;
+        const curbWidth = CURB_VISUAL_WIDTH_M;
+        const curbHeight = CURB_VISUAL_HEIGHT_M;
         const segmentLen = 0.8;
         const curbCenterX = edgeX - Math.sign(edgeX) * (curbWidth / 2);
         const count = Math.ceil(lengthM / segmentLen);
@@ -333,8 +365,8 @@ export class FourLaneRoad {
 
     /** Curb đỏ-trắng chạy theo local X, từ `fromX` tới `toX`, tâm curb tại `z`. */
     private addStepCurb(fromX: number, toX: number, z: number, parent: THREE.Group) {
-        const curbWidth = 0.2;
-        const curbHeight = 0.05;
+        const curbWidth = CURB_VISUAL_WIDTH_M;
+        const curbHeight = CURB_VISUAL_HEIGHT_M;
         const segmentLen = 0.8;
         const length = toX - fromX;
         const count = Math.ceil(length / segmentLen - 1e-6);
@@ -359,17 +391,12 @@ export class FourLaneRoad {
     private addArrow(
         x: number,
         z: number,
-        laneWidthM: number,
-        lengthM: number,
         isBackward: boolean,
         parent: THREE.Group,
     ) {
-        const texture = this.createStraightArrowTexture();
-
-        const arrowWidth = Math.min(laneWidthM * 0.32, 1.2);
-        const arrowLength = Math.min(lengthM * 0.35, 3.4);
+        const texture = createStraightRoadArrowTexture();
         const arrow = new THREE.Mesh(
-            new THREE.PlaneGeometry(arrowWidth, arrowLength),
+            new THREE.PlaneGeometry(STRAIGHT_ROAD_ARROW_WIDTH_M, STRAIGHT_ROAD_ARROW_LENGTH_M),
             new THREE.MeshBasicMaterial({ map: texture, transparent: true }),
         );
         arrow.rotation.x = -Math.PI / 2;
@@ -380,49 +407,6 @@ export class FourLaneRoad {
         }
         arrow.name = isBackward ? 'arrow-backward' : 'arrow-forward';
         parent.add(arrow);
-    }
-
-    /**
-     * Tạo canvas texture vẽ mũi tên thẳng (đầu nhọn chĩa lên trong canvas).
-     * Khi `rotation.x = -PI/2`, mũi tên chĩa về +Z trong world.
-     */
-    private createStraightArrowTexture(): THREE.CanvasTexture {
-        const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 512;
-
-        const ctx = canvas.getContext('2d')!;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        ctx.fillStyle = 'white';
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 28;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        const cx = canvas.width / 2;
-
-        // thân mũi tên
-        ctx.beginPath();
-        ctx.moveTo(cx, 420);
-        ctx.lineTo(cx, 140);
-        ctx.stroke();
-
-        // đầu mũi tên
-        ctx.beginPath();
-        ctx.moveTo(cx, 90);
-        ctx.lineTo(cx - 55, 165);
-        ctx.lineTo(cx - 20, 165);
-        ctx.lineTo(cx - 20, 250);
-        ctx.lineTo(cx + 20, 250);
-        ctx.lineTo(cx + 20, 165);
-        ctx.lineTo(cx + 55, 165);
-        ctx.closePath();
-        ctx.fill();
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        return texture;
     }
 
     /**

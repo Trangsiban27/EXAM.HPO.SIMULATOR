@@ -1,5 +1,11 @@
 import * as THREE from 'three';
+import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import { offsetPath, roundCorners, splitByPattern, type Point } from './roundedPath';
+import {
+    createRoadArrowTexture,
+    STRAIGHT_ROAD_ARROW_LENGTH_M,
+    STRAIGHT_ROAD_ARROW_WIDTH_M,
+} from './straightRoadArrow';
 
 /**
  * Bài sát hạch số 4 — Qua vệt bánh xe và đường vòng vuông góc.
@@ -47,7 +53,6 @@ export interface WheelTrackCourseOptions {
 
 const CURB_GAP_M = 0.2;
 const CURB_WIDTH_M = 0.2;
-const CURB_HEIGHT_M = 0.05;
 const CURB_SEGMENT_M = 0.8;
 const LIMIT_LINE_WIDTH_M = 0.1;
 const LIMIT_SENSOR_WIDTH_M = 0.25;
@@ -176,8 +181,8 @@ export class WheelTrackCourse {
         const leftLimit = leftPath(limitStartZ, limitEndZ);
 
         this.buildSurface(rightCurb, leftCurb);
-        this.buildCurb(rightCurb, CURB_WIDTH_M);
-        this.buildCurb(leftCurb, -CURB_WIDTH_M);
+        this.buildCurb(rightCurb, CURB_VISUAL_WIDTH_M);
+        this.buildCurb(leftCurb, -CURB_VISUAL_WIDTH_M);
         this.buildLimitLine(rightLimit);
         this.buildLimitLine(leftLimit);
 
@@ -225,14 +230,14 @@ export class WheelTrackCourse {
         const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .85 });
         const red = new THREE.MeshStandardMaterial({ color: 0xd83b3b, roughness: .85 });
         splitByPattern(curbLine, [CURB_SEGMENT_M]).forEach((piece, i) => {
-            const curb = this.addRibbon(piece, 0, width, CURB_HEIGHT_M, .06,
+            const curb = this.addRibbon(piece, 0, width, .06, CURB_VISUAL_HEIGHT_M,
                 i % 2 === 0 ? white : red, 'red-white-curb');
             curb.castShadow = true;
         });
     }
 
     private buildLimitLine(path: Point[]): void {
-        const material = new THREE.MeshStandardMaterial({ color: 0xd83b3b, roughness: .7 });
+        const material = new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .7 });
         this.addRibbon(path, -LIMIT_LINE_WIDTH_M / 2, LIMIT_LINE_WIDTH_M / 2,
             .01, .065, material, 'wheel-track-limit-line');
 
@@ -330,11 +335,11 @@ export class WheelTrackCourse {
      */
     private addRoadArrow(x: number, z: number, w: number, d: number,
         type: 'straight' | 'left' | 'right'): void {
-        const texture = this.createArrowTexture(type);
+        const texture = createRoadArrowTexture(type);
         const arrow = new THREE.Mesh(
             new THREE.PlaneGeometry(
-                Math.min(w * 0.32, type === 'straight' ? 1.2 : 1.9),
-                Math.min(d * 0.35, 3.4)
+                Math.min(w * .5, STRAIGHT_ROAD_ARROW_WIDTH_M),
+                Math.min(d * .35, STRAIGHT_ROAD_ARROW_LENGTH_M)
             ),
             new THREE.MeshBasicMaterial({ map: texture, transparent: true })
         );
@@ -346,11 +351,11 @@ export class WheelTrackCourse {
     /** Đặt arrow vào group có sẵn (dùng cho acrossArrow). */
     private addRoadArrowTo(x: number, z: number, w: number, d: number,
         type: 'straight' | 'left' | 'right', parent: THREE.Group): void {
-        const texture = this.createArrowTexture(type);
+        const texture = createRoadArrowTexture(type);
         const arrow = new THREE.Mesh(
             new THREE.PlaneGeometry(
-                Math.min(w * 0.32, type === 'straight' ? 1.2 : 1.9),
-                Math.min(d * 0.35, 3.4)
+                Math.min(w * .5, STRAIGHT_ROAD_ARROW_WIDTH_M),
+                Math.min(d * .35, STRAIGHT_ROAD_ARROW_LENGTH_M)
             ),
             new THREE.MeshBasicMaterial({ map: texture, transparent: true })
         );
@@ -359,55 +364,4 @@ export class WheelTrackCourse {
         parent.add(arrow);
     }
 
-    private createArrowTexture(type: 'straight' | 'left' | 'right' | 'none'): THREE.CanvasTexture {
-        const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 512;
-        const ctx = canvas.getContext('2d')!;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = 'white';
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 28;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        const cx = canvas.width / 2;
-        if (type === 'straight') {
-            ctx.beginPath();
-            ctx.moveTo(cx, 420);
-            ctx.lineTo(cx, 140);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(cx, 90);
-            ctx.lineTo(cx - 55, 165);
-            ctx.lineTo(cx - 20, 165);
-            ctx.lineTo(cx - 20, 250);
-            ctx.lineTo(cx + 20, 250);
-            ctx.lineTo(cx + 20, 165);
-            ctx.lineTo(cx + 55, 165);
-            ctx.closePath();
-            ctx.fill();
-        } else if (type === 'left' || type === 'right') {
-            ctx.save();
-            if (type === 'left') {
-                ctx.translate(canvas.width, 0);
-                ctx.scale(-1, 1);
-            }
-            ctx.beginPath();
-            ctx.moveTo(55, 430);
-            ctx.lineTo(115, 430);
-            ctx.lineTo(115, 205);
-            ctx.lineTo(165, 205);
-            ctx.lineTo(165, 270);
-            ctx.lineTo(240, 165);
-            ctx.lineTo(165, 60);
-            ctx.lineTo(165, 125);
-            ctx.lineTo(55, 125);
-            ctx.closePath();
-            ctx.fill();
-            ctx.restore();
-        }
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        return texture;
-    }
 }

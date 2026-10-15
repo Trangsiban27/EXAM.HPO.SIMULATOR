@@ -8,6 +8,29 @@
         "Khi có lệnh xuất phát (đèn xanh trên xe bật sáng, tiếng loa trên xe báo lệnh xuất phát), bật đèn xi nhan trái, lái xe xuất phát.",
         "Tắt xi nhan trái ở khoảng cách 05 mét sau vạch xuất phát (đèn xanh trên xe tắt).",
         "Lái xe đến bài sát hạch tiếp theo."
+      ],
+      "requirements": [
+        "Thắt dây an toàn trước khi xuất phát.",
+        "Khởi hành nhẹ nhàng, không bị rung giật, trong khoảng thời gian 20 giây.",
+        "Bật đèn xi nhan trái trước khi xuất phát.",
+        "Tắt đèn xi nhan trái ở khoảng cách 05 mét sau vạch xuất phát (đèn xanh trên xe tắt).",
+        "Giữ động cơ hoạt động liên tục.",
+        "Giữ tốc độ động cơ không quá 4000 vòng/phút.",
+        "Lái xe theo quy tắc giao thông đường bộ.",
+        "Tốc độ xe chạy không quá:\n- 24 km/h đối với hạng B, D1, D2\n- 20 km/h đối với hạng C1, C, D"
+      ],
+      "penalties": [
+        "Không thắt dây an toàn, trừ 05 điểm.",
+        "Không bật đèn xi nhan trái khi xuất phát, trừ 05 điểm.",
+        "Không tắt đèn xi nhan trái ở khoảng cách 05 mét sau vạch xuất phát (đèn xanh trên xe tắt), trừ 05 điểm.",
+        "Không bật và tắt đèn xi nhan trái kịp thời trừ 05 điểm.",
+        "Quá 20 giây kể từ khi có lệnh xuất phát (đèn xanh trên xe bật sáng) không đi qua vạch xuất phát, trừ 05 điểm.",
+        "Quá 30 giây kể từ khi có lệnh xuất phát (đèn xanh trên xe bật sáng) không đi qua vạch xuất phát, bị đình chỉ sát hạch.",
+        "Lái xe lên vỉa hè bị đình chỉ sát hạch.",
+        "Xử lý tình huống không hợp lý gây tai nạn, bị đình chỉ sát hạch.",
+        "Lái xe bị chết máy, mỗi lần trừ 05 điểm.",
+        "Để tốc độ động cơ quá 4000 vòng/phút, mỗi lần trừ 05 điểm.",
+        "Lái xe quá tốc độ quy định, cứ 03 giây trừ 01 điểm."
       ]
     },
     {
@@ -16,6 +39,24 @@
       "steps": [
         "Dừng xe để khoảng cách từ hình chiếu thanh cản phía trước của xe xuống mặt đường đến vạch dừng (khoảng cách A) không quá 500 mm.",
         "Lái xe đến bài sát hạch tiếp theo."
+      ],
+      "requirements": [
+        "Dừng xe cách vạch dừng quy định không quá 500mm.",
+        "Giữ động cơ hoạt động liên tục.",
+        "Giữ tốc độ động cơ không quá 4000 vòng/phút.",
+        "Lái xe theo quy tắc giao thông đường bộ.",
+        "Tốc độ xe chạy không quá:\n- 24 km/h đối với hạng B, D1, D2\n- 20 km/h đối với hạng C1, C, D"
+      ],
+      "penalties": [
+        "Không dừng xe ở vạch dừng quy định, trừ 05 điểm.",
+        "Dừng xe chưa đến vạch dừng quy định, trừ 05 điểm.",
+        "Dừng xe quá vạch dừng quy định, trừ 05 điểm.",
+        "Lái xe lên vỉa hè bị đình chỉ sát hạch.",
+        "Xử lý tình huống không hợp lý gây tai nạn, bị đình chỉ sát hạch.",
+        "Lái xe bị chết máy, mỗi lần trừ 05 điểm.",
+        "Để tốc độ động cơ quá 4000 vòng/phút, mỗi lần trừ 05 điểm.",
+        "Lái xe quá tốc độ quy định, cứ 03 giây trừ 01 điểm.",
+        "Tổng thời gian đến bài sát hạch đang thực hiện quá quy định, cứ 03 giây trừ 01 điểm."
       ]
     },
     {
@@ -25,6 +66,27 @@
         "Dừng xe để khoảng cách từ hình chiếu thanh cản phía trước của xe xuống mặt đường đến vạch dừng (khoảng cách A) không quá 500 mm.",
         "Khởi hành lên dốc nhẹ nhàng, không bị tụt dốc, bảo đảm thời gian quy định.",
         "Lái xe đến bài sát hạch tiếp theo."
+      ],
+      "requirements": [
+        "Dừng xe cách vạch dừng quy định không quá 500mm.",
+        "Khởi hành xe êm dịu, không bị tụt dốc quá 500mm.",
+        "Xe qua vị trí dừng trong khoảng thời gian 30 giây.",
+        "Giữ động cơ hoạt động liên tục.",
+        "Giữ tốc độ động cơ không quá 4000 vòng/phút.",
+        "Lái xe theo quy tắc giao thông đường bộ.",
+        "Tốc độ xe chạy không quá:\n- 24 km/h đối với hạng B, D1, D2\n- 20 km/h đối với hạng C1, C, D"
+      ],
+      "penalties": [
+        "Không dừng xe ở vạch dừng quy định, bị đình chỉ sát hạch.",
+        "Dừng xe chưa đến vạch dừng quy định, trừ 05 điểm.",
+        "Dừng xe quá vạch dừng quy định, bị đình chỉ sát hạch.",
+        "Quá thời gian 30 giây kể từ khi dừng xe không khởi hành xe qua vạch dừng, bị đình chỉ sát hạch.",
+        "Xe bị tụt dốc quá 500mm kể từ khi dừng xe, bị đình chỉ sát hạch.",
+        "Xử lý tình huống không hợp lý gây tai nạn, đình chỉ sát hạch.",
+        "Xe bị chết máy, mỗi lần trừ 05 điểm.",
+        "Để tốc độ động cơ quá 4000 vòng/phút, mỗi lần trừ 05 điểm.",
+        "Lái xe quá tốc độ quy định, cứ 03 giây trừ 01 điểm.",
+        "Tổng thời gian đến bài sát hạch đang thực hiện quá quy định, cứ 03 giây trừ 1 điểm."
       ]
     },
     {
@@ -34,6 +96,28 @@
         "Lái xe để bánh xe trước và bánh xe sau bên lái phụ qua vùng giới hạn của hình vệt bánh xe.",
         "Lái xe qua đường vòng vuông góc trong vùng giới hạn của hình sát hạch trong thời gian 02 phút.",
         "Lái xe qua vạch kết thúc bài sát hạch và đến bài sát hạch tiếp theo."
+      ],
+      "requirements": [
+        "Đi đúng hình quy định của hạng xe sát hạch.",
+        "Bánh xe trước và bánh xe sau bên lái phụ qua vùng giới hạn của hình vệt bánh xe.",
+        "Bánh xe không đè vào vạch giới hạn hình sát hạch.",
+        "Hoàn thành bài sát hạch trong thời gian 02 phút.",
+        "Giữ động cơ hoạt động liên tục.",
+        "Giữ tốc độ động cơ không quá 4000 vòng/phút.",
+        "Tốc độ xe chạy không quá:\n- 24 km/h đối với hạng B, D1, D2\n- 20 km/h đối với hạng C1, C, D."
+      ],
+      "penalties": [
+        "Đi không đúng hình của hạng xe sát hạch, bị đình chỉ sát hạch.",
+        "Bánh xe trước và bánh xe sau bên lái phụ không qua vùng giới hạn của hình vệt bánh xe, bị đình chỉ sát hạch.",
+        "Bánh xe đè vào vạch giới hạn hình sát hạch, mỗi lần trừ 05 điểm.",
+        "Bánh xe đè vào vạch giới hạn hình sát hạch, cứ quá 05 giây, trừ 05 điểm.",
+        "Thời gian thực hiện bài sát hạch, cứ quá 02 phút, trừ 05 điểm.",
+        "Lái xe lên vỉa hè bị đình chỉ sát hạch.",
+        "Xử lý tình huống không hợp lý gây tai nạn, bị đình chỉ sát hạch.",
+        "Xe bị chết máy, mỗi lần trừ 05 điểm.",
+        "Để tốc độ động cơ quá 4000 vòng/phút, mỗi lần trừ 05 điểm.",
+        "Xe quá tốc độ quy định, cứ 03 giây trừ 01 điểm.",
+        "Tổng thời gian đến bài sát hạch đang thực hiện quá quy định, cứ 03 giây trừ 01 điểm."
       ]
     },
     {
@@ -54,6 +138,32 @@
         "Lái xe qua ngã tư trong thời gian quy định.",
         "Lái xe qua ngã tư không vi phạm vạch kẻ đường.",
         "Lái xe đến bài sát hạch tiếp theo."
+      ],
+      "requirements": [
+        "Chấp hành theo tín hiệu đèn điều khiển giao thông.",
+        "Dừng xe cách vạch dừng quy định không quá 1000mm.",
+        "Bật đèn xi nhan trái khi rẽ trái.",
+        "Bật đèn xi nhan phải khi rẽ phải.",
+        "Xe qua ngã tư trong thời gian 20 giây.",
+        "Lái xe qua ngã tư không vi phạm quy tắc giao thông đường bộ.",
+        "Giữ động cơ hoạt động liên tục.",
+        "Giữ tốc độ động cơ không quá 4000 vòng/phút.",
+        "Tốc độ xe chạy không quá:\n- 24 km/h đối với hạng B, D1, D2\n- 20 km/h đối với hạng C1, C, D"
+      ],
+      "penalties": [
+        "Vi phạm tín hiệu đèn điều khiển giao thông (đi qua ngã tư khi đèn tín hiệu màu đỏ), trừ 10 điểm.",
+        "Dừng xe quá vạch dừng quy định, trừ 05 điểm.",
+        "Dừng xe chưa đến vạch dừng quy định, trừ 05 điểm.",
+        "Không bật đèn xi nhan khi rẽ trái hoặc rẽ phải, trừ 05 điểm.",
+        "Quá 20 giây từ khi đèn tín hiệu màu xanh bật sáng không lái xe qua được vạch kết thúc ngã tư, trừ 05 điểm.",
+        "Quá 30 giây từ khi đèn tín hiệu màu xanh bật sáng không lái xe qua được vạch kết thúc ngã tư, bị đình chỉ sát hạch.",
+        "Lái xe vi phạm vạch kẻ đường để thiết bị báo không thực hiện đúng trình tự bài sát hạch, bị đình chỉ sát hạch.",
+        "Lái xe lên vỉa hè bị đình chỉ sát hạch.",
+        "Xử lý tình huống không hợp lý gây tai nạn, bị đình chỉ sát hạch.",
+        "Xe bị chết máy, mỗi lần trừ 05 điểm.",
+        "Để tốc độ động cơ quá 4000 vòng/phút, mỗi lần trừ 05 điểm.",
+        "Xe quá tốc độ quy định, cứ 03 giây trừ 01 điểm.",
+        "Tổng thời gian đến bài sát hạch đang thực hiện quá quy định, cứ 03 giây trừ 01 điểm."
       ]
     }
   ]

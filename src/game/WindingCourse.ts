@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import type { WindingCourseSpec } from './WindingCourseSpec';
 
 export interface SCurveTrackOptions {
@@ -36,7 +37,6 @@ type ArcDefinition = {
 
 const EPSILON_M = 0.005;
 const ARC_STEPS_PER_RADIAN = 64;
-const CURB_VISUAL_WIDTH_M = 0.10;
 /** Đo từ bản vẽ hạng B: dz = 5.55, Sqc = 8.86 → φ ≈ 51.2°. Dùng khi spec không có verticalSpanM. */
 const DEFAULT_CENTER_TILT_RAD = Math.acos(5.55 / 8.86);
 
@@ -64,6 +64,15 @@ export class SCurveTrack {
     readonly tangentPoints: readonly THREE.Vector3[];
     readonly exit: THREE.Vector3;
     readonly centerTiltRad: number;
+    private exitOuterArc: ArcDefinition | null = null;
+    private exitOuterBoundary: THREE.Mesh | null = null;
+    private exitOuterCurbParts: Array<{
+        mesh: THREE.Mesh;
+        from: number;
+        to: number;
+        innerRadiusM: number;
+        outerRadiusM: number;
+    }> = [];
 
     constructor(options: SCurveTrackOptions) {
         validateGeometryOptions(options);
@@ -133,9 +142,9 @@ export class SCurveTrack {
         const asphalt = new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95 });
         const curbWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .85 });
         const curbRed = new THREE.MeshStandardMaterial({ color: 0xd83b3b, roughness: .85 });
-        const boundaryRed = new THREE.MeshStandardMaterial({ color: 0xe52521, roughness: .65 });
+        const boundaryRed = new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .65 });
 
-        for (const arc of arcs) {
+        for (const [arcIndex, arc] of arcs.entries()) {
             this.addArcBand(
                 arc,
                 innerRadiusM - curbWidthM,
@@ -145,7 +154,8 @@ export class SCurveTrack {
                 asphalt,
             );
             this.addBoundaryLine(arc, innerRadiusM, boundaryRed, 'inner-red-boundary');
-            this.addBoundaryLine(arc, outerRadiusM, boundaryRed, 'outer-red-boundary');
+            const outerBoundary = this.addBoundaryLine(
+                arc, outerRadiusM, boundaryRed, 'outer-red-boundary');
             const curbGapM = Math.max(0, curbWidthM - CURB_VISUAL_WIDTH_M);
             this.addCurb(
                 arc,
@@ -154,14 +164,19 @@ export class SCurveTrack {
                 curbWhite,
                 curbRed,
             );
-            this.addCurb(
+            const outerCurbParts = this.addCurb(
                 arc,
                 outerRadiusM + curbGapM,
                 outerRadiusM + curbWidthM,
                 curbWhite,
                 curbRed,
             );
-            this.addArcPenaltyZones(arc, innerRadiusM - curbWidthM, outerRadiusM + curbWidthM);
+            if (arcIndex === 1) {
+                this.exitOuterArc = arc;
+                this.exitOuterBoundary = outerBoundary;
+                this.exitOuterCurbParts = outerCurbParts;
+            }
+            this.addArcPenaltyZones(arc, innerRadiusM, outerRadiusM);
         }
 
         this.addTangent(
@@ -187,10 +202,36 @@ export class SCurveTrack {
             boundaryRed,
         );
 
+        // Hai vạch vàng ngang đường đánh dấu đầu và cuối phần giới hạn đỏ.
+        this.addYellowDashedGate('s-curve-start-yellow-dashed-line', 0, topTangentZ);
+        this.addYellowDashedGate('s-curve-end-yellow-dashed-line', bottomTangentX, bottomTangentZ);
+
         this.exit = new THREE.Vector3(bottomTangentX, .06, bottomTangentZ);
         if (debug) {
             this.addDebugGeometry(arcs, firstCenterZ, secondCenterZ, topTangentZ, bottomTangentZ);
         }
+    }
+
+    addEntryApproachYellowDashedGate(distanceM: number): void {
+        this.addYellowDashedGate('s-curve-entry-approach-yellow-dashed-line', distanceM, 0);
+    }
+
+    private addYellowDashedGate(name: string, x: number, centerZ: number): void {
+        const dashLengthM = .6;
+        const dashGapM = .3;
+        const dashCount = Math.max(1, Math.floor((this.roadWidthM + dashGapM) / (dashLengthM + dashGapM)));
+        const patternWidthM = dashCount * dashLengthM + (dashCount - 1) * dashGapM;
+        const startZ = centerZ - patternWidthM / 2;
+        const material = new THREE.MeshStandardMaterial({ color: 0xffd400, roughness: .7 });
+        const group = new THREE.Group();
+        group.name = name;
+        for (let i = 0; i < dashCount; i++) {
+            const dash = new THREE.Mesh(new THREE.BoxGeometry(.15, .008, dashLengthM), material);
+            dash.position.set(x, .09, startZ + i * (dashLengthM + dashGapM) + dashLengthM / 2);
+            dash.receiveShadow = true;
+            group.add(dash);
+        }
+        this.root.add(group);
     }
 
     private addArcBand(
@@ -220,24 +261,27 @@ export class SCurveTrack {
         outerRadiusM: number,
         white: THREE.Material,
         red: THREE.Material,
-    ): void {
+    ): SCurveTrack['exitOuterCurbParts'] {
         const meanRadius = (innerRadiusM + outerRadiusM) / 2;
         const count = Math.max(2, Math.ceil(Math.abs(arc.to - arc.from) * meanRadius / .8));
+        const parts: SCurveTrack['exitOuterCurbParts'] = [];
         for (let i = 0; i < count; i++) {
             const start = arc.from + (arc.to - arc.from) * i / count;
             const end = arc.from + (arc.to - arc.from) * (i + 1) / count;
             const segmentGeometry = new THREE.ExtrudeGeometry(
                 this.createArcShape({ ...arc, from: start, to: end }, innerRadiusM, outerRadiusM),
-                { depth: .05, bevelEnabled: false },
+                { depth: CURB_VISUAL_HEIGHT_M, bevelEnabled: false },
             );
-            segmentGeometry.translate(0, 0, -.05);
+            segmentGeometry.translate(0, 0, -CURB_VISUAL_HEIGHT_M);
             segmentGeometry.rotateX(-Math.PI / 2);
             const segment = new THREE.Mesh(segmentGeometry, i % 2 ? red : white);
-            segment.position.y = .11;
+            segment.position.y = .06 + CURB_VISUAL_HEIGHT_M;
             segment.castShadow = true;
             segment.receiveShadow = true;
             this.root.add(segment);
+            parts.push({ mesh: segment, from: start, to: end, innerRadiusM, outerRadiusM });
         }
+        return parts;
     }
 
     private addTangent(
@@ -294,7 +338,7 @@ export class SCurveTrack {
             const curbGap = curbDepth - visualCurbDepth;
             for (const side of [-1, 1] as const) {
                 const curb = new THREE.Mesh(
-                    new THREE.BoxGeometry(length, .05, visualCurbDepth),
+                    new THREE.BoxGeometry(length, CURB_VISUAL_HEIGHT_M, visualCurbDepth),
                     side === -1 ? white : red,
                 );
                 curb.position.set(
@@ -315,7 +359,7 @@ export class SCurveTrack {
         radius: number,
         material: THREE.Material,
         name: string,
-    ): void {
+    ): THREE.Mesh {
         const geometry = new THREE.ExtrudeGeometry(
             this.createArcShape(arc, radius - .02, radius + .02),
             { depth: .008, bevelEnabled: false },
@@ -327,6 +371,40 @@ export class SCurveTrack {
         line.position.y = .085;
         line.receiveShadow = true;
         this.root.add(line);
+        return line;
+    }
+
+    /** Cắt đoạn curb ngoài cuối chữ S tại điểm tiếp tuyến của góc lối ra. */
+    trimExitOuterCurbAtWorldPoint(tangentWorld: THREE.Vector3): void {
+        const arc = this.exitOuterArc;
+        const boundary = this.exitOuterBoundary;
+        if (!arc || !boundary) return;
+        this.root.updateWorldMatrix(true, false);
+        const tangent = this.root.worldToLocal(tangentWorld.clone());
+        const angle = Math.atan2(tangent.z - arc.centerZ, tangent.x - arc.centerX);
+        if (angle <= arc.from || angle >= arc.to) return;
+        const arcGeometry = (from: number, to: number, inner: number, outer: number, depth: number) => {
+            const geometry = new THREE.ExtrudeGeometry(
+                this.createArcShape({ ...arc, from, to }, inner, outer),
+                { depth, bevelEnabled: false },
+            );
+            geometry.translate(0, 0, -depth);
+            geometry.rotateX(-Math.PI / 2);
+            return geometry;
+        };
+        for (const part of this.exitOuterCurbParts) {
+            if (part.from >= angle) {
+                part.mesh.removeFromParent();
+                part.mesh.geometry.dispose();
+            } else if (part.to > angle) {
+                part.mesh.geometry.dispose();
+                part.mesh.geometry = arcGeometry(
+                    part.from, angle, part.innerRadiusM, part.outerRadiusM, CURB_VISUAL_HEIGHT_M);
+            }
+        }
+        boundary.geometry.dispose();
+        boundary.geometry = arcGeometry(
+            arc.from, angle, this.outerRadius - .02, this.outerRadius + .02, .008);
     }
 
     private createArcShape(arc: ArcDefinition, innerRadiusM: number, outerRadiusM: number): THREE.Shape {
@@ -351,18 +429,22 @@ export class SCurveTrack {
 
     private addArcPenaltyZones(arc: ArcDefinition, innerRadiusM: number, outerRadiusM: number): void {
         const samples = Math.max(2, Math.ceil(Math.abs(arc.to - arc.from) * outerRadiusM / .15));
-        for (let i = 0; i < samples; i++) {
-            const start = arc.from + (arc.to - arc.from) * i / samples;
-            const end = arc.from + (arc.to - arc.from) * (i + 1) / samples;
-            const points = [
-                this.arcPoint(arc, innerRadiusM, start),
-                this.arcPoint(arc, outerRadiusM, start),
-                this.arcPoint(arc, innerRadiusM, end),
-                this.arcPoint(arc, outerRadiusM, end),
-            ];
-            const zone = new THREE.Box3().setFromPoints(points);
-            zone.expandByVector(new THREE.Vector3(.125, .1, .125));
-            this.penaltyZones.push(zone);
+        // Chỉ kiểm tra sát hai vạch giới hạn; khoảng giữa là phần đường hợp lệ.
+        const wheelAndLineToleranceM = .13; // Nửa bề rộng bánh xe và vạch giới hạn.
+        for (const radiusM of [innerRadiusM, outerRadiusM]) {
+            for (let i = 0; i < samples; i++) {
+                const start = arc.from + (arc.to - arc.from) * i / samples;
+                const end = arc.from + (arc.to - arc.from) * (i + 1) / samples;
+                const points = [
+                    this.arcPoint(arc, radiusM - wheelAndLineToleranceM, start),
+                    this.arcPoint(arc, radiusM + wheelAndLineToleranceM, start),
+                    this.arcPoint(arc, radiusM - wheelAndLineToleranceM, end),
+                    this.arcPoint(arc, radiusM + wheelAndLineToleranceM, end),
+                ];
+                const zone = new THREE.Box3().setFromPoints(points);
+                zone.expandByVector(new THREE.Vector3(.01, .1, .01));
+                this.penaltyZones.push(zone);
+            }
         }
     }
 

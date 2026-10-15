@@ -7,10 +7,11 @@ import { notify, type NotifyKind, type NotifyOptions } from './Notify';
 import { pedestrianHud } from './PedestrianHud';
 import type { Exam02Pedestrian } from '../game/exercises/Exam02Pedestrian';
 import type { ExamScoringMode } from '../game/exam/examScoringMode';
-import type { AutoDriveLesson } from '../game/autoDrive/autoDriveLessons';
+import { AUTO_DRIVE_LESSONS, type AutoDriveLesson } from '../game/autoDrive/autoDriveLessons';
 import './auto-drive.css';
 
-type Bindings = { onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void; onAutoDriveToggle: () => void; onWaypointRecordingStart: () => void; onWaypointRecordingFinish: () => string };
+type Bindings = { onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void; onAutoDriveToggle: () => void; onLessonSelect: (lessonId: number) => void; onWaypointRecordingStart: () => boolean; onWaypointRecordingFinish: () => string };
+type AutoLessonView = 'steps' | 'requirements' | 'penalties';
 
 export class Hud {
     private audio: EngineAudio;
@@ -31,6 +32,7 @@ export class Hud {
                 ${options.develop ? '<section class="pill develop-pill">DEVELOP</section>' : ''}
                 <section class="pill"><span class="mint icon">♢</span><strong id="score">100</strong><i></i><span class="mint">◴</span><b class="mint mono" id="time">00:00</b></section>
                 <section class="pill exercise"><span class="blue">◎</span><b id="exercise">Xuất phát</b><small id="penalty">0 lỗi</small><span id="startLamp" class="start-lamp" title="Đèn lệnh xuất phát">GO</span></section>
+                <section class="pill lesson-picker"><label for="lessonSelect">Bài học</label><select id="lessonSelect" aria-label="Chọn bài học tự chạy"><option value="">Chọn bài</option>${AUTO_DRIVE_LESSONS.map(lesson => `<option value="${lesson.id}">Bài ${lesson.id}</option>`).join('')}<option value="6" disabled>Bài 6</option><option value="7" disabled>Bài 7</option><option value="8" disabled>Bài 8</option><option value="9" disabled>Bài 9</option></select></section>
                 <section class="pill"><strong id="speed">0</strong><small class="blue">KM/H</small><i></i><span class="amber">ϟ</span><b class="amber" id="rpm">0</b><small class="amber">RPM</small><i></i><button id="engine" data-key="Enter" class="engine" aria-label="Bật hoặc tắt động cơ">ENGINE</button></section>
             </header>
             <details class="settings"><summary>⚙ &nbsp; CÀI ĐẶT & GÓC NHÌN</summary><div class="settings-body">
@@ -59,11 +61,21 @@ export class Hud {
                     <label class="fine-gas">Chỉnh mức ga <input type="range" min="0" max="1" step="0.01" value="0" data-analog="gas" aria-label="Mức ga"></label><div class="pedals"><button data-key="ArrowDown" class="pedal brake" aria-label="Giữ để phanh"><b>PHANH</b><span class="pedal-meter"><span id="brakeFill"></span></span><small id="brakeValue">0%</small><kbd>S / ↓</kbd></button><button data-key="ArrowUp" class="pedal gas" aria-label="Giữ để đạp ga"><b>⌃ GA</b><span class="pedal-meter gas-meter"><span id="gasFill"></span></span><small id="gasValue">Nhả ga</small><kbd>W / ↑</kbd></button></div>
             </div>
             </div>
-            <section id="autoLesson" class="auto-quiz" role="dialog" aria-modal="true" aria-labelledby="autoLessonTitle" hidden>
+            <section id="autoLesson" class="auto-quiz auto-lesson" role="dialog" aria-labelledby="autoLessonTitle" hidden>
                 <div class="auto-quiz-card auto-lesson-card">
                     <div class="auto-quiz-eyebrow">HƯỚNG DẪN BÀI SÁT HẠCH</div>
                     <h2 id="autoLessonTitle"></h2>
-                    <ol id="autoLessonSteps" class="auto-lesson-steps"></ol>
+                    <div class="auto-lesson-switcher" role="group" aria-label="Nội dung bài sát hạch">
+                        <button type="button" data-lesson-view="steps" aria-pressed="true">Các bước</button>
+                        <button type="button" data-lesson-view="requirements" aria-pressed="false">Yêu cầu</button>
+                        <button type="button" data-lesson-view="penalties" aria-pressed="false">Trừ điểm</button>
+                    </div>
+                    <div class="auto-lesson-content">
+                        <ol id="autoLessonSteps" class="auto-lesson-list auto-lesson-steps" data-lesson-panel="steps"></ol>
+                        <ul id="autoLessonRequirements" class="auto-lesson-list" data-lesson-panel="requirements" hidden></ul>
+                        <ul id="autoLessonPenalties" class="auto-lesson-list" data-lesson-panel="penalties" hidden></ul>
+                    </div>
+                    <button id="autoLessonRecord" class="auto-quiz-choice auto-lesson-record" type="button" hidden>Ghi waypoint mới từ đây</button>
                     <button id="autoLessonContinue" class="auto-quiz-choice auto-lesson-continue" type="button">Đã đọc, tiếp tục</button>
                     <button id="autoLessonStop" class="auto-quiz-stop" type="button">Dừng xe tự chạy</button>
                 </div>
@@ -147,13 +159,34 @@ export class Hud {
         });
         this.el('restartBtn').addEventListener('click', b.onRestart);
         this.el('autoDriveBtn').addEventListener('click', b.onAutoDriveToggle);
+        this.el('lessonSelect').addEventListener('change', () => {
+            const lessonId = Number((this.el('lessonSelect') as HTMLSelectElement).value);
+            if (lessonId) b.onLessonSelect(lessonId);
+        });
         this.el('autoLessonContinue').addEventListener('click', () => this.autoLessonContinue?.());
         this.el('autoLessonStop').addEventListener('click', b.onAutoDriveToggle);
+        this.el('autoLessonRecord').addEventListener('click', () => {
+            if (!b.onWaypointRecordingStart()) return;
+            this.el('autoLesson').setAttribute('hidden', '');
+            this.showWaypointRecordingBadge();
+            const lessonId = Number((this.el('lessonSelect') as HTMLSelectElement).value);
+            this.flash(this.el('autoLessonRecord').dataset.nextLesson === '9'
+                ? 'Đang ghi waypoint mới từ bài 8 đến bài 9. Vào số 1 và tiếp tục lái.'
+                : lessonId === 9
+                ? 'Đang ghi tiếp waypoint từ lối vào bài 9. Vào số 1 và tiếp tục lái.'
+                : lessonId === 8
+                ? 'Đang ghi tiếp waypoint từ lối vào bài 8. Vào số 1 và tiếp tục lái.'
+                : lessonId === 7
+                ? 'Đang ghi tiếp waypoint từ lối vào bài 7. Vào số 1 và tiếp tục lái.'
+                : 'Đang ghi từ waypoint cuối bài 5. Vào số 1 và lái tuyến bài 6.', 'info');
+        });
+        this.host.querySelectorAll<HTMLButtonElement>('[data-lesson-view]').forEach(button => {
+            button.addEventListener('click', () => this.setAutoLessonView(button.dataset.lessonView as AutoLessonView));
+        });
         this.el('waypointRecordStart').addEventListener('click', () => {
-            b.onWaypointRecordingStart();
-            this.host.classList.add('waypoint-recording-active');
+            if (!b.onWaypointRecordingStart()) return;
             this.el('waypointPrompt').setAttribute('hidden', '');
-            this.el('waypointRecordingBadge').removeAttribute('hidden');
+            this.showWaypointRecordingBadge();
         });
         this.el('waypointRecordFinish').addEventListener('click', () => {
             this.showWaypointRecordingResult(b.onWaypointRecordingFinish());
@@ -261,6 +294,7 @@ export class Hud {
         button.classList.toggle('active', enabled);
         this.host.classList.toggle('auto-drive-active', enabled);
         if (!enabled) {
+            this.setSelectedLesson(null);
             this.host.classList.remove('waypoint-recording-active');
             this.showAutoDriveLesson(null, () => {});
             this.el('waypointPrompt').setAttribute('hidden', '');
@@ -268,10 +302,50 @@ export class Hud {
         }
     }
 
-    showWaypointStopPrompt(_kind: 'bridge' = 'bridge'): void {
+    setSelectedLesson(lessonId: number | null): void {
+        const select = this.el('lessonSelect') as HTMLSelectElement;
+        const value = lessonId === null ? '' : String(lessonId);
+        if (select.value !== value) select.value = value;
+    }
+
+    setExam06Selectable(available: boolean): void {
+        const option = this.host.querySelector<HTMLOptionElement>('#lessonSelect option[value="6"]');
+        if (option) option.disabled = !available;
+    }
+
+    setExam07Selectable(available: boolean): void {
+        const option = this.host.querySelector<HTMLOptionElement>('#lessonSelect option[value="7"]');
+        if (option) option.disabled = !available;
+    }
+
+    setExam08Selectable(available: boolean): void {
+        const option = this.host.querySelector<HTMLOptionElement>('#lessonSelect option[value="8"]');
+        if (option) option.disabled = !available;
+    }
+
+    setExam09Selectable(available: boolean): void {
+        const option = this.host.querySelector<HTMLOptionElement>('#lessonSelect option[value="9"]');
+        if (option) option.disabled = !available;
+    }
+
+    showWaypointStopPrompt(kind: 'bridge' | 'exam05' | 'exam06' | 'exam07' | 'exam08' | 'exam09' = 'bridge'): void {
         this.el('autoLesson').setAttribute('hidden', '');
-        this.el('waypointTitle').textContent = 'Xe đã dừng ở cuối cầu';
-        this.el('waypointInstructions').textContent = 'Bấm “Bắt đầu ghi tuyến”, tự lái liên tục từ cuối cầu qua bài 4 đến gần bài 5 rồi bấm “Lưu tuyến”. Vị trí và hướng xe được ghi mỗi 0,4 m. Điều khiển bằng Enter, số 1/R, Shift, W/↑, A/D và S/↓.';
+        this.el('waypointTitle').textContent = kind === 'exam09' ? 'Xe đã đến lối vào bài 9'
+            : kind === 'exam08' ? 'Xe đã đến lối vào bài 8'
+            : kind === 'exam07' ? 'Xe đã đến lối vào bài 7'
+            : kind === 'exam06' ? 'Xe đã đến cuối tuyến waypoint bài 6'
+            : kind === 'exam05' ? 'Xe đã dừng ở waypoint cuối tuyến bài 5' : 'Xe đã dừng ở cuối cầu';
+        this.el('waypointInstructions').textContent = kind === 'exam09'
+            ? 'Bấm “Bắt đầu ghi tuyến” để ghi tiếp từ đây qua bài 9, rồi bấm “Lưu tuyến”.'
+            : kind === 'exam08'
+            ? 'Bấm “Bắt đầu ghi tuyến” để ghi tiếp từ đây qua bài 8, rồi bấm “Lưu tuyến”.'
+            : kind === 'exam07'
+            ? 'Bấm “Bắt đầu ghi tuyến” để ghi tiếp từ đây qua bài 7, rồi bấm “Lưu tuyến”.'
+            : kind === 'exam06'
+            ? 'Bấm “Bắt đầu ghi tuyến” để ghi tiếp từ waypoint cuối này sang bài tiếp theo, rồi bấm “Lưu tuyến”.'
+            : kind === 'exam05'
+                ? 'Bấm “Bắt đầu ghi tuyến”, lái từ điểm nối này đến lối vào bài 6 rồi bấm “Lưu tuyến”. Vị trí và hướng xe được ghi mỗi 0,4 m.'
+                : 'Bấm “Bắt đầu ghi tuyến”, tự lái liên tục từ cuối cầu qua bài 4 đến gần bài 5 rồi bấm “Lưu tuyến”. Vị trí và hướng xe được ghi mỗi 0,4 m. Điều khiển bằng Enter, số 1/R, Shift, W/↑, A/D và S/↓.';
         (this.el('waypointRouteOutput') as HTMLTextAreaElement).value = '';
         this.el('waypointRouteOutput').setAttribute('hidden', '');
         this.el('waypointRecordStart').removeAttribute('hidden');
@@ -284,10 +358,35 @@ export class Hud {
         this.el('waypointCount').textContent = String(count);
     }
 
+    private showWaypointRecordingBadge(): void {
+        this.host.classList.add('waypoint-recording-active');
+        this.el('waypointRecordingBadge').removeAttribute('hidden');
+    }
+
     private showWaypointRecordingResult(route: string): void {
         this.host.classList.remove('waypoint-recording-active');
         this.el('waypointRecordingBadge').setAttribute('hidden', '');
-        this.el('waypointInstructions').textContent = 'Đã ghi một tuyến liên tục. Sao chép đoạn mã bên dưới và thêm vào autoDriveRoutes.ts để xe tự chạy theo tuyến mới.';
+        const exam06Route = route.startsWith('const exam05ToExam06Waypoints = [');
+        const exam06Continuation = route.startsWith('const exam06ToExam07Waypoints = [');
+        const exam07Continuation = route.startsWith('const exam07ToExam08Waypoints = [');
+        const exam08Continuation = route.startsWith('const exam08ToExam09Waypoints = [');
+        const exam09Continuation = route.startsWith('const exam09ToExam10Waypoints = [');
+        this.el('waypointTitle').textContent = exam09Continuation ? 'Đã ghi tuyến bài 9'
+            : exam08Continuation ? 'Đã ghi tuyến bài 8'
+            : exam07Continuation ? 'Đã ghi tuyến bài 7'
+            : exam06Continuation ? 'Đã ghi tuyến sau bài 6'
+            : exam06Route ? 'Đã ghi tuyến đến bài 6' : 'Đã ghi tuyến waypoint';
+        this.el('waypointInstructions').textContent = exam09Continuation
+            ? 'Sao chép tuyến bên dưới vào autoDriveRoutes.ts. Waypoint đầu tiên trùng điểm cuối tuyến vào bài 9.'
+            : exam08Continuation
+            ? 'Sao chép tuyến bên dưới vào autoDriveRoutes.ts. Waypoint đầu tiên trùng điểm cuối tuyến vào bài 8.'
+            : exam07Continuation
+            ? 'Sao chép tuyến bên dưới vào autoDriveRoutes.ts. Waypoint đầu tiên trùng điểm cuối tuyến vào bài 7.'
+            : exam06Continuation
+            ? 'Sao chép tuyến bên dưới vào autoDriveRoutes.ts. Waypoint đầu tiên trùng điểm cuối tuyến bài 6.'
+            : exam06Route
+                ? 'Sao chép tuyến bên dưới vào autoDriveRoutes.ts. Waypoint đầu tiên trùng điểm cuối tuyến bài 5.'
+                : 'Đã ghi một tuyến liên tục. Sao chép đoạn mã bên dưới và thêm vào autoDriveRoutes.ts để xe tự chạy theo tuyến mới.';
         const output = this.el('waypointRouteOutput') as HTMLTextAreaElement;
         output.value = route;
         output.removeAttribute('hidden');
@@ -297,12 +396,17 @@ export class Hud {
         this.el('waypointPrompt').removeAttribute('hidden');
     }
 
-    showAutoDriveLesson(lesson: AutoDriveLesson | null, onContinue: () => void) {
+    showAutoDriveLesson(lesson: AutoDriveLesson | null, onContinue: () => void,
+        canRecordContinuation = false, canContinue = true) {
         const panel = this.el('autoLesson');
-        this.autoLessonContinue = lesson ? onContinue : undefined;
+        this.autoLessonContinue = lesson ? () => {
+            panel.setAttribute('hidden', '');
+            if (canContinue) onContinue();
+        } : undefined;
         panel.toggleAttribute('hidden', !lesson);
         if (!lesson) return;
 
+        this.setAutoLessonView('steps');
         this.el('autoLessonTitle').textContent = lesson.name;
         const steps = this.el('autoLessonSteps');
         steps.replaceChildren();
@@ -323,9 +427,37 @@ export class Hud {
             }
             steps.append(item);
         }
+        for (const [id, entries] of [
+            ['autoLessonRequirements', lesson.requirements],
+            ['autoLessonPenalties', lesson.penalties],
+        ] as const) {
+            const list = this.el(id);
+            list.replaceChildren();
+            for (const entry of entries) {
+                const item = document.createElement('li');
+                item.textContent = entry;
+                list.append(item);
+            }
+        }
         const continueButton = this.el('autoLessonContinue') as HTMLButtonElement;
-        continueButton.textContent = lesson.id === 5 ? 'Hoàn thành' : 'Đã đọc, tiếp tục';
+        continueButton.textContent = 'Đã đọc, tiếp tục';
+        const recordButton = this.el('autoLessonRecord');
+        const canRecordLesson09 = lesson.id === 8 && canRecordContinuation;
+        recordButton.textContent = 'Tạo waypoint mới cho bài 9';
+        recordButton.dataset.nextLesson = canRecordLesson09 ? '9' : '';
+        recordButton.toggleAttribute('hidden', !canRecordLesson09);
+        continueButton.removeAttribute('hidden');
         continueButton.focus();
+    }
+
+    private setAutoLessonView(view: AutoLessonView): void {
+        this.host.querySelectorAll<HTMLButtonElement>('[data-lesson-view]').forEach(button => {
+            button.setAttribute('aria-pressed', String(button.dataset.lessonView === view));
+        });
+        this.host.querySelectorAll<HTMLElement>('[data-lesson-panel]').forEach(panel => {
+            panel.toggleAttribute('hidden', panel.dataset.lessonPanel !== view);
+            panel.scrollTop = 0;
+        });
     }
 
     update(t: GameTelemetry, finished: boolean, scoringMode: ExamScoringMode = 'normal') {
@@ -382,7 +514,7 @@ export class Hud {
         this.el('seatBelt').setAttribute('aria-pressed', String(t.seatBelt));
         this.el('startLamp').classList.toggle('on', t.startLamp);
         if (this.status !== t.engineStatus) { this.status = t.engineStatus; this.flash(t.engineStatus, 'info'); }
-        if (finished && scoringMode === 'normal') {
+        if (finished && (scoringMode === 'normal' || t.disqualified)) {
             if (!this.finishedShown) {
                 this.finishedShown = true;
                 if (t.disqualified) {

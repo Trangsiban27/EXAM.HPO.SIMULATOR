@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createStripedSignPost } from './StripedSignPost';
 
 export interface PedestrianSignOptions {
     x: number;
@@ -49,12 +50,8 @@ export class PedestrianSign {
         signMesh.castShadow = true;
         this.root.add(signMesh);
 
-        const post = new THREE.Mesh(
-            new THREE.CylinderGeometry(.06, .06, 2.5, 12),
-            new THREE.MeshStandardMaterial({ color: 0xc7d0d5, metalness: .6, roughness: .4 })
-        );
-        post.position.set(postX, 1.25, 0);
-        post.castShadow = true;
+        const post = createStripedSignPost(2.5, .06);
+        post.position.set(postX, 0, 0);
         this.root.add(post);
     }
 }

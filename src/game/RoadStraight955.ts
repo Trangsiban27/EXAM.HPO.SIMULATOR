@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 
 export interface RoadStraight955Options {
     x: number;
@@ -13,6 +14,10 @@ export interface RoadStraight955Options {
     endLowerWidthM?: number;
     upperLengthM?: number;
     lowerLengthM?: number;
+    /** Giới hạn chiều dài curb mép -local Z, tính từ đầu connector. */
+    lowerCurbLengthM?: number;
+    /** Giới hạn chiều dài curb mép +local Z, tính từ đầu connector. */
+    upperCurbLengthM?: number;
     startUpperOffsetM?: number;
     startLowerOffsetM?: number;
     /** Hướng phân bố phần vát theo trục local X. */
@@ -31,7 +36,9 @@ export interface RoadStraight955Options {
     highlight?: boolean;
     showEdges?: boolean;
     edge?: {
+        topLeftRadiusM?: number;
         topRightRadiusM?: number;
+        bottomLeftRadiusM?: number;
         bottomRightRadiusM?: number;
     };
 }
@@ -84,10 +91,16 @@ export function validateRoadStraight955(options: RoadStraight955Options): void {
             throw new Error('RoadStraight955: taper widths must be > 0');
         }
     }
+    if (options.lowerCurbLengthM !== undefined && options.lowerCurbLengthM < 0) {
+        throw new Error('RoadStraight955: curb lengths must be >= 0');
+    }
+    if (options.upperCurbLengthM !== undefined && options.upperCurbLengthM < 0) {
+        throw new Error('RoadStraight955: curb lengths must be >= 0');
+    }
     if (options.grassWidthM !== undefined && options.grassWidthM <= 0) {
         throw new Error('RoadStraight955: grassWidthM must be > 0');
     }
-    for (const radius of [options.edge?.topRightRadiusM, options.edge?.bottomRightRadiusM]) {
+    for (const radius of Object.values(options.edge ?? {})) {
         if (radius !== undefined && radius <= 0) {
             throw new Error('RoadStraight955: edge radius must be > 0');
         }
@@ -114,6 +127,8 @@ export class RoadStraight955 {
     readonly endLowerWidthM: number;
     readonly upperLengthM: number;
     readonly lowerLengthM: number;
+    readonly lowerCurbLengthM?: number;
+    readonly upperCurbLengthM?: number;
     readonly startUpperOffsetM: number;
     readonly startLowerOffsetM: number;
     readonly curbWidthM: number;
@@ -144,13 +159,15 @@ export class RoadStraight955 {
         this.lowerLengthM = this.taperDirection === 'right-to-left'
             ? taperLengthM
             : lowerLengthM;
+        this.lowerCurbLengthM = options.lowerCurbLengthM;
+        this.upperCurbLengthM = options.upperCurbLengthM;
         this.startUpperOffsetM = this.taperDirection === 'right-to-left'
             ? options.startUpperOffsetM ?? taperLengthM - upperLengthM
             : options.startUpperOffsetM ?? 0;
         this.startLowerOffsetM = this.taperDirection === 'right-to-left'
             ? options.startLowerOffsetM ?? taperLengthM - lowerLengthM
             : options.startLowerOffsetM ?? 0;
-        this.curbWidthM = options.curbWidthM ?? 0.20;
+        this.curbWidthM = Math.min(options.curbWidthM ?? CURB_VISUAL_WIDTH_M, CURB_VISUAL_WIDTH_M);
         this.curbPlacement = options.curbPlacement ?? 'centered';
         const maximumLengthM = Math.max(options.lengthM, this.upperLengthM, this.lowerLengthM);
         const maximumWidthM = Math.max(
@@ -192,7 +209,7 @@ export class RoadStraight955 {
             this.debugGroup,
         );
 
-        this.buildSurface();
+        this.buildSurface(options.edge);
         if (options.showEdges ?? true) this.buildEdges();
         this.buildGrass();
         this.buildLogic();
@@ -204,17 +221,59 @@ export class RoadStraight955 {
         this.debugGroup.visible = visible;
     }
 
-    private buildSurface(): void {
+    private buildSurface(edge?: RoadStraight955Options['edge']): void {
         const halfLength = this.geometry.lengthM / 2;
         const upperEndX = -halfLength + this.upperLengthM;
         const lowerEndX = -halfLength + this.lowerLengthM;
         const upperStartX = -halfLength + this.startUpperOffsetM;
-        const shape = new THREE.Shape();
         const lowerStartX = -halfLength + this.startLowerOffsetM;
-        shape.moveTo(lowerStartX, this.startLowerWidthM);
-        shape.lineTo(lowerEndX, this.endLowerWidthM);
-        shape.lineTo(upperEndX, -this.endUpperWidthM);
-        shape.lineTo(upperStartX, -this.startUpperWidthM);
+        const corners = [
+            new THREE.Vector2(lowerStartX, this.startLowerWidthM),
+            new THREE.Vector2(lowerEndX, this.endLowerWidthM),
+            new THREE.Vector2(upperEndX, -this.endUpperWidthM),
+            new THREE.Vector2(upperStartX, -this.startUpperWidthM),
+        ];
+        const radii = [
+            edge?.topLeftRadiusM ?? 0,
+            edge?.topRightRadiusM ?? 0,
+            edge?.bottomRightRadiusM ?? 0,
+            edge?.bottomLeftRadiusM ?? 0,
+        ];
+        const shape = new THREE.Shape();
+        corners.forEach((corner, index) => {
+            const previous = corners[(index + corners.length - 1) % corners.length];
+            const next = corners[(index + 1) % corners.length];
+            const toPrevious = previous.clone().sub(corner);
+            const toNext = next.clone().sub(corner);
+            const previousLength = toPrevious.length();
+            const nextLength = toNext.length();
+            if (!radii[index] || previousLength < .001 || nextLength < .001) {
+                if (index === 0) shape.moveTo(corner.x, corner.y);
+                else shape.lineTo(corner.x, corner.y);
+                return;
+            }
+            toPrevious.normalize();
+            toNext.normalize();
+            const halfAngle = Math.acos(THREE.MathUtils.clamp(
+                toPrevious.dot(toNext), -1, 1,
+            )) / 2;
+            const tangent = Math.min(
+                radii[index] / Math.tan(halfAngle), previousLength / 2, nextLength / 2,
+            );
+            const radius = tangent * Math.tan(halfAngle);
+            const start = corner.clone().addScaledVector(toPrevious, tangent);
+            const end = corner.clone().addScaledVector(toNext, tangent);
+            const center = corner.clone().addScaledVector(
+                toPrevious.add(toNext).normalize(), radius / Math.sin(halfAngle),
+            );
+            if (index === 0) shape.moveTo(start.x, start.y);
+            else shape.lineTo(start.x, start.y);
+            shape.absarc(
+                center.x, center.y, radius,
+                Math.atan2(start.y - center.y, start.x - center.x),
+                Math.atan2(end.y - center.y, end.x - center.x), true,
+            );
+        });
         shape.closePath();
 
         const surface = new THREE.Mesh(
@@ -236,7 +295,7 @@ export class RoadStraight955 {
 
     private buildEdges(): void {
         const curbWidthM = this.curbWidthM;
-        const curbHeightM = 0.05;
+        const curbHeightM = CURB_VISUAL_HEIGHT_M;
         const segmentLengthM = 0.8;
         const whiteMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
         const redMaterial = new THREE.MeshStandardMaterial({ color: 0xd83b3b, roughness: 0.85 });
@@ -261,13 +320,16 @@ export class RoadStraight955 {
         for (const edge of edges) {
             const edgeGroup = new THREE.Group();
             edgeGroup.name = edge.name;
-            const edgeLengthM = edge.endX - edge.startX;
+            const fullEdgeLengthM = edge.endX - edge.startX;
+            const curbLengthM = edge.name === 'RoadEdge_NegZ'
+                ? this.lowerCurbLengthM : this.upperCurbLengthM;
+            const edgeLengthM = Math.min(fullEdgeLengthM, curbLengthM ?? fullEdgeLengthM);
             const segmentCount = Math.ceil(edgeLengthM / segmentLengthM);
             for (let index = 0; index < segmentCount; index++) {
                 const x0 = edge.startX + index * segmentLengthM;
-                const x1 = Math.min(x0 + segmentLengthM, edge.endX);
-                const t0 = edgeLengthM <= 0 ? 0 : (x0 - edge.startX) / edgeLengthM;
-                const t1 = edgeLengthM <= 0 ? 0 : (x1 - edge.startX) / edgeLengthM;
+                const x1 = Math.min(x0 + segmentLengthM, edge.startX + edgeLengthM);
+                const t0 = fullEdgeLengthM <= 0 ? 0 : (x0 - edge.startX) / fullEdgeLengthM;
+                const t1 = fullEdgeLengthM <= 0 ? 0 : (x1 - edge.startX) / fullEdgeLengthM;
                 const z0 = edge.startZ + (edge.endZ - edge.startZ) * t0;
                 const z1 = edge.startZ + (edge.endZ - edge.startZ) * t1;
                 const halfCurbWidthM = curbWidthM / 2;

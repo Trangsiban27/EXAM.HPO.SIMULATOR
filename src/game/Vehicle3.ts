@@ -15,6 +15,7 @@ export class Vehicle3 extends Vehicle {
     private wheelAssy!: Vehicle3WheelAssembly;
     /** Exposed so DrivingGame can read wheel world positions for Exam04 sensors. */
     get wheelAssembly(): Vehicle3WheelAssembly { return this.wheelAssy; }
+    private frontTurnLamps: { material: THREE.MeshStandardMaterial; left: boolean }[] = [];
     private rearTurnLamps: { material: THREE.MeshStandardMaterial; left: boolean }[] = [];
     private rearBrakeLamps: THREE.MeshStandardMaterial[] = [];
 
@@ -72,6 +73,7 @@ export class Vehicle3 extends Vehicle {
                 object.receiveShadow = true;
             }
         });
+        this.addFrontTurnSignals(model);
         this.addRearLights(model);
         // Procedural tyres are placed at the four corners using Vehicle3WheelAssembly.
         // Forward is root-local -Z (same convention as the procedural Vehicle); the
@@ -85,6 +87,35 @@ export class Vehicle3 extends Vehicle {
         this.wheelAssy.buildWheels(this.visual);
         // Expose front pivots to the base Vehicle.update() steering loop.
         this.frontPivots = this.wheelAssy.frontPivots;
+    }
+
+    private addFrontTurnSignals(model: THREE.Group) {
+        // The GLB merges its lamps into the body, so add small lenses on the
+        // front bumper surface and raycast them onto the actual body geometry.
+        this.visual.updateWorldMatrix(true, true);
+        const raycaster = new THREE.Raycaster();
+        const geometry = new THREE.SphereGeometry(1, 20, 12);
+        for (const { x, left } of [{ x: -0.80, left: true }, { x: 0.48, left: false }]) {
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x744014,
+                emissive: 0x000000,
+                roughness: 0.32,
+                metalness: 0.08,
+            });
+            const origin = this.visual.localToWorld(new THREE.Vector3(x, 0.91, -2.8));
+            const direction = new THREE.Vector3(0, 0, 1).transformDirection(this.visual.matrixWorld);
+            raycaster.set(origin, direction);
+            const frontSurface = raycaster.intersectObject(model, true)[0];
+            const z = frontSurface
+                ? this.visual.worldToLocal(frontSurface.point.clone()).z - 0.014
+                : -2.20;
+            const lens = new THREE.Mesh(geometry, material);
+            lens.name = left ? 'FrontTurnSignalLeft' : 'FrontTurnSignalRight';
+            lens.position.set(x, 0.91, z);
+            lens.scale.set(0.12, 0.055, 0.018);
+            this.visual.add(lens);
+            this.frontTurnLamps.push({ material, left });
+        }
     }
 
     private addRearLights(model: THREE.Group) {
@@ -144,7 +175,7 @@ export class Vehicle3 extends Vehicle {
 
     protected override updateSignalBlink() {
         const on = performance.now() % 1100 < 550;
-        for (const lamp of this.rearTurnLamps) {
+        for (const lamp of [...this.frontTurnLamps, ...this.rearTurnLamps]) {
             const active = this.signals.hazard || (lamp.left ? this.signals.left : this.signals.right);
             lamp.material.color.setHex(active && on ? 0xffc343 : 0x744014);
             lamp.material.emissive.setHex(active && on ? 0xffa000 : 0x000000);
@@ -161,7 +192,8 @@ export class Vehicle3 extends Vehicle {
         this.steeringSystem.update(dt, Number(right) - Number(left), this.speed,
             dragging ? ((input.getAnalog('steering') ?? .5) * 2 - 1) * steeringConfig.maxSteeringWheelAngle : undefined);
         this.steering = this.steeringSystem.centerSteerAngle;
-        this.speed = this.transmission.update(dt, input, this.speed, this.slopeAngle);
+        this.speed = this.capManualSpeed(this.transmission.update(dt, input, this.speed,
+            this.slopeAngle, this.maxAllowedSpeedMps));
         const pose = advanceVehicle(this.root.position.x, this.root.position.z, this.root.rotation.y, this.speed, this.steering, dt);
         this.root.position.x = pose.x; this.root.position.z = pose.z; this.root.rotation.y = pose.heading;
         // Steering: positive centerSteerAngle turns right (per SteeringSystem). The
@@ -175,9 +207,10 @@ export class Vehicle3 extends Vehicle {
     }
 
     override updateAutomatic(dt: number, steeringInput: number, speed: number) {
-        const braking = speed < this.speed - 0.01;
+        const braking = Math.abs(speed) < Math.abs(this.speed) - 0.01;
         this.updateAutomaticMotion(dt, steeringInput, speed);
         this.wheelAssy.updateRolling(this.speed, dt);
+        this.updateSignalBlink();
         this.updateBrakeLights(braking);
     }
 

@@ -133,7 +133,7 @@ export class CameraManager {
         const root = vehicle.root;
         let target = new THREE.Vector3(), look = root.position.clone();
         const modeChanged = this.previousMode !== this.mode;
-        const fov = this.mode === 0 ? 35 : 60;
+        const fov = this.mode === 0 ? 34 : 60;
         if (this.camera.fov !== fov) {
             this.camera.fov = fov;
             this.camera.updateProjectionMatrix();
@@ -145,7 +145,7 @@ export class CameraManager {
             // Fixed world-space angle: turning the car does not rotate the view.
             // View the left side (-X at spawn), 36 degrees above the ground.
             const portraitExtra = Math.max(0, (16 / 9) / this.camera.aspect - 1) * 9;
-            this.followOffset.setFromSphericalCoords(42 + portraitExtra, Math.PI * .3, -Math.PI * .5);
+            this.followOffset.setFromSphericalCoords(36 + portraitExtra, Math.PI * .3, -Math.PI * .5);
             look.copy(this.followFocus);
             target.copy(look).add(this.followOffset);
         } else if (this.mode === 2) {

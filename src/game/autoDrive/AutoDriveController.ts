@@ -3,6 +3,7 @@ import { FRONT_PROBE_OFFSET_M, startPosition } from '../startPosition';
 import { EXAM_02_STOP_LINE_X, EXAM_03_STOP_LINE_X } from '../exam/examCourseGeometry';
 import { steeringConfig } from '../drivetrain/SteeringSystem';
 import type { Vehicle } from '../Vehicle';
+import type { TrafficLight } from '../TrafficLight';
 import type { AutoDriveWaypointStop } from '../TrackObjects';
 import type { AutoDriveLesson } from './autoDriveLessons';
 import { AUTO_DRIVE_WAYPOINTS_BY_CLASS, type AutoDriveWaypoint } from './autoDriveRoutes';
@@ -19,12 +20,19 @@ const COURSE_CORNER_RADIUS = 1.2;
 const ROAD_LANE_WIDTH_M = 3.7;
 const ROAD_RIGHT_LANE_OFFSET_M = ROAD_LANE_WIDTH_M / 2;
 const AUTO_DRIVE_START_RUNUP_M = 5;
+const SELECTED_LESSON_APPROACH_M = 3;
 const WAYPOINT_STOP_APPROACH_M = 8;
 const AUTO_DRIVE_SPEED_MPS = 2.6;
+const AUTO_DRIVE_REVERSE_SPEED_MPS = 5 / 3.6;
 const AUTO_DRIVE_BRAKING_MPS2 = 3.5;
+const GEAR_CHANGE_PAUSE_SEC = 1.5;
+const RAILWAY_STOP_FRONT_GAP_M = .5;
+const TRAFFIC_STOP_FRONT_GAP_M = .5;
+const TRAFFIC_GREEN_COMMIT_SEC = 2;
 
 type Stop = { position: THREE.Vector3; lesson: AutoDriveLesson };
-type WaypointStopKind = 'bridge';
+type WaypointStopKind = 'bridge' | 'exam05' | 'exam06' | 'exam07' | 'exam08' | 'exam09';
+type SavedRouteStopKind = WaypointStopKind | 'routeEnd';
 type Exam04GateWaypoint = { beforeIndex: number; point: AutoDriveWaypoint };
 
 /** Drives a slow route and pauses at each lesson checkpoint. */
@@ -35,17 +43,39 @@ export class AutoDriveController {
     private stopIndex = 0;
     private waypointIndex = 0;
     private readonly capturedRoute?: readonly AutoDriveWaypoint[];
+    private readonly exam06ApproachRoute?: THREE.Vector3[];
+    private readonly exam07ApproachRoute?: THREE.Vector3[];
+    private readonly exam08ApproachRoute?: THREE.Vector3[];
+    private readonly exam09ApproachRoute?: THREE.Vector3[];
+    private readonly exam08PopupWaypointIndex?: number;
+    private readonly exam09PopupWaypointIndex?: number;
+    private readonly exam08DirectionChangeIndices: number[];
     private readonly exam04GateWaypoint?: Exam04GateWaypoint;
+    private trafficStopWaypointIndex?: number;
+    private trafficStopLineWorldZ?: number;
+    private eastTrafficStopWaypointIndex?: number;
+    private eastTrafficStopLineWorldX?: number;
+    private exam05LessonShown = false;
+    private exam06ApproachStarted = false;
+    private exam07ApproachStarted = false;
+    private exam08ApproachStarted = false;
+    private exam09ApproachStarted = false;
+    private exam08DirectionChangeCursor = 0;
+    private exam08ShiftPauseRemaining = 0;
     private readonly recordedHeadings = new WeakMap<THREE.Vector3, number>();
+    private readonly recordedSpeeds = new WeakMap<THREE.Vector3, number>();
     private waypointStopKind: WaypointStopKind = 'bridge';
     private waitingForLesson = false;
+    private waitingForTrafficLight = false;
+    private trafficGreenCommitted = false;
     private currentSpeed = 0;
     private brakingForWaypointStop = false;
     private waypointStopReady = false;
     private waypointStopConsumed = false;
     private approachingStartLine = false;
+    private selectedApproachRoute?: THREE.Vector3[];
     private waypointStopTarget?: { position: THREE.Vector3; heading: number };
-    private recordingWaypoints: { x: number; z: number; heading: number }[] = [];
+    private recordingWaypoints: AutoDriveWaypoint[] = [];
     private recordingRouteName = 'bridgeToExam05Waypoints';
     private lastRecordedPosition?: THREE.Vector3;
     isWaypointRecording = false;
@@ -57,36 +87,109 @@ export class AutoDriveController {
         private readonly onWaypointStop: (kind: WaypointStopKind) => void,
         private readonly vehicleClass: ExamVehicleClass,
         private readonly exam04StartYellowSensor: THREE.Box3,
+        private readonly southTrafficLight?: TrafficLight,
+        private readonly eastTrafficLight?: TrafficLight,
+        railwayStopLine?: THREE.Object3D,
     ) {
         const savedRoutes = AUTO_DRIVE_WAYPOINTS_BY_CLASS[this.vehicleClass];
         this.capturedRoute = savedRoutes?.bridgeToExam05;
+        this.exam06ApproachRoute = savedRoutes?.exam05ToExam06?.map(point => this.recordedPoint(point));
+        this.exam07ApproachRoute = savedRoutes?.exam06ToExam07?.map(point => this.recordedPoint(point));
+        this.exam08ApproachRoute = savedRoutes?.exam07ToExam08?.map(point => this.recordedPoint(point));
+        this.exam09ApproachRoute = savedRoutes?.exam08ToExam09?.map(point => this.recordedPoint(point));
+        const exam09PopupIndex = savedRoutes?.exam08ToExam09?.findIndex(point => point.popupLessonId === 9);
+        this.exam09PopupWaypointIndex = exam09PopupIndex !== undefined && exam09PopupIndex >= 0
+            ? exam09PopupIndex : undefined;
+        this.exam08PopupWaypointIndex = this.exam09ApproachRoute && railwayStopLine
+            ? this.findRailwayStopWaypointIndex(this.exam09ApproachRoute, railwayStopLine)
+            : undefined;
+        this.exam08DirectionChangeIndices = this.exam08ApproachRoute
+            ? this.findDirectionChangeIndices(this.exam08ApproachRoute) : [];
         this.exam04GateWaypoint = this.capturedRoute
             ? this.findExam04GateWaypoint(this.capturedRoute)
             : undefined;
         this.stops = this.buildStops(lessons);
         this.routes = this.buildRoutes();
+        this.addTrafficStopWaypoint();
+        this.addEastTrafficStopWaypoint();
+        if (this.trafficStopWaypointIndex !== undefined) {
+            this.stops[4].position.copy(this.routes[3][this.trafficStopWaypointIndex]);
+        }
     }
 
     get currentExamNumber(): number {
+        if (this.waypointStopKind === 'exam09' || (this.exam09ApproachStarted
+            && this.waypointStopKind === 'exam08')) return 9;
+        if (this.exam08ApproachStarted || this.exam09ApproachStarted || (this.waypointStopReady
+            && this.waypointStopKind === 'exam08')) return 8;
+        if (this.exam07ApproachStarted || (this.waypointStopReady
+            && (this.waypointStopKind === 'exam06' || this.waypointStopKind === 'exam07'))) return 7;
+        if (this.exam06ApproachStarted || (this.waypointStopReady
+            && this.waypointStopKind === 'exam05')) return 6;
         return this.stops[this.stopIndex]?.lesson.id ?? 5;
     }
 
     get currentExerciseTitle(): string {
+        if (this.waitingForTrafficLight) return `Tự động · Bài ${this.currentExamNumber} · Chờ đèn xanh`;
+        if (this.currentExamNumber === 8) return this.waypointStopKind === 'exam08'
+            ? 'Tự động · Bài 8 · Theo waypoint' : 'Tự động · Bài 8 · Đường vào';
+        if (this.currentExamNumber === 7) return this.waypointStopKind === 'exam07'
+            ? 'Tự động · Bài 7 · Ghi waypoint' : 'Tự động · Bài 7 · Đường vào';
+        if (this.currentExamNumber === 6) return 'Tự động · Bài 6 · Đường vào';
         return this.stopIndex === 3 && !this.waitingForLesson
             ? 'Tự động · Chờ vào bài 4'
             : `Tự động · Bài ${this.currentExamNumber}`;
     }
 
+    get canRecordExam05Continuation(): boolean {
+        return this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam05'
+            && !!this.capturedRoute && !this.isWaypointRecording;
+    }
+
+    get hasSavedExam06Approach(): boolean { return !!this.exam06ApproachRoute?.length; }
+    get hasSavedExam07Approach(): boolean { return !!this.exam07ApproachRoute?.length; }
+    get hasSavedExam08Approach(): boolean { return !!this.exam08ApproachRoute?.length; }
+    get hasSavedExam09Approach(): boolean { return !!this.exam09ApproachRoute?.length; }
+    get hasExam08PopupWaypoint(): boolean { return this.exam08PopupWaypointIndex !== undefined; }
+    get hasExam09PopupWaypoint(): boolean { return this.exam09PopupWaypointIndex !== undefined; }
+
+    get canRecordExam06Completion(): boolean {
+        return this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam06'
+            && this.hasSavedExam06Approach && !this.isWaypointRecording;
+    }
+
+    get canRecordExam07Continuation(): boolean {
+        return this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam07'
+            && this.hasSavedExam07Approach && !this.isWaypointRecording;
+    }
+
+    get canRecordExam08Continuation(): boolean {
+        return this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam08'
+            && this.hasExam08PopupWaypoint && !this.isWaypointRecording;
+    }
+
     start(vehicle: Vehicle): void {
         this.enabled = true;
+        vehicle.transmission.car.engine.start();
+        vehicle.transmission.status = 'Máy đang chạy';
         this.stopIndex = 0;
         this.waypointIndex = 0;
         this.waypointStopKind = 'bridge';
         this.currentSpeed = 0;
+        this.exam05LessonShown = false;
+        this.exam06ApproachStarted = false;
+        this.exam07ApproachStarted = false;
+        this.exam08ApproachStarted = false;
+        this.exam09ApproachStarted = false;
+        this.exam08DirectionChangeCursor = 0;
+        this.exam08ShiftPauseRemaining = 0;
+        this.waitingForTrafficLight = false;
+        this.trafficGreenCommitted = false;
         this.brakingForWaypointStop = false;
         this.waypointStopReady = false;
         this.waypointStopConsumed = false;
         this.approachingStartLine = true;
+        this.selectedApproachRoute = undefined;
         this.waypointStopTarget = undefined;
         this.recordingWaypoints = [];
         this.isWaypointRecording = false;
@@ -97,20 +200,241 @@ export class AutoDriveController {
         this.publishLesson(null);
     }
 
+    /** Start later lessons shortly before their saved-route popup. */
+    jumpToLesson(lessonId: number, vehicle: Vehicle): boolean {
+        const selectingExam06 = lessonId === 6;
+        const selectingExam07 = lessonId === 7;
+        const selectingExam08 = lessonId === 8;
+        const selectingExam09 = lessonId === 9;
+        const index = selectingExam06 || selectingExam07 || selectingExam08 || selectingExam09 ? 4
+            : this.stops.findIndex(stop => stop.lesson.id === lessonId);
+        if (!this.enabled || index < 0 || (selectingExam06
+            && (!this.hasSavedExam06Approach || !this.capturedRoute?.length))
+            || (selectingExam07 && !this.hasSavedExam07Approach)
+            || (selectingExam08 && !this.hasExam08PopupWaypoint)
+            || (selectingExam09 && !this.hasExam09PopupWaypoint)) return false;
+
+        const stop = this.stops[index];
+        this.stopIndex = index;
+        this.waypointIndex = 0;
+        this.currentSpeed = 0;
+        this.exam05LessonShown = selectingExam06 || selectingExam07 || selectingExam08 || selectingExam09;
+        this.exam06ApproachStarted = false;
+        this.exam07ApproachStarted = false;
+        this.exam08ApproachStarted = false;
+        this.exam09ApproachStarted = false;
+        this.exam08DirectionChangeCursor = 0;
+        this.exam08ShiftPauseRemaining = 0;
+        this.waitingForTrafficLight = false;
+        this.trafficGreenCommitted = false;
+        this.waitingForLesson = false;
+        this.approachingStartLine = index === 0;
+        this.selectedApproachRoute = undefined;
+        this.brakingForWaypointStop = false;
+        this.waypointStopReady = false;
+        this.waypointStopConsumed = index > 2;
+        this.waypointStopTarget = undefined;
+        this.isWaypointRecording = false;
+        this.recordingWaypoints = [];
+        this.lastRecordedPosition = undefined;
+        if (selectingExam06) {
+            const anchor = this.capturedRoute![this.capturedRoute!.length - 1];
+            this.waypointIndex = this.routes[3].length;
+            this.waypointStopKind = 'exam05';
+            this.waypointStopReady = true;
+            vehicle.root.position.set(anchor.x, vehicle.root.position.y, anchor.z);
+            vehicle.root.rotation.set(0, anchor.heading, 0);
+        } else if (selectingExam07) {
+            const pose = this.poseBeforeRouteEnd(
+                this.exam07ApproachRoute!, SELECTED_LESSON_APPROACH_M);
+            this.waypointIndex = pose.waypointIndex;
+            this.waypointStopKind = 'exam06';
+            this.exam07ApproachStarted = true;
+            vehicle.root.position.copy(pose.position);
+            vehicle.root.rotation.set(0, pose.heading, 0);
+        } else if (selectingExam08) {
+            const pose = this.poseBeforeRouteEnd(
+                this.exam09ApproachRoute!.slice(0, this.exam08PopupWaypointIndex! + 1),
+                SELECTED_LESSON_APPROACH_M);
+            this.waypointIndex = pose.waypointIndex;
+            this.waypointStopKind = 'exam07';
+            this.exam09ApproachStarted = true;
+            vehicle.root.position.copy(pose.position);
+            vehicle.root.rotation.set(0, pose.heading, 0);
+        } else if (selectingExam09) {
+            const pose = this.poseBeforeRouteEnd(
+                this.exam09ApproachRoute!.slice(0, this.exam09PopupWaypointIndex! + 1),
+                SELECTED_LESSON_APPROACH_M);
+            this.waypointIndex = pose.waypointIndex;
+            this.waypointStopKind = 'exam08';
+            this.exam09ApproachStarted = true;
+            vehicle.root.position.copy(pose.position);
+            vehicle.root.rotation.set(0, pose.heading, 0);
+        } else if (index === 0) {
+            vehicle.root.position.copy(stop.position);
+            vehicle.root.position.x -= SELECTED_LESSON_APPROACH_M;
+            vehicle.root.rotation.set(0, startPosition.heading, 0);
+        } else {
+            const route = index === 4 && this.trafficStopWaypointIndex !== undefined
+                ? this.routes[3].slice(0, this.trafficStopWaypointIndex + 1)
+                : this.routes[index - 1];
+            const previousStop = this.stops[index - 1].position;
+            const approachRoute = route[0].distanceTo(previousStop) < .01
+                ? [...route] : [previousStop, ...route];
+            const pose = this.poseBeforeRouteEnd(approachRoute, SELECTED_LESSON_APPROACH_M);
+            this.selectedApproachRoute = approachRoute;
+            this.waypointIndex = pose.waypointIndex;
+            vehicle.root.position.copy(pose.position);
+            vehicle.root.rotation.set(0, pose.heading, 0);
+        }
+        vehicle.speed = 0;
+        vehicle.steering = 0;
+        vehicle.setSignal({ left: false, right: false, hazard: false });
+        this.publishLesson(null);
+        if (selectingExam06) this.onWaypointStop('exam05');
+        return true;
+    }
+
+    private poseBeforeRouteEnd(route: readonly THREE.Vector3[], distanceM: number): {
+        position: THREE.Vector3; heading: number; waypointIndex: number;
+    } {
+        let remaining = distanceM;
+        for (let i = route.length - 1; i > 0; i--) {
+            const from = route[i - 1];
+            const to = route[i];
+            const length = Math.hypot(to.x - from.x, to.z - from.z);
+            if (length < .0001) continue;
+            if (remaining <= length) {
+                const fraction = 1 - remaining / length;
+                const fromHeading = this.recordedHeadings.get(from);
+                const toHeading = this.recordedHeadings.get(to);
+                const tangentHeading = Math.atan2(from.x - to.x, from.z - to.z);
+                const heading = fromHeading !== undefined && toHeading !== undefined
+                    ? fromHeading + (THREE.MathUtils.euclideanModulo(
+                        toHeading - fromHeading + Math.PI, Math.PI * 2,
+                    ) - Math.PI) * fraction
+                    : toHeading ?? fromHeading ?? tangentHeading;
+                return { position: from.clone().lerp(to, fraction), heading, waypointIndex: i };
+            }
+            remaining -= length;
+        }
+        const first = route[0];
+        const next = route[1];
+        const tangent = next.clone().sub(first).setY(0).normalize();
+        return {
+            position: first.clone().addScaledVector(tangent, -remaining),
+            heading: this.recordedHeadings.get(next) ?? Math.atan2(-tangent.x, -tangent.z),
+            waypointIndex: 1,
+        };
+    }
+
+    /** First saved pose whose front bumper is within 0.5 m of the near edge of the railway line. */
+    private findRailwayStopWaypointIndex(
+        route: readonly THREE.Vector3[], line: THREE.Object3D,
+    ): number | undefined {
+        if (!(line instanceof THREE.Mesh) || !(line.geometry instanceof THREE.PlaneGeometry)) {
+            return undefined;
+        }
+        line.updateWorldMatrix(true, false);
+        const { width, height } = line.geometry.parameters;
+        const lineY = line.getWorldPosition(new THREE.Vector3()).y;
+        const front = new THREE.Vector3();
+        let previousY: number | undefined;
+        for (let index = 0; index < route.length; index++) {
+            const point = route[index];
+            const heading = this.recordedHeadings.get(point);
+            if (heading === undefined) continue;
+            front.set(
+                point.x - Math.sin(heading) * FRONT_PROBE_OFFSET_M,
+                lineY,
+                point.z - Math.cos(heading) * FRONT_PROBE_OFFSET_M,
+            );
+            line.worldToLocal(front);
+            const distanceToNearEdge = Math.abs(front.y) - height / 2;
+            if (previousY !== undefined
+                && Math.sign(front.y) === Math.sign(previousY)
+                && Math.abs(front.y) < Math.abs(previousY)
+                && Math.abs(front.x) <= width / 2
+                && distanceToNearEdge >= 0
+                && distanceToNearEdge <= RAILWAY_STOP_FRONT_GAP_M) {
+                return index;
+            }
+            previousY = front.y;
+        }
+        return undefined;
+    }
+
     stop(): void {
         this.enabled = false;
         this.waitingForLesson = false;
+        this.waitingForTrafficLight = false;
+        this.trafficGreenCommitted = false;
         this.approachingStartLine = false;
+        this.selectedApproachRoute = undefined;
+        this.exam06ApproachStarted = false;
+        this.exam07ApproachStarted = false;
+        this.exam08ApproachStarted = false;
+        this.exam09ApproachStarted = false;
+        this.exam08DirectionChangeCursor = 0;
+        this.exam08ShiftPauseRemaining = 0;
         this.isWaypointRecording = false;
         this.publishLesson(null);
     }
 
     /** Resume driving after the learner has read the current lesson. */
     continueLesson(): void {
+        if (this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam09') {
+            this.waypointStopReady = false;
+            this.currentSpeed = 0;
+            this.publishLesson(null);
+            return;
+        }
+        if (this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam08'
+            && this.exam09ApproachRoute?.length) {
+            this.waypointStopReady = false;
+            this.exam09ApproachStarted = true;
+            this.waypointIndex = this.exam08PopupWaypointIndex! + 1;
+            this.currentSpeed = 0;
+            this.waitingForTrafficLight = false;
+            this.trafficGreenCommitted = false;
+            this.publishLesson(null);
+            return;
+        }
+        if (this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam07'
+            && this.exam08ApproachRoute?.length) {
+            this.waypointStopReady = false;
+            this.exam08ApproachStarted = true;
+            this.exam08DirectionChangeCursor = 0;
+            this.exam08ShiftPauseRemaining = 0;
+            this.waypointIndex = 1;
+            this.currentSpeed = 0;
+            this.waitingForTrafficLight = false;
+            this.trafficGreenCommitted = false;
+            this.publishLesson(null);
+            return;
+        }
+        if (this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam05'
+            && this.exam06ApproachRoute?.length) {
+            this.waypointStopReady = false;
+            this.exam06ApproachStarted = true;
+            this.waypointIndex = 1;
+            this.currentSpeed = 0;
+            this.waitingForTrafficLight = false;
+            this.trafficGreenCommitted = false;
+            this.publishLesson(null);
+            return;
+        }
         if (!this.enabled || !this.waitingForLesson) return;
         this.waitingForLesson = false;
+        this.waitingForTrafficLight = false;
+        this.trafficGreenCommitted = false;
         this.publishLesson(null);
         if (this.stopIndex >= this.stops.length - 1) {
+            if (this.trafficStopWaypointIndex !== undefined && !this.exam05LessonShown) {
+                this.exam05LessonShown = true;
+                this.waypointIndex = this.trafficStopWaypointIndex + 1;
+                return;
+            }
             this.enabled = false;
             this.onComplete();
             return;
@@ -125,6 +449,8 @@ export class AutoDriveController {
         waypointStops: AutoDriveWaypointStop[],
     ): void {
         if (!this.enabled) return;
+        const cruiseSpeed = Math.min(AUTO_DRIVE_SPEED_MPS, vehicle.maxAllowedSpeedMps);
+        this.currentSpeed = Math.min(this.currentSpeed, cruiseSpeed);
 
         // Bài 1 bắt đầu tại vạch xuất phát. Giữ xi nhan trái đến mốc 5 m
         // sau vạch, nơi bài 1 yêu cầu tắt xi nhan.
@@ -149,7 +475,7 @@ export class AutoDriveController {
             const target = this.stops[0].position;
             const distance = vehicle.root.position.distanceTo(target);
             const stoppingSpeed = Math.sqrt(2 * AUTO_DRIVE_BRAKING_MPS2 * Math.max(0, distance - .08));
-            const targetSpeed = Math.min(AUTO_DRIVE_SPEED_MPS, stoppingSpeed);
+            const targetSpeed = Math.min(cruiseSpeed, stoppingSpeed);
             this.currentSpeed = this.approach(this.currentSpeed, targetSpeed,
                 (targetSpeed < this.currentSpeed ? AUTO_DRIVE_BRAKING_MPS2 : AUTO_DRIVE_SPEED_MPS) * dt);
             vehicle.updateAutomatic(dt, 0, this.currentSpeed);
@@ -171,6 +497,33 @@ export class AutoDriveController {
             return;
         }
 
+        if (this.selectedApproachRoute) {
+            this.followSavedRoute(dt, vehicle, this.selectedApproachRoute);
+            return;
+        }
+
+        if (this.exam06ApproachStarted) {
+            this.followSavedRoute(dt, vehicle, this.exam06ApproachRoute!,
+                this.eastTrafficStopWaypointIndex, undefined, 'exam06',
+                this.eastTrafficLight, this.eastTrafficStopLineWorldX, 'x');
+            return;
+        }
+        if (this.exam07ApproachStarted) {
+            this.followSavedRoute(dt, vehicle, this.exam07ApproachRoute!,
+                undefined, undefined, 'exam07');
+            return;
+        }
+        if (this.exam08ApproachStarted) {
+            this.followSavedRoute(dt, vehicle, this.exam08ApproachRoute!,
+                undefined, undefined, this.hasExam08PopupWaypoint ? 'exam08' : 'routeEnd');
+            return;
+        }
+        if (this.exam09ApproachStarted) {
+            this.followSavedRoute(dt, vehicle, this.exam09ApproachRoute!,
+                undefined, undefined, 'routeEnd');
+            return;
+        }
+
         // Keep the recording checkpoint available for classes that do not yet
         // have a saved route. A class with captured waypoints drives through it.
         if (!this.capturedRoute && !this.waypointStopConsumed) {
@@ -189,7 +542,7 @@ export class AutoDriveController {
             const remaining = (target.position.x - vehicle.root.position.x) * forwardX
                 + (target.position.z - vehicle.root.position.z) * forwardZ;
             const stoppingSpeed = Math.sqrt(2 * AUTO_DRIVE_BRAKING_MPS2 * Math.max(0, remaining - .08));
-            const targetSpeed = Math.min(AUTO_DRIVE_SPEED_MPS, stoppingSpeed);
+            const targetSpeed = Math.min(cruiseSpeed, stoppingSpeed);
             this.currentSpeed = this.approach(this.currentSpeed, targetSpeed,
                 (targetSpeed < this.currentSpeed ? AUTO_DRIVE_BRAKING_MPS2 : AUTO_DRIVE_SPEED_MPS) * dt);
             // The bridge exit is straight. Braking along its axis avoids the
@@ -210,7 +563,11 @@ export class AutoDriveController {
 
         const route = this.routes[this.stopIndex - 1] ?? [];
         if (this.capturedRoute && (this.stopIndex === 3 || this.stopIndex === 4)) {
-            this.followSavedRoute(dt, vehicle, route);
+            this.followSavedRoute(dt, vehicle, route,
+                this.stopIndex === 4 ? this.trafficStopWaypointIndex : undefined,
+                this.stopIndex === 4 && !this.exam05LessonShown
+                    ? this.trafficStopWaypointIndex : undefined,
+                this.stopIndex === 4 && this.exam05LessonShown ? 'exam05' : undefined);
             return;
         }
         if (this.waypointIndex >= route.length) {
@@ -259,51 +616,200 @@ export class AutoDriveController {
         );
         const endDistance = vehicle.root.position.distanceTo(route[route.length - 1]);
         const stoppingSpeed = Math.sqrt(2 * AUTO_DRIVE_BRAKING_MPS2 * Math.max(0, endDistance - .35));
-        const targetSpeed = Math.min(AUTO_DRIVE_SPEED_MPS, stoppingSpeed);
+        const targetSpeed = Math.min(cruiseSpeed, stoppingSpeed);
         this.currentSpeed = this.approach(this.currentSpeed, targetSpeed,
             (targetSpeed < this.currentSpeed ? AUTO_DRIVE_BRAKING_MPS2 : AUTO_DRIVE_SPEED_MPS) * dt);
         vehicle.updateAutomatic(dt, steering, this.currentSpeed);
     }
 
-    /** Replay the recorded vehicle path at a fixed speed without steering toward a stale point. */
-    private followSavedRoute(dt: number, vehicle: Vehicle, route: readonly THREE.Vector3[]): void {
+    /** Replay the recorded vehicle path, including saved speeds after the lesson 8 popup. */
+    private followSavedRoute(
+        dt: number,
+        vehicle: Vehicle,
+        route: readonly THREE.Vector3[],
+        trafficStopIndex?: number,
+        lessonStopIndex?: number,
+        waypointStopAtEnd?: SavedRouteStopKind,
+        trafficLight: TrafficLight | undefined = this.southTrafficLight,
+        stopLineWorld: number | undefined = this.trafficStopLineWorldZ,
+        trafficAxis: 'x' | 'z' = 'z',
+    ): void {
+        if (waypointStopAtEnd === 'exam08' && this.exam08ShiftPauseRemaining > 0) {
+            this.exam08ShiftPauseRemaining = Math.max(0, this.exam08ShiftPauseRemaining - dt);
+            this.currentSpeed = 0;
+            vehicle.updateAutomatic(dt,
+                vehicle.steering / THREE.MathUtils.degToRad(steeringConfig.maxRoadWheelAngle), 0);
+            if (this.exam08ShiftPauseRemaining === 0) {
+                const changeIndex = this.exam08DirectionChangeIndices[this.exam08DirectionChangeCursor];
+                vehicle.transmission.gear = this.directionForSegment(route, changeIndex);
+                this.exam08DirectionChangeCursor++;
+            }
+            return;
+        }
+
+        const direction = waypointStopAtEnd === 'exam08' && this.waypointIndex < route.length
+            ? this.directionForSegment(route, Math.max(0, this.waypointIndex - 1)) : 1;
+        const replayRecordedSpeed = this.exam09ApproachStarted
+            && (this.waypointStopKind === 'exam08' || this.waypointStopKind === 'exam09');
+        const speedIndex = Math.min(this.waypointIndex, route.length - 1);
+        let recordedSpeed = replayRecordedSpeed ? this.recordedSpeeds.get(route[speedIndex]) : undefined;
+        // A final stationary sample marks the endpoint. Brake toward it using
+        // the remaining distance rather than stopping at the preceding sample.
+        if (recordedSpeed === 0 && speedIndex === route.length - 1) {
+            recordedSpeed = this.recordedSpeeds.get(route[speedIndex - 1]);
+        }
+        const cruiseSpeed = Math.min(recordedSpeed ?? AUTO_DRIVE_SPEED_MPS, vehicle.maxAllowedSpeedMps,
+            direction < 0 ? AUTO_DRIVE_REVERSE_SPEED_MPS : Infinity);
         const position = vehicle.root.position;
         const finish = route[route.length - 1];
         if (!finish) return;
 
-        let remaining = this.waypointIndex < route.length
+        const frontCoordinate = trafficAxis === 'x'
+            ? position.x - Math.sin(vehicle.root.rotation.y) * FRONT_PROBE_OFFSET_M
+            : position.z - Math.cos(vehicle.root.rotation.y) * FRONT_PROBE_OFFSET_M;
+        const light = trafficLight;
+        const nearStop = trafficStopIndex !== undefined
+            && position.distanceTo(route[trafficStopIndex]) < 1;
+        if (light?.phase !== 'green') this.trafficGreenCommitted = false;
+        if (nearStop && light?.phase === 'green'
+            && light.remainingSeconds > TRAFFIC_GREEN_COMMIT_SEC) {
+            this.trafficGreenCommitted = true;
+        }
+        const waitForGreen = lessonStopIndex === undefined
+            && trafficStopIndex !== undefined
+            && stopLineWorld !== undefined
+            && frontCoordinate > stopLineWorld
+            && (!light || light.phase !== 'green'
+                || (!this.trafficGreenCommitted
+                    && light.remainingSeconds <= TRAFFIC_GREEN_COMMIT_SEC));
+        const exam08PopupIndex = waypointStopAtEnd === 'routeEnd'
+            && this.waypointStopKind !== 'exam08' && this.waypointStopKind !== 'exam09'
+            ? this.exam08PopupWaypointIndex : undefined;
+        const exam09PopupIndex = waypointStopAtEnd === 'routeEnd'
+            && this.waypointStopKind === 'exam08' ? this.exam09PopupWaypointIndex : undefined;
+        const popupIndex = exam08PopupIndex ?? exam09PopupIndex;
+        const routeLimitIndex = popupIndex ?? lessonStopIndex
+            ?? (waitForGreen ? trafficStopIndex! : route.length - 1);
+        const directionChangeIndex = waypointStopAtEnd === 'exam08'
+            ? this.exam08DirectionChangeIndices[this.exam08DirectionChangeCursor] : undefined;
+        const lastIndex = directionChangeIndex === undefined
+            ? routeLimitIndex : Math.min(routeLimitIndex, directionChangeIndex);
+        const target = route[lastIndex];
+        const continuesToExam07 = waypointStopAtEnd === 'exam06'
+            && this.hasSavedExam07Approach;
+        const continuesToExam08 = waypointStopAtEnd === 'exam08'
+            && this.hasExam08PopupWaypoint;
+
+        let remaining = this.waypointIndex <= lastIndex
             ? Math.hypot(position.x - route[this.waypointIndex].x,
                 position.z - route[this.waypointIndex].z)
             : 0;
-        for (let i = this.waypointIndex + 1; i < route.length; i++) {
+        for (let i = this.waypointIndex + 1; i <= lastIndex; i++) {
             remaining += Math.hypot(route[i].x - route[i - 1].x,
                 route[i].z - route[i - 1].z);
         }
-        if (remaining < .03 || this.waypointIndex >= route.length) {
+        this.waitingForTrafficLight = waitForGreen && remaining < .5;
+        if (remaining < (waitForGreen ? .005 : .03) || this.waypointIndex > lastIndex) {
+            if (directionChangeIndex !== undefined && lastIndex === directionChangeIndex && !waitForGreen) {
+                position.x = target.x;
+                position.z = target.z;
+                vehicle.root.rotation.y = this.recordedHeadings.get(target) ?? vehicle.root.rotation.y;
+                this.waypointIndex = directionChangeIndex + 1;
+                this.currentSpeed = 0;
+                vehicle.updateAutomatic(dt, 0, 0);
+                vehicle.transmission.gear = 0;
+                this.exam08ShiftPauseRemaining = GEAR_CHANGE_PAUSE_SEC;
+                return;
+            }
+            if (continuesToExam07 && !waitForGreen) {
+                position.x = finish.x;
+                position.z = finish.z;
+                vehicle.root.rotation.y = this.recordedHeadings.get(finish) ?? vehicle.root.rotation.y;
+                this.exam06ApproachStarted = false;
+                this.exam07ApproachStarted = true;
+                this.waypointIndex = 1;
+                this.waitingForTrafficLight = false;
+                this.trafficGreenCommitted = false;
+                return;
+            }
+            if (continuesToExam08 && !waitForGreen) {
+                position.x = finish.x;
+                position.z = finish.z;
+                vehicle.root.rotation.y = this.recordedHeadings.get(finish) ?? vehicle.root.rotation.y;
+                this.exam08ApproachStarted = false;
+                this.exam09ApproachStarted = true;
+                this.waypointIndex = 1;
+                return;
+            }
             this.currentSpeed = 0;
             vehicle.updateAutomatic(dt, 0, 0);
+            if (popupIndex !== undefined) {
+                position.x = target.x;
+                position.z = target.z;
+                vehicle.root.rotation.y = this.recordedHeadings.get(target) ?? vehicle.root.rotation.y;
+                this.waypointIndex = popupIndex + 1;
+                this.waypointStopKind = exam09PopupIndex !== undefined ? 'exam09' : 'exam08';
+                this.waypointStopReady = true;
+                this.onWaypointStop(this.waypointStopKind);
+                return;
+            }
+            if (lessonStopIndex !== undefined) {
+                position.x = target.x;
+                position.z = target.z;
+                this.waypointIndex = lastIndex + 1;
+                this.waitingForLesson = true;
+                this.publishLesson(this.stops[this.stopIndex].lesson);
+                return;
+            }
+            if (waitForGreen) {
+                if (this.waypointIndex <= lastIndex) {
+                    position.x = target.x;
+                    position.z = target.z;
+                }
+                this.waypointIndex = Math.max(this.waypointIndex, lastIndex + 1);
+                return;
+            }
             position.x = finish.x;
             position.z = finish.z;
             this.waypointIndex = route.length;
+            this.selectedApproachRoute = undefined;
+            if (waypointStopAtEnd) {
+                vehicle.root.rotation.y = this.recordedHeadings.get(finish) ?? vehicle.root.rotation.y;
+                this.exam06ApproachStarted = false;
+                this.exam07ApproachStarted = false;
+                this.exam08ApproachStarted = false;
+                this.exam09ApproachStarted = false;
+                if (waypointStopAtEnd === 'routeEnd') {
+                    this.enabled = false;
+                    this.onComplete();
+                    return;
+                }
+                this.waypointStopKind = waypointStopAtEnd;
+                this.waypointStopReady = true;
+                this.onWaypointStop(waypointStopAtEnd);
+                return;
+            }
             this.waitingForLesson = true;
             this.publishLesson(this.stops[this.stopIndex].lesson);
             return;
         }
 
         const stoppingSpeed = Math.sqrt(2 * AUTO_DRIVE_BRAKING_MPS2 * remaining);
-        const targetSpeed = Math.min(AUTO_DRIVE_SPEED_MPS, stoppingSpeed);
-        this.currentSpeed = this.approach(this.currentSpeed, targetSpeed,
-            (targetSpeed < this.currentSpeed ? AUTO_DRIVE_BRAKING_MPS2 : AUTO_DRIVE_SPEED_MPS) * dt);
+        const targetSpeed = (continuesToExam07 || continuesToExam08) && !waitForGreen
+            ? cruiseSpeed : Math.min(cruiseSpeed, stoppingSpeed);
+        this.currentSpeed = recordedSpeed !== undefined ? targetSpeed
+            : this.approach(this.currentSpeed, targetSpeed,
+                (targetSpeed < this.currentSpeed ? AUTO_DRIVE_BRAKING_MPS2 : AUTO_DRIVE_SPEED_MPS) * dt);
 
         let travel = this.currentSpeed * dt;
         let x = position.x;
         let z = position.z;
         let heading = vehicle.root.rotation.y;
         const initialHeading = heading;
-        while (travel > 0 && this.waypointIndex < route.length) {
-            const target = route[this.waypointIndex];
-            const dx = target.x - x;
-            const dz = target.z - z;
+        while (travel > 0 && this.waypointIndex <= lastIndex) {
+            const waypoint = route[this.waypointIndex];
+            const dx = waypoint.x - x;
+            const dz = waypoint.z - z;
             const distance = Math.hypot(dx, dz);
             if (distance < .0001) {
                 this.waypointIndex++;
@@ -312,7 +818,7 @@ export class AutoDriveController {
             const step = Math.min(travel, distance);
             x += dx * step / distance;
             z += dz * step / distance;
-            const segmentHeading = this.recordedHeadings.get(target) ?? Math.atan2(-dx, -dz);
+            const segmentHeading = this.recordedHeadings.get(waypoint) ?? Math.atan2(-dx, -dz);
             const headingError = THREE.MathUtils.euclideanModulo(
                 segmentHeading - heading + Math.PI, Math.PI * 2,
             ) - Math.PI;
@@ -330,22 +836,75 @@ export class AutoDriveController {
         const roadWheelAngle = -Math.atan(steeringConfig.wheelBase * headingChange
             / Math.max(travelled, .001));
         const steering = THREE.MathUtils.clamp(
-            roadWheelAngle / THREE.MathUtils.degToRad(steeringConfig.maxRoadWheelAngle),
+            roadWheelAngle * direction / THREE.MathUtils.degToRad(steeringConfig.maxRoadWheelAngle),
             -1, 1,
         );
-        vehicle.updateAutomatic(dt, steering, this.currentSpeed);
+        if (waypointStopAtEnd === 'exam08' || waypointStopAtEnd === 'routeEnd') {
+            vehicle.transmission.gear = direction;
+        }
+        vehicle.updateAutomatic(dt, steering, direction * this.currentSpeed);
         position.x = x;
         position.z = z;
         vehicle.root.rotation.y = heading;
     }
 
-    beginWaypointRecording(vehicle: Vehicle): void {
-        if (!this.enabled || !this.waypointStopReady || this.isWaypointRecording) return;
-        this.recordingRouteName = 'bridgeToExam05Waypoints';
+    private directionForSegment(route: readonly THREE.Vector3[], fromIndex: number): 1 | -1 {
+        const from = route[fromIndex];
+        const to = route[fromIndex + 1];
+        const heading = this.recordedHeadings.get(from)
+            ?? Math.atan2(from.x - to.x, from.z - to.z);
+        const forwardDistance = (to.x - from.x) * -Math.sin(heading)
+            + (to.z - from.z) * -Math.cos(heading);
+        return forwardDistance >= 0 ? 1 : -1;
+    }
+
+    private findDirectionChangeIndices(route: readonly THREE.Vector3[]): number[] {
+        const indices: number[] = [];
+        for (let index = 1; index < route.length - 1; index++) {
+            if (this.directionForSegment(route, index) !== this.directionForSegment(route, index - 1)) {
+                indices.push(index);
+            }
+        }
+        return indices;
+    }
+
+    beginWaypointRecording(vehicle: Vehicle): boolean {
+        const recordingFromExam05 = this.canRecordExam05Continuation;
+        const recordingFromExam06 = this.canRecordExam06Completion;
+        const recordingFromExam07 = this.waypointStopKind === 'exam07'
+            && this.hasSavedExam07Approach;
+        const recordingFromExam08 = this.canRecordExam08Continuation;
+        if (!this.enabled || !this.waypointStopReady || this.isWaypointRecording) return false;
+        this.recordingRouteName = recordingFromExam08 ? 'exam08ToExam09Waypoints'
+            : recordingFromExam07 ? 'exam07ToExam08Waypoints'
+            : recordingFromExam06 ? 'exam06ToExam07Waypoints'
+            : recordingFromExam05 ? 'exam05ToExam06Waypoints' : 'bridgeToExam05Waypoints';
         this.recordingWaypoints = [];
         this.lastRecordedPosition = undefined;
+        if (recordingFromExam05) {
+            const anchor = this.capturedRoute![this.capturedRoute!.length - 1];
+            vehicle.root.position.x = anchor.x;
+            vehicle.root.position.z = anchor.z;
+            vehicle.root.rotation.y = anchor.heading;
+        } else if (recordingFromExam06) {
+            const anchor = this.exam06ApproachRoute![this.exam06ApproachRoute!.length - 1];
+            vehicle.root.position.x = anchor.x;
+            vehicle.root.position.z = anchor.z;
+            vehicle.root.rotation.y = this.recordedHeadings.get(anchor)!;
+        } else if (recordingFromExam07) {
+            const anchor = this.exam07ApproachRoute![this.exam07ApproachRoute!.length - 1];
+            vehicle.root.position.x = anchor.x;
+            vehicle.root.position.z = anchor.z;
+            vehicle.root.rotation.y = this.recordedHeadings.get(anchor)!;
+        } else if (recordingFromExam08) {
+            const anchor = this.exam09ApproachRoute![this.exam08PopupWaypointIndex!];
+            vehicle.root.position.x = anchor.x;
+            vehicle.root.position.z = anchor.z;
+            vehicle.root.rotation.y = this.recordedHeadings.get(anchor)!;
+        }
         this.recordWaypoint(vehicle, true);
         this.isWaypointRecording = true;
+        return true;
     }
 
     captureWaypoint(vehicle: Vehicle): number {
@@ -367,14 +926,15 @@ export class AutoDriveController {
             x: Number(position.x.toFixed(2)),
             z: Number(position.z.toFixed(2)),
             heading: Number(vehicle.root.rotation.y.toFixed(3)),
+            speedMps: Number(Math.abs(vehicle.speed).toFixed(3)),
         });
         this.lastRecordedPosition = position.clone();
     }
 
     private formatRecordedRoute(): string {
-        return `const ${this.recordingRouteName} = [\n${this.recordingWaypoints
-            .map(point => `    { x: ${point.x}, z: ${point.z}, heading: ${point.heading} },`)
-            .join('\n')}\n];`;
+        const lines = this.recordingWaypoints
+            .map(point => `    { x: ${point.x}, z: ${point.z}, heading: ${point.heading}, speedMps: ${point.speedMps} },`);
+        return `const ${this.recordingRouteName} = [\n${lines.join('\n')}\n];`;
     }
 
     private isApproachingMarker(vehicle: Vehicle, marker: AutoDriveWaypointStop): boolean {
@@ -419,6 +979,9 @@ export class AutoDriveController {
     private recordedPoint(point: AutoDriveWaypoint): THREE.Vector3 {
         const position = new THREE.Vector3(point.x, 0, point.z);
         this.recordedHeadings.set(position, point.heading);
+        if (point.speedMps !== undefined && Number.isFinite(point.speedMps) && point.speedMps >= 0) {
+            this.recordedSpeeds.set(position, point.speedMps);
+        }
         return position;
     }
 
@@ -455,6 +1018,78 @@ export class AutoDriveController {
         const leg3 = this.bridgeToWheelTrackRoute(stops[2].position, stops[3].position);
         const leg4 = this.wheelTrackToIntersectionRoute(stops[3].position, stops[4].position);
         return [leg1, leg2, leg3, leg4];
+    }
+
+    private addTrafficStopWaypoint(): void {
+        const light = this.southTrafficLight;
+        if (!light) return;
+        light.root.updateWorldMatrix(true, false);
+        const line = light.root.localToWorld(new THREE.Vector3(light.stopLineX, 0, light.stopLineZ));
+        const stopRootZ = line.z + FRONT_PROBE_OFFSET_M + TRAFFIC_STOP_FRONT_GAP_M;
+        const route = this.routes[3];
+        for (let index = 1; index < route.length; index++) {
+            const from = route[index - 1];
+            const to = route[index];
+            if (from.z < stopRootZ || to.z > stopRootZ || from.z - to.z < .001) continue;
+            const fraction = (from.z - stopRootZ) / (from.z - to.z);
+            const point = from.clone().lerp(to, fraction);
+            if (point.distanceTo(from) < .05) {
+                this.trafficStopWaypointIndex = index - 1;
+            } else if (point.distanceTo(to) < .05) {
+                this.trafficStopWaypointIndex = index;
+            } else {
+                const fromHeading = this.recordedHeadings.get(from);
+                const toHeading = this.recordedHeadings.get(to);
+                const tangentHeading = Math.atan2(from.x - to.x, from.z - to.z);
+                const heading = fromHeading !== undefined && toHeading !== undefined
+                    ? fromHeading + (THREE.MathUtils.euclideanModulo(
+                        toHeading - fromHeading + Math.PI, Math.PI * 2,
+                    ) - Math.PI) * fraction
+                    : toHeading ?? fromHeading ?? tangentHeading;
+                this.recordedHeadings.set(point, heading);
+                route.splice(index, 0, point);
+                this.trafficStopWaypointIndex = index;
+            }
+            this.trafficStopLineWorldZ = line.z;
+            return;
+        }
+    }
+
+    private addEastTrafficStopWaypoint(): void {
+        const light = this.eastTrafficLight;
+        const route = this.exam06ApproachRoute;
+        if (!light || !route) return;
+        light.root.updateWorldMatrix(true, false);
+        const line = light.root.localToWorld(new THREE.Vector3(light.stopLineX, 0, light.stopLineZ));
+        const stopRootX = line.x + FRONT_PROBE_OFFSET_M + TRAFFIC_STOP_FRONT_GAP_M;
+        for (let index = 1; index < route.length; index++) {
+            const from = route[index - 1];
+            const to = route[index];
+            if (from.x < stopRootX || to.x > stopRootX || from.x - to.x < .001) continue;
+            const fraction = (from.x - stopRootX) / (from.x - to.x);
+            const point = from.clone().lerp(to, fraction);
+            // The S curve crosses this X earlier; select the westbound lane at the light.
+            if (Math.abs(point.z - line.z) > light.stopLineLength / 2 + .75) continue;
+            if (point.distanceTo(from) < .05) {
+                this.eastTrafficStopWaypointIndex = index - 1;
+            } else if (point.distanceTo(to) < .05) {
+                this.eastTrafficStopWaypointIndex = index;
+            } else {
+                const fromHeading = this.recordedHeadings.get(from);
+                const toHeading = this.recordedHeadings.get(to);
+                const tangentHeading = Math.atan2(from.x - to.x, from.z - to.z);
+                const heading = fromHeading !== undefined && toHeading !== undefined
+                    ? fromHeading + (THREE.MathUtils.euclideanModulo(
+                        toHeading - fromHeading + Math.PI, Math.PI * 2,
+                    ) - Math.PI) * fraction
+                    : toHeading ?? fromHeading ?? tangentHeading;
+                this.recordedHeadings.set(point, heading);
+                route.splice(index, 0, point);
+                this.eastTrafficStopWaypointIndex = index;
+            }
+            this.eastTrafficStopLineWorldX = line.x;
+            return;
+        }
     }
 
     private bridgeToWheelTrackRoute(from: THREE.Vector3, exam04Start: THREE.Vector3): THREE.Vector3[] {

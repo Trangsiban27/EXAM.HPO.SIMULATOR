@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 /** Cache cho railway track GLB — load một lần, clone cho mỗi placement */
@@ -138,8 +139,8 @@ export class RailwayCrossingRoad {
      */
     private buildCurb(side: -1 | 1) {
         const segmentLen = 0.8;
-        const curbWidth = 0.15;
-        const curbHeight = 0.05;
+        const curbWidth = CURB_VISUAL_WIDTH_M;
+        const curbHeight = CURB_VISUAL_HEIGHT_M;
 
         const count = Math.ceil(this.roadLengthM / segmentLen);
         const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });

@@ -19,15 +19,15 @@ import {
  * (`stopLineX`, `stopLineZ`, ...). Nếu sau này ai đó dịch chuyển South light
  * trong buildExamGround, sensors tự bám theo.
  *
- * Scope lần này (đã chốt với user):
- *   E05-01 Đèn đỏ -10
+ * Scope chấm điểm hiện tại:
+ *   E05-01 Qua stopbar trắng khi đèn đỏ -10
  *   E05-02 Dừng quá vạch -5
  *   E05-03 Dừng chưa đến vạch -5
+ *   E05-05 Quá 20 giây từ đèn xanh đến vạch kết thúc -5
+ *   E05-06 Quá 30 giây từ đèn xanh đến vạch kết thúc: đình chỉ
  *   E05-10 Chết máy -5 mỗi lần
  *
- * RULE_EX05_20: chỉ chấm E05-01/02/03/10 cho trafficLight South.
- * Các lỗi khác (E05-04 xi nhan, E05-05/06 timer 20/30s, E05-07 lane marking,
- * E05-08 curb, E05-09 accident) chưa wire trong lần này.
+ * Các lỗi khác (xi nhan, vạch đường, vỉa hè, tai nạn) chưa wire.
  *
  * TODO: TrafficLight hiện không có phase 'yellow' (chỉ red/green). Khi có,
  * cập nhật logic E05-01 để phân biệt red vs yellow semantics theo spec §2.1.
@@ -37,7 +37,7 @@ export type Exam05State =
     | 'INACTIVE'        // chưa trigger SOUTH
     | 'APPROACHING'     // xe vừa chạm trigger → chờ đánh giá dừng
     | 'STOP_EVALUATION' // đã dừng tại vạch → chấm điểm
-    | 'COMPLETED'       // hoàn thành (chưa wire trong lần này)
+    | 'COMPLETED'       // đã vượt vạch kết thúc ngã tư
     | 'DISQUALIFIED';
 
 export interface Exam05Input {
@@ -81,10 +81,10 @@ export interface Exam05SouthAttachOptions {
     light: TrafficLight;
     roadWidth?: number;
     roadZ?: number;
-    /** Tâm world (x, z) của vùng hoàn thành bài (Box3 trigger). Bỏ trống = không wire. */
-    completionZoneCenter?: { x: number; z: number };
-    /** Kích thước zone theo (widthX, lengthZ). Mặc định 6×6. */
-    completionZoneSize?: { widthX: number; lengthZ: number };
+    /** Mép stopbar trắng gần xe đi tới, lấy từ mesh 'exam-05-stop-bar'. */
+    stopBar?: { minX: number; maxX: number; nearZ: number };
+    /** Tâm vạch qua đường dùng làm vạch kết thúc ngã tư. */
+    finishLine?: { x: number; z: number; widthM: number; depthM: number };
 }
 
 const DEFAULTS = {
@@ -99,7 +99,7 @@ export class Exam05South {
 
     /** Box3 vạch dừng (dải mỏng quanh vạch vàng) — world space. */
     readonly stopLine: THREE.Box3;
-    /** Box3 vùng "đã quá vạch" (ngay sau vạch ~0.85m) — phát hiện xe chạy đèn đỏ (E05-01). */
+    /** Box3 vùng ngay sau vạch đèn vàng, giữ cho cảm biến vị trí dừng. */
     readonly overLine: THREE.Box3;
     /** Box3 vùng "đã quá vạch ≥ 1m" — phát hiện dừng sâu quá vạch (E05-02 STOP_OVER_LINE). */
     readonly overLineDeep: THREE.Box3;
@@ -120,13 +120,18 @@ export class Exam05South {
 
     private stoppedSince = 0;
     private stopEvaluated = false;
-    private redLightPenaltyApplied = false;
+    private stopBarCrossed = false;
+    private stopBar?: Exam05SouthAttachOptions['stopBar'];
+    private finishLineZ?: number;
+    private greenStarted = false;
+    private greenElapsedSec = 0;
+    private green20PenaltyApplied = false;
     private stallLatched = false;
     private engineWasRunning = false;
     private _stopClassification: Exam05Result['stopClassification'];
-    /** Đánh dấu đã qua exitLine (chưa wire exit sensor trong lần này). */
+    /** Đánh dấu đã qua vạch kết thúc. */
     private completed = false;
-    /** Box3 vạch hoàn thành bài — frontPosition nằm trong zone → COMPLETED. */
+    /** Footprint của vạch qua đường dùng làm mốc kết thúc bài. */
     readonly completionZone: THREE.Box3 = new THREE.Box3();
     private hasCompletionZone = false;
 
@@ -170,19 +175,24 @@ export class Exam05South {
         (this as { overLineDeep: THREE.Box3 }).overLineDeep = built.overLineDeep;
         (this as { approachZone: THREE.Box3 }).approachZone = built.approachZone;
         (this as { stopLineWorldZ: number }).stopLineWorldZ = built.stopLineWorldZ;
+        this.stopBar = options.stopBar ?? {
+            minX: built.stopLine.min.x,
+            maxX: built.stopLine.max.x,
+            nearZ: built.stopLine.max.z,
+        };
 
-        // Wire completion zone (vạch hoàn thành bài 5) — vùng xanh lá nhạt
-        // phía nam ngã tư. Xe chạm → COMPLETED → ExamEngine.finished.
-        if (options.completionZoneCenter) {
-            const cx = options.completionZoneCenter.x;
-            const cz = options.completionZoneCenter.z;
-            const { widthX, lengthZ } = options.completionZoneSize ?? { widthX: 6, lengthZ: 6 };
-            // Y extent = 4 chỉ để chứa cả xe (~2m cao); X/Z theo đúng kích thước zone.
+        if (options.finishLine) {
+            const { x, z, widthM, depthM } = options.finishLine;
             this.completionZone.setFromCenterAndSize(
-                new THREE.Vector3(cx, 0, cz),
-                new THREE.Vector3(widthX, 4, lengthZ),
+                new THREE.Vector3(x, 0, z),
+                new THREE.Vector3(widthM, 4, depthM),
             );
+            this.finishLineZ = z;
             this.hasCompletionZone = true;
+        } else {
+            this.completionZone.makeEmpty();
+            this.finishLineZ = undefined;
+            this.hasCompletionZone = false;
         }
     }
 
@@ -217,10 +227,8 @@ export class Exam05South {
             new THREE.Vector3(roadZ - halfWidth, -1, zCenter - .15),
             new THREE.Vector3(roadZ + halfWidth, 3, zCenter + .15),
         );
-        // E05-01 red-light sensor: phát hiện "đã qua vạch" NGAY khi front vượt vạch
-        // (0.15m buffer). Dùng cho rule "đi qua ngã tư khi đèn đỏ" — vẫn trigger sớm
-        // vì đây là hành vi nguy hiểm, không liên quan ngưỡng "dừng đúng vị trí".
-        // Box3 trải z ∈ [zCenter - 1, zCenter - 0.15] (rộng 0.85m ngay sau vạch).
+        // Giữ dải ngay sau vạch đèn vàng để mô tả vị trí dừng. Lỗi vượt đèn đỏ
+        // được chấm tại mesh stopbar trắng, không dùng dải này.
         const overLine = new THREE.Box3(
             new THREE.Vector3(roadZ - halfWidth, -1, zCenter - 1),
             new THREE.Vector3(roadZ + halfWidth, 3, zCenter - .15),
@@ -260,7 +268,10 @@ export class Exam05South {
         this.state = 'INACTIVE';
         this.stoppedSince = 0;
         this.stopEvaluated = false;
-        this.redLightPenaltyApplied = false;
+        this.stopBarCrossed = false;
+        this.greenStarted = false;
+        this.greenElapsedSec = 0;
+        this.green20PenaltyApplied = false;
         this.stallLatched = false;
         this.engineWasRunning = false;
         this._stopClassification = undefined;
@@ -303,30 +314,66 @@ export class Exam05South {
             };
         }
 
-        // === Hoàn thành bài 5: xe chạm vùng trigger xanh lá nhạt phía nam ngã tư ===
-        // Đặt trước các check E05-01/02/03/10 để completion fire ngay khi xe tới zone
-        // (tránh bị stall/stop penalty "lẻ" cùng frame). Chỉ áp dụng khi xe đã ACTIVE
-        // (state INACTIVE đã return sớm ở trên).
-        if (this.hasCompletionZone && this.completionZone.containsPoint(input.frontPosition)) {
-            this.completed = true;
-            this.state = 'COMPLETED';
-            return {
-                toast: 'Hoàn thành bài 5',
-                penalties: [],
-                completed: true,
-                disqualified: false,
-                stopClassification: this._stopClassification,
-            };
-        }
-
         const penalties: PenaltyEvent[] = [];
         const now = performance.now();
         const add = (points: number, reason: string) => {
             penalties.push({ at: now, points, reason });
         };
 
+        // Chốt thời điểm đèn xanh đầu tiên; không đặt lại đồng hồ khi đèn lặp chu kỳ.
+        const phase = this.light?.phase;
+        if (!this.greenStarted && phase === 'green') {
+            this.greenStarted = true;
+        } else if (this.greenStarted) {
+            this.greenElapsedSec += Math.max(0, input.dt);
+        }
+
+        // Đầu xe chạm mép stopbar trắng khi đèn đỏ: trừ một lần tại thời điểm vượt.
+        const stopBar = this.stopBar;
+        if (!this.stopBarCrossed && stopBar
+            && input.frontPosition.x >= stopBar.minX
+            && input.frontPosition.x <= stopBar.maxX
+            && input.frontPosition.z <= stopBar.nearZ) {
+            this.stopBarCrossed = true;
+            if (phase === 'red') add(this.rules.penalties.redLight, 'Đi qua stopbar khi đèn đỏ');
+        }
+
+        if (this.greenStarted && !this.green20PenaltyApplied
+            && this.greenElapsedSec > this.rules.timer.penaltyAtSec) {
+            this.green20PenaltyApplied = true;
+            add(this.rules.timer.penaltyPoints,
+                'Quá 20 giây từ khi đèn xanh bật sáng chưa qua vạch kết thúc ngã tư');
+        }
+        if (this.greenStarted && this.greenElapsedSec > this.rules.timer.disqualifyAtSec) {
+            const reason = 'Quá 30 giây từ khi đèn xanh bật sáng chưa qua vạch kết thúc ngã tư';
+            this.state = 'DISQUALIFIED';
+            return {
+                toast: `Đình chỉ sát hạch — ${reason}`,
+                penalties,
+                completed: false,
+                disqualified: true,
+                disqualifyReason: reason,
+                stopClassification: this._stopClassification,
+            };
+        }
+
+        // Đầu xe đi qua tâm vạch qua đường tại Z=-51: kết thúc bài.
+        if (this.hasCompletionZone && this.finishLineZ !== undefined
+            && input.frontPosition.x >= this.completionZone.min.x
+            && input.frontPosition.x <= this.completionZone.max.x
+            && input.frontPosition.z <= this.finishLineZ) {
+            this.completed = true;
+            this.state = 'COMPLETED';
+            return {
+                toast: 'Hoàn thành bài 5',
+                penalties,
+                completed: true,
+                disqualified: false,
+                stopClassification: this._stopClassification,
+            };
+        }
+
         const stopped = Math.abs(input.speedKmh) < this.stopSpeedKmh;
-        const overTheLine = this.overLine.containsPoint(input.frontPosition);
         const onTheLine = this.stopLine.containsPoint(input.frontPosition);
 
         // === E05-10: Chết máy (rising-edge) ===
@@ -343,16 +390,6 @@ export class Exam05South {
         ) {
             this.stallLatched = true;
             add(this.stallPenaltyPoints, 'Chết máy');
-        }
-
-        // === E05-01: Đèn đỏ — xe vượt qua stop line khi light.phase === 'red' ===
-        if (
-            !this.redLightPenaltyApplied
-            && overTheLine
-            && this.light?.phase === 'red'
-        ) {
-            this.redLightPenaltyApplied = true;
-            add(this.rules.penalties.redLight, 'Đi qua ngã tư khi đèn đỏ');
         }
 
         // === APPROACHING state ===

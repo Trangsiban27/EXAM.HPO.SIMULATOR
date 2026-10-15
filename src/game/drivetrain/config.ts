@@ -5,7 +5,7 @@ export const manualConfig = {
     hillStartIdleTorqueLimit: 100, hillStartBiteEngagement: .55,
     clutchCapacity: 240, slipGain: .3, rideDelay: 3, rideSlipRPM: 350,
     mass: 1200, wheelRadius: .36, finalDrive: 4.1, efficiency: .9,
-    ratios: [0, 3.5, 2, 1.3, 1, .8], reverseRatio: -3.4,
+    ratios: [0, 3.5, 2, 1.3, 1, .8], reverseRatio: -5.1, // ~5 km/h at idle with the clutch fully released.
     redlineRPM: 5500, torqueFadeRPM: 4200, peakTorque: 160, lugRPM: 1200,
 };
 export const gearSpeedRanges = {

@@ -45,9 +45,10 @@ export class CabinView {
         this.frames = Array.from(this.overlay.querySelectorAll<HTMLElement>('.mirror-frame'));
     }
 
-    render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, vehicle: Vehicle, active: boolean) {
+    render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera,
+        vehicle: Vehicle, active: boolean, steeringWheelAngle: number) {
         this.overlay.hidden = !active;
-        if (active) this.interior.update(vehicle);
+        if (active) this.interior.update(vehicle, steeringWheelAngle);
         const w = this.host.clientWidth, h = this.host.clientHeight;
         renderer.setViewport(0, 0, w, h);
         if (!active) { renderer.render(scene, camera); return; }
