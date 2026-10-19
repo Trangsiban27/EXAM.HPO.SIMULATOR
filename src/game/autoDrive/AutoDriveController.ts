@@ -31,7 +31,7 @@ const TRAFFIC_STOP_FRONT_GAP_M = .5;
 const TRAFFIC_GREEN_COMMIT_SEC = 2;
 
 type Stop = { position: THREE.Vector3; lesson: AutoDriveLesson };
-type WaypointStopKind = 'bridge' | 'exam05' | 'exam06' | 'exam07' | 'exam08' | 'exam09';
+type WaypointStopKind = 'bridge' | 'exam05' | 'exam06' | 'exam07' | 'exam08' | 'exam09' | 'exam10';
 type SavedRouteStopKind = WaypointStopKind | 'routeEnd';
 type Exam04GateWaypoint = { beforeIndex: number; point: AutoDriveWaypoint };
 
@@ -49,7 +49,9 @@ export class AutoDriveController {
     private readonly exam09ApproachRoute?: THREE.Vector3[];
     private readonly exam08PopupWaypointIndex?: number;
     private readonly exam09PopupWaypointIndex?: number;
+    private readonly exam10PopupWaypointIndex?: number;
     private readonly exam08DirectionChangeIndices: number[];
+    private readonly exam10DirectionChangeIndices: number[];
     private readonly exam04GateWaypoint?: Exam04GateWaypoint;
     private trafficStopWaypointIndex?: number;
     private trafficStopLineWorldZ?: number;
@@ -90,6 +92,7 @@ export class AutoDriveController {
         private readonly southTrafficLight?: TrafficLight,
         private readonly eastTrafficLight?: TrafficLight,
         railwayStopLine?: THREE.Object3D,
+        private readonly exam09AccelerationPositions?: readonly [number, number, number],
     ) {
         const savedRoutes = AUTO_DRIVE_WAYPOINTS_BY_CLASS[this.vehicleClass];
         this.capturedRoute = savedRoutes?.bridgeToExam05;
@@ -100,6 +103,12 @@ export class AutoDriveController {
         const exam09PopupIndex = savedRoutes?.exam08ToExam09?.findIndex(point => point.popupLessonId === 9);
         this.exam09PopupWaypointIndex = exam09PopupIndex !== undefined && exam09PopupIndex >= 0
             ? exam09PopupIndex : undefined;
+        const exam10PopupIndex = savedRoutes?.exam08ToExam09?.findIndex(point => point.popupLessonId === 10);
+        this.exam10PopupWaypointIndex = exam10PopupIndex !== undefined && exam10PopupIndex >= 0
+            ? exam10PopupIndex : undefined;
+        this.exam10DirectionChangeIndices = this.exam09ApproachRoute && this.exam10PopupWaypointIndex !== undefined
+            ? this.findDirectionChangeIndices(this.exam09ApproachRoute)
+                .filter(index => index >= this.exam10PopupWaypointIndex!) : [];
         this.exam08PopupWaypointIndex = this.exam09ApproachRoute && railwayStopLine
             ? this.findRailwayStopWaypointIndex(this.exam09ApproachRoute, railwayStopLine)
             : undefined;
@@ -118,6 +127,7 @@ export class AutoDriveController {
     }
 
     get currentExamNumber(): number {
+        if (this.waypointStopKind === 'exam10') return 10;
         if (this.waypointStopKind === 'exam09' || (this.exam09ApproachStarted
             && this.waypointStopKind === 'exam08')) return 9;
         if (this.exam08ApproachStarted || this.exam09ApproachStarted || (this.waypointStopReady
@@ -149,9 +159,13 @@ export class AutoDriveController {
     get hasSavedExam06Approach(): boolean { return !!this.exam06ApproachRoute?.length; }
     get hasSavedExam07Approach(): boolean { return !!this.exam07ApproachRoute?.length; }
     get hasSavedExam08Approach(): boolean { return !!this.exam08ApproachRoute?.length; }
-    get hasSavedExam09Approach(): boolean { return !!this.exam09ApproachRoute?.length; }
+    get hasSavedExam09Approach(): boolean {
+        return this.exam08PopupWaypointIndex !== undefined
+            && this.exam08PopupWaypointIndex < (this.exam09ApproachRoute?.length ?? 0) - 1;
+    }
     get hasExam08PopupWaypoint(): boolean { return this.exam08PopupWaypointIndex !== undefined; }
     get hasExam09PopupWaypoint(): boolean { return this.exam09PopupWaypointIndex !== undefined; }
+    get hasExam10PopupWaypoint(): boolean { return this.exam10PopupWaypointIndex !== undefined; }
 
     get canRecordExam06Completion(): boolean {
         return this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam06'
@@ -166,6 +180,16 @@ export class AutoDriveController {
     get canRecordExam08Continuation(): boolean {
         return this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam08'
             && this.hasExam08PopupWaypoint && !this.isWaypointRecording;
+    }
+
+    get canRecordExam09Continuation(): boolean {
+        return this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam09'
+            && this.hasExam09PopupWaypoint && !this.isWaypointRecording;
+    }
+
+    get canRecordExam10Continuation(): boolean {
+        return this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam10'
+            && this.hasExam10PopupWaypoint && !this.isWaypointRecording;
     }
 
     start(vehicle: Vehicle): void {
@@ -206,19 +230,21 @@ export class AutoDriveController {
         const selectingExam07 = lessonId === 7;
         const selectingExam08 = lessonId === 8;
         const selectingExam09 = lessonId === 9;
-        const index = selectingExam06 || selectingExam07 || selectingExam08 || selectingExam09 ? 4
+        const selectingExam10 = lessonId === 10;
+        const index = selectingExam06 || selectingExam07 || selectingExam08 || selectingExam09 || selectingExam10 ? 4
             : this.stops.findIndex(stop => stop.lesson.id === lessonId);
         if (!this.enabled || index < 0 || (selectingExam06
             && (!this.hasSavedExam06Approach || !this.capturedRoute?.length))
             || (selectingExam07 && !this.hasSavedExam07Approach)
             || (selectingExam08 && !this.hasExam08PopupWaypoint)
-            || (selectingExam09 && !this.hasExam09PopupWaypoint)) return false;
+            || (selectingExam09 && !this.hasExam09PopupWaypoint)
+            || (selectingExam10 && !this.hasExam10PopupWaypoint)) return false;
 
         const stop = this.stops[index];
         this.stopIndex = index;
         this.waypointIndex = 0;
         this.currentSpeed = 0;
-        this.exam05LessonShown = selectingExam06 || selectingExam07 || selectingExam08 || selectingExam09;
+        this.exam05LessonShown = selectingExam06 || selectingExam07 || selectingExam08 || selectingExam09 || selectingExam10;
         this.exam06ApproachStarted = false;
         this.exam07ApproachStarted = false;
         this.exam08ApproachStarted = false;
@@ -270,6 +296,14 @@ export class AutoDriveController {
             this.exam09ApproachStarted = true;
             vehicle.root.position.copy(pose.position);
             vehicle.root.rotation.set(0, pose.heading, 0);
+        } else if (selectingExam10) {
+            const anchor = this.exam09ApproachRoute![this.exam10PopupWaypointIndex!];
+            this.waypointIndex = this.exam10PopupWaypointIndex! + 1;
+            this.waypointStopKind = 'exam10';
+            this.waypointStopReady = true;
+            this.exam09ApproachStarted = true;
+            vehicle.root.position.copy(anchor);
+            vehicle.root.rotation.set(0, this.recordedHeadings.get(anchor)!, 0);
         } else if (index === 0) {
             vehicle.root.position.copy(stop.position);
             vehicle.root.position.x -= SELECTED_LESSON_APPROACH_M;
@@ -292,6 +326,7 @@ export class AutoDriveController {
         vehicle.setSignal({ left: false, right: false, hazard: false });
         this.publishLesson(null);
         if (selectingExam06) this.onWaypointStop('exam05');
+        if (selectingExam10) this.onWaypointStop('exam10');
         return true;
     }
 
@@ -383,8 +418,11 @@ export class AutoDriveController {
 
     /** Resume driving after the learner has read the current lesson. */
     continueLesson(): void {
-        if (this.enabled && this.waypointStopReady && this.waypointStopKind === 'exam09') {
+        if (this.enabled && this.waypointStopReady
+            && (this.waypointStopKind === 'exam09' || this.waypointStopKind === 'exam10')) {
             this.waypointStopReady = false;
+            this.exam08DirectionChangeCursor = 0;
+            this.exam08ShiftPauseRemaining = 0;
             this.currentSpeed = 0;
             this.publishLesson(null);
             return;
@@ -634,31 +672,40 @@ export class AutoDriveController {
         stopLineWorld: number | undefined = this.trafficStopLineWorldZ,
         trafficAxis: 'x' | 'z' = 'z',
     ): void {
-        if (waypointStopAtEnd === 'exam08' && this.exam08ShiftPauseRemaining > 0) {
+        const replayExam10 = waypointStopAtEnd === 'routeEnd' && this.waypointStopKind === 'exam10';
+        const directionChanges = replayExam10 ? this.exam10DirectionChangeIndices : this.exam08DirectionChangeIndices;
+        const replayDirections = waypointStopAtEnd === 'exam08' || replayExam10;
+        if (replayDirections && this.exam08ShiftPauseRemaining > 0) {
             this.exam08ShiftPauseRemaining = Math.max(0, this.exam08ShiftPauseRemaining - dt);
             this.currentSpeed = 0;
             vehicle.updateAutomatic(dt,
                 vehicle.steering / THREE.MathUtils.degToRad(steeringConfig.maxRoadWheelAngle), 0);
             if (this.exam08ShiftPauseRemaining === 0) {
-                const changeIndex = this.exam08DirectionChangeIndices[this.exam08DirectionChangeCursor];
+                const changeIndex = directionChanges[this.exam08DirectionChangeCursor];
                 vehicle.transmission.gear = this.directionForSegment(route, changeIndex);
                 this.exam08DirectionChangeCursor++;
             }
             return;
         }
 
-        const direction = waypointStopAtEnd === 'exam08' && this.waypointIndex < route.length
+        const direction = replayDirections && this.waypointIndex < route.length
             ? this.directionForSegment(route, Math.max(0, this.waypointIndex - 1)) : 1;
         const replayRecordedSpeed = this.exam09ApproachStarted
-            && (this.waypointStopKind === 'exam08' || this.waypointStopKind === 'exam09');
+            && (this.waypointStopKind === 'exam08' || this.waypointStopKind === 'exam09' || replayExam10);
         const speedIndex = Math.min(this.waypointIndex, route.length - 1);
         let recordedSpeed = replayRecordedSpeed ? this.recordedSpeeds.get(route[speedIndex]) : undefined;
-        // A final stationary sample marks the endpoint. Brake toward it using
-        // the remaining distance rather than stopping at the preceding sample.
-        if (recordedSpeed === 0 && speedIndex === route.length - 1) {
-            recordedSpeed = this.recordedSpeeds.get(route[speedIndex - 1]);
+        // Stationary samples mark checkpoints. The route limit handles the stop;
+        // a zero cruise speed would strand the car before reaching the checkpoint.
+        if (recordedSpeed === 0) {
+            recordedSpeed = this.recordedSpeeds.get(route[speedIndex - 1]) || AUTO_DRIVE_SPEED_MPS;
         }
-        const cruiseSpeed = Math.min(recordedSpeed ?? AUTO_DRIVE_SPEED_MPS, vehicle.maxAllowedSpeedMps,
+        const accelerationSpeed = replayRecordedSpeed && !replayExam10
+            ? this.exam09AccelerationSpeed(vehicle.root.position.x
+                - Math.sin(vehicle.root.rotation.y) * FRONT_PROBE_OFFSET_M,
+                recordedSpeed ?? AUTO_DRIVE_SPEED_MPS)
+            : undefined;
+        const cruiseSpeed = Math.min(accelerationSpeed ?? recordedSpeed ?? AUTO_DRIVE_SPEED_MPS, vehicle.maxAllowedSpeedMps,
+            replayExam10 ? 3 / 3.6 : Infinity,
             direction < 0 ? AUTO_DRIVE_REVERSE_SPEED_MPS : Infinity);
         const position = vehicle.root.position;
         const finish = route[route.length - 1];
@@ -684,14 +731,17 @@ export class AutoDriveController {
                     && light.remainingSeconds <= TRAFFIC_GREEN_COMMIT_SEC));
         const exam08PopupIndex = waypointStopAtEnd === 'routeEnd'
             && this.waypointStopKind !== 'exam08' && this.waypointStopKind !== 'exam09'
+            && this.waypointStopKind !== 'exam10'
             ? this.exam08PopupWaypointIndex : undefined;
         const exam09PopupIndex = waypointStopAtEnd === 'routeEnd'
             && this.waypointStopKind === 'exam08' ? this.exam09PopupWaypointIndex : undefined;
-        const popupIndex = exam08PopupIndex ?? exam09PopupIndex;
+        const exam10PopupIndex = waypointStopAtEnd === 'routeEnd'
+            && this.waypointStopKind === 'exam09' ? this.exam10PopupWaypointIndex : undefined;
+        const popupIndex = exam08PopupIndex ?? exam09PopupIndex ?? exam10PopupIndex;
         const routeLimitIndex = popupIndex ?? lessonStopIndex
             ?? (waitForGreen ? trafficStopIndex! : route.length - 1);
-        const directionChangeIndex = waypointStopAtEnd === 'exam08'
-            ? this.exam08DirectionChangeIndices[this.exam08DirectionChangeCursor] : undefined;
+        const directionChangeIndex = replayDirections
+            ? directionChanges[this.exam08DirectionChangeCursor] : undefined;
         const lastIndex = directionChangeIndex === undefined
             ? routeLimitIndex : Math.min(routeLimitIndex, directionChangeIndex);
         const target = route[lastIndex];
@@ -748,7 +798,8 @@ export class AutoDriveController {
                 position.z = target.z;
                 vehicle.root.rotation.y = this.recordedHeadings.get(target) ?? vehicle.root.rotation.y;
                 this.waypointIndex = popupIndex + 1;
-                this.waypointStopKind = exam09PopupIndex !== undefined ? 'exam09' : 'exam08';
+                this.waypointStopKind = exam10PopupIndex !== undefined ? 'exam10'
+                    : exam09PopupIndex !== undefined ? 'exam09' : 'exam08';
                 this.waypointStopReady = true;
                 this.onWaypointStop(this.waypointStopKind);
                 return;
@@ -797,7 +848,7 @@ export class AutoDriveController {
         const stoppingSpeed = Math.sqrt(2 * AUTO_DRIVE_BRAKING_MPS2 * remaining);
         const targetSpeed = (continuesToExam07 || continuesToExam08) && !waitForGreen
             ? cruiseSpeed : Math.min(cruiseSpeed, stoppingSpeed);
-        this.currentSpeed = recordedSpeed !== undefined ? targetSpeed
+        this.currentSpeed = recordedSpeed !== undefined || accelerationSpeed !== undefined ? targetSpeed
             : this.approach(this.currentSpeed, targetSpeed,
                 (targetSpeed < this.currentSpeed ? AUTO_DRIVE_BRAKING_MPS2 : AUTO_DRIVE_SPEED_MPS) * dt);
 
@@ -848,6 +899,27 @@ export class AutoDriveController {
         vehicle.root.rotation.y = heading;
     }
 
+    /** Speed at the front probe: accelerate after marker 1, brake uniformly after marker 2. */
+    private exam09AccelerationSpeed(frontX: number, approachSpeed = 20 / 3.6): number | undefined {
+        if (!this.exam09AccelerationPositions) return undefined;
+        const [position1X, position2X, position3X] = this.exam09AccelerationPositions;
+        if (frontX > position1X) return Math.min(approachSpeed, 20 / 3.6);
+        const entrySpeed = 20 / 3.6;
+        const fastSpeed = 30 / 3.6;
+        const exitSpeed = 9 / 3.6;
+        if (frontX > position2X) {
+            const accelerationDistanceM = Math.min(10, position1X - position2X);
+            const fraction = Math.min(1, (position1X - frontX) / accelerationDistanceM);
+            return Math.sqrt(entrySpeed ** 2 + (fastSpeed ** 2 - entrySpeed ** 2) * fraction);
+        }
+        if (frontX >= position3X) {
+            const fraction = (frontX - position3X) / (position2X - position3X);
+            return Math.sqrt(exitSpeed ** 2 + (fastSpeed ** 2 - exitSpeed ** 2) * fraction);
+        }
+        // Once past marker 3, follow the next section's saved speed again.
+        return approachSpeed;
+    }
+
     private directionForSegment(route: readonly THREE.Vector3[], fromIndex: number): 1 | -1 {
         const from = route[fromIndex];
         const to = route[fromIndex + 1];
@@ -874,8 +946,15 @@ export class AutoDriveController {
         const recordingFromExam07 = this.waypointStopKind === 'exam07'
             && this.hasSavedExam07Approach;
         const recordingFromExam08 = this.canRecordExam08Continuation;
+        const recordingFromExam09 = this.canRecordExam09Continuation;
+        const recordingFromExam10 = this.canRecordExam10Continuation;
         if (!this.enabled || !this.waypointStopReady || this.isWaypointRecording) return false;
-        this.recordingRouteName = recordingFromExam08 ? 'exam08ToExam09Waypoints'
+        if (!vehicle.transmission.running) vehicle.transmission.car.engine.start();
+        vehicle.transmission.car.stalled = false;
+        vehicle.transmission.status = 'Máy đang chạy';
+        this.recordingRouteName = recordingFromExam10 ? 'exam10ToExam11Waypoints'
+            : recordingFromExam09 ? 'exam09ContinuationWaypoints'
+            : recordingFromExam08 ? 'exam08ToExam09Waypoints'
             : recordingFromExam07 ? 'exam07ToExam08Waypoints'
             : recordingFromExam06 ? 'exam06ToExam07Waypoints'
             : recordingFromExam05 ? 'exam05ToExam06Waypoints' : 'bridgeToExam05Waypoints';
@@ -896,8 +975,10 @@ export class AutoDriveController {
             vehicle.root.position.x = anchor.x;
             vehicle.root.position.z = anchor.z;
             vehicle.root.rotation.y = this.recordedHeadings.get(anchor)!;
-        } else if (recordingFromExam08) {
-            const anchor = this.exam09ApproachRoute![this.exam08PopupWaypointIndex!];
+        } else if (recordingFromExam08 || recordingFromExam09 || recordingFromExam10) {
+            const anchorIndex = recordingFromExam10 ? this.exam10PopupWaypointIndex!
+                : recordingFromExam09 ? this.exam09PopupWaypointIndex! : this.exam08PopupWaypointIndex!;
+            const anchor = this.exam09ApproachRoute![anchorIndex];
             vehicle.root.position.x = anchor.x;
             vehicle.root.position.z = anchor.z;
             vehicle.root.rotation.y = this.recordedHeadings.get(anchor)!;

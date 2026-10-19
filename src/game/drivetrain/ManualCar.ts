@@ -19,7 +19,8 @@ export class ManualCar {
         this.engine = new Engine(config); this.clutch = new Clutch(config);
         this.gearbox = new Transmission(config); this.physics = new VehiclePhysics(config);
     }
-    update(dt: number, gas: number, pedal: number, fast: boolean, brake: number, slope: number) {
+    update(dt: number, gas: number, pedal: number, fast: boolean, brake: number, slope: number,
+        preventStall = false) {
         this.stalled = false;
         // Fixed-size substeps keep clutch loading stable across display frame rates.
         for (let remaining = Math.min(dt, .1); remaining > 1e-8;) {
@@ -41,6 +42,9 @@ export class ManualCar {
                 + (this.config.hillStartIdleTorqueLimit - this.config.idleTorqueLimit) * hillStartAssist;
             this.engine.update(h, gas, torque, idleTorqueLimit);
             this.physics.update(h, this.gearbox.force(torque), brake, slope);
+            if (preventStall && this.engine.running) {
+                this.engine.rpm = Math.max(this.config.idleRPM, this.engine.rpm);
+            }
             if (this.engine.checkStall(h, this.clutch.engagement, this.gearbox.gear)) this.stalled = true;
             const kick = this.clutch.releaseSpeed > 6 && Math.abs(this.physics.speed) < 2 ? torque * .015 : 0;
             this.joltVelocity += (kick - 65 * this.jolt - 10 * this.joltVelocity) * h;

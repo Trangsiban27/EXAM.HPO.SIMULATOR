@@ -10,7 +10,7 @@ import {CameraManager} from './CameraManager';
 import {ProbeController} from './ProbeController';
 import {FRONT_PROBE_OFFSET_M} from './startPosition';
 import {AutoDriveController} from './autoDrive/AutoDriveController';
-import {AUTO_DRIVE_LESSONS, EXAM_06_LESSON, EXAM_07_LESSON, EXAM_08_LESSON, EXAM_09_LESSON} from './autoDrive/autoDriveLessons';
+import {AUTO_DRIVE_LESSONS, EXAM_06_LESSON, EXAM_07_LESSON, EXAM_08_LESSON, EXAM_09_LESSON, EXAM_10_LESSON} from './autoDrive/autoDriveLessons';
 import {Exam04SpeedZone} from './exam/Exam04SpeedZone';
 import {ParkingBayBSpeedZone} from './exam/ParkingBayBSpeedZone';
 import {RedWhiteCurbContact} from './RedWhiteCurbContact';
@@ -21,6 +21,7 @@ import type {Hud} from '../ui/Hud';
 const EXAM_VEHICLE_CLASSES: ExamVehicleClass[] = ['A1', 'A2', 'B', 'C1', 'C', 'D1', 'D2', 'D', 'E', 'Fc'];
 const EXAM_04_SPEED_LIMIT_KMH = 5;
 const PARKING_BAY_B_SPEED_LIMIT_KMH = 2;
+const EXAM_10_SPEED_LIMIT_KMH = 3;
 
 function getAutoDriveVehicleClass(): ExamVehicleClass {
 const requestedClass = new URLSearchParams(window.location.search).get('vehicleClass');
@@ -88,6 +89,16 @@ this.cameras.attach(this.renderer.domElement);
     this.parkingBayBSpeedZone = new ParkingBayBSpeedZone(this.track.root);
     // Wire up Exam05South với trafficLight South đã có sẵn (xem buildExamGround.ts).
     this.exam.wireExam05South(this.track);
+    const accelerationPositions = [
+        'six-a-acceleration-position-1-yellow-dash',
+        'six-a-acceleration-position-2-yellow-dash',
+        'eight-a-acceleration-position-3-yellow-dash',
+    ].map(name => {
+        const marker = this.track.root.getObjectByName(name);
+        if (!marker) throw new Error(`Missing acceleration marker: ${name}`);
+        marker.updateWorldMatrix(true, false);
+        return marker.getWorldPosition(new THREE.Vector3()).x;
+    }) as [number, number, number];
     this.autoDrive = new AutoDriveController(
         AUTO_DRIVE_LESSONS,
         lesson => this.hud.showAutoDriveLesson(lesson, () => this.autoDrive.continueLesson(),
@@ -108,7 +119,11 @@ this.cameras.attach(this.renderer.domElement);
                 this.hud.showAutoDriveLesson(EXAM_08_LESSON, () => this.autoDrive.continueLesson(),
                     this.autoDrive.canRecordExam08Continuation, this.autoDrive.hasSavedExam09Approach);
             } else if (kind === 'exam09') {
-                this.hud.showAutoDriveLesson(EXAM_09_LESSON, () => this.autoDrive.continueLesson());
+                this.hud.showAutoDriveLesson(EXAM_09_LESSON, () => this.autoDrive.continueLesson(),
+                    this.autoDrive.canRecordExam09Continuation);
+            } else if (kind === 'exam10') {
+                this.hud.showAutoDriveLesson(EXAM_10_LESSON, () => this.autoDrive.continueLesson(),
+                    this.autoDrive.canRecordExam10Continuation);
             } else {
                 this.hud.showWaypointStopPrompt(kind);
             }
@@ -118,11 +133,13 @@ this.cameras.attach(this.renderer.domElement);
         this.track.getTrafficLight('SOUTH'),
         this.track.getTrafficLight('EAST'),
         this.track.root.getObjectByName('road-11a-railway-white-line'),
+        accelerationPositions,
     );
     this.hud.setExam06Selectable(this.autoDrive.hasSavedExam06Approach);
     this.hud.setExam07Selectable(this.autoDrive.hasSavedExam07Approach);
     this.hud.setExam08Selectable(this.autoDrive.hasExam08PopupWaypoint);
     this.hud.setExam09Selectable(this.autoDrive.hasExam09PopupWaypoint);
+    this.hud.setExam10Selectable(this.autoDrive.hasExam10PopupWaypoint);
 if(this.develop){
 this.probeCtrl=new ProbeController(this.cameras.camera,this.track,this.renderer.domElement,this.devProbePanel,true);
 }
@@ -154,6 +171,7 @@ const frontBeforeMove=this.probe.set(0,0,-FRONT_PROBE_OFFSET_M).applyQuaternion(
 const rearBeforeMove=this.rearProbe.set(0,0,FRONT_PROBE_OFFSET_M).applyQuaternion(this.vehicle.root.quaternion).add(this.vehicle.root.position);
 this.updateCourseSpeedLimits(frontBeforeMove,rearBeforeMove,Object.values(this.getWheelPositions()));
 if(!this.develop||this.autoDrive.enabled){
+this.vehicle.transmission.preventStall=this.autoDrive.enabled;
 if(this.autoDrive.enabled&&this.autoDrive.isWaypointRecording){
 this.vehicle.update(dt,this.input);
 this.hud.setWaypointRecordingCount(this.autoDrive.captureWaypoint(this.vehicle));
@@ -260,6 +278,7 @@ if(lessonId===6?!this.autoDrive.hasSavedExam06Approach:
     lessonId===7?!this.autoDrive.hasSavedExam07Approach:
     lessonId===8?!this.autoDrive.hasExam08PopupWaypoint:
     lessonId===9?!this.autoDrive.hasExam09PopupWaypoint:
+    lessonId===10?!this.autoDrive.hasExam10PopupWaypoint:
     !AUTO_DRIVE_LESSONS.some(lesson=>lesson.id===lessonId))return;
 this.redWhiteCurbContact.reset();
 this.hud.setAutoDriveMode(false);
@@ -301,7 +320,9 @@ private updateCourseSpeedLimits(front:THREE.Vector3,rear:THREE.Vector3,wheels:re
 const inExam04=this.exam04SpeedZone.update(front,rear);
 const inSCurve=this.sCurveSpeedZone.update(front,rear);
 const inParkingBayB=this.parkingBayBSpeedZone.update(wheels);
-this.vehicle.setSpeedLimitKmh(inParkingBayB?PARKING_BAY_B_SPEED_LIMIT_KMH:
+const inExam10=this.autoDrive.enabled&&this.autoDrive.currentExamNumber===10;
+this.vehicle.setSpeedLimitKmh(inExam10?EXAM_10_SPEED_LIMIT_KMH:
+    inParkingBayB?PARKING_BAY_B_SPEED_LIMIT_KMH:
     inExam04||inSCurve?EXAM_04_SPEED_LIMIT_KMH:undefined);
 }
 private resize=()=>{

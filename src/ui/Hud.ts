@@ -32,7 +32,7 @@ export class Hud {
                 ${options.develop ? '<section class="pill develop-pill">DEVELOP</section>' : ''}
                 <section class="pill"><span class="mint icon">♢</span><strong id="score">100</strong><i></i><span class="mint">◴</span><b class="mint mono" id="time">00:00</b></section>
                 <section class="pill exercise"><span class="blue">◎</span><b id="exercise">Xuất phát</b><small id="penalty">0 lỗi</small><span id="startLamp" class="start-lamp" title="Đèn lệnh xuất phát">GO</span></section>
-                <section class="pill lesson-picker"><label for="lessonSelect">Bài học</label><select id="lessonSelect" aria-label="Chọn bài học tự chạy"><option value="">Chọn bài</option>${AUTO_DRIVE_LESSONS.map(lesson => `<option value="${lesson.id}">Bài ${lesson.id}</option>`).join('')}<option value="6" disabled>Bài 6</option><option value="7" disabled>Bài 7</option><option value="8" disabled>Bài 8</option><option value="9" disabled>Bài 9</option></select></section>
+                <section class="pill lesson-picker"><label for="lessonSelect">Bài học</label><select id="lessonSelect" aria-label="Chọn bài học tự chạy"><option value="">Chọn bài</option>${AUTO_DRIVE_LESSONS.map(lesson => `<option value="${lesson.id}">Bài ${lesson.id}</option>`).join('')}<option value="6" disabled>Bài 6</option><option value="7" disabled>Bài 7</option><option value="8" disabled>Bài 8</option><option value="9" disabled>Bài 9</option><option value="10" disabled>Bài 10</option></select></section>
                 <section class="pill"><strong id="speed">0</strong><small class="blue">KM/H</small><i></i><span class="amber">ϟ</span><b class="amber" id="rpm">0</b><small class="amber">RPM</small><i></i><button id="engine" data-key="Enter" class="engine" aria-label="Bật hoặc tắt động cơ">ENGINE</button></section>
             </header>
             <details class="settings"><summary>⚙ &nbsp; CÀI ĐẶT & GÓC NHÌN</summary><div class="settings-body">
@@ -172,6 +172,8 @@ export class Hud {
             const lessonId = Number((this.el('lessonSelect') as HTMLSelectElement).value);
             this.flash(this.el('autoLessonRecord').dataset.nextLesson === '9'
                 ? 'Đang ghi waypoint mới từ bài 8 đến bài 9. Vào số 1 và tiếp tục lái.'
+                : lessonId === 10
+                ? 'Đang ghi waypoint mới từ bài 10. Vào số 1 hoặc R và bắt đầu lái.'
                 : lessonId === 9
                 ? 'Đang ghi tiếp waypoint từ lối vào bài 9. Vào số 1 và tiếp tục lái.'
                 : lessonId === 8
@@ -328,6 +330,11 @@ export class Hud {
         if (option) option.disabled = !available;
     }
 
+    setExam10Selectable(available: boolean): void {
+        const option = this.host.querySelector<HTMLOptionElement>('#lessonSelect option[value="10"]');
+        if (option) option.disabled = !available;
+    }
+
     showWaypointStopPrompt(kind: 'bridge' | 'exam05' | 'exam06' | 'exam07' | 'exam08' | 'exam09' = 'bridge'): void {
         this.el('autoLesson').setAttribute('hidden', '');
         this.el('waypointTitle').textContent = kind === 'exam09' ? 'Xe đã đến lối vào bài 9'
@@ -371,12 +378,16 @@ export class Hud {
         const exam07Continuation = route.startsWith('const exam07ToExam08Waypoints = [');
         const exam08Continuation = route.startsWith('const exam08ToExam09Waypoints = [');
         const exam09Continuation = route.startsWith('const exam09ToExam10Waypoints = [');
-        this.el('waypointTitle').textContent = exam09Continuation ? 'Đã ghi tuyến bài 9'
+        const exam10Continuation = route.startsWith('const exam10ToExam11Waypoints = [');
+        this.el('waypointTitle').textContent = exam10Continuation ? 'Đã ghi tuyến bài 10'
+            : exam09Continuation ? 'Đã ghi tuyến bài 9'
             : exam08Continuation ? 'Đã ghi tuyến bài 8'
             : exam07Continuation ? 'Đã ghi tuyến bài 7'
             : exam06Continuation ? 'Đã ghi tuyến sau bài 6'
             : exam06Route ? 'Đã ghi tuyến đến bài 6' : 'Đã ghi tuyến waypoint';
-        this.el('waypointInstructions').textContent = exam09Continuation
+        this.el('waypointInstructions').textContent = exam10Continuation
+            ? 'Sao chép tuyến bên dưới vào autoDriveRoutes.ts. Waypoint đầu tiên trùng điểm dừng popup bài 10.'
+            : exam09Continuation
             ? 'Sao chép tuyến bên dưới vào autoDriveRoutes.ts. Waypoint đầu tiên trùng điểm cuối tuyến vào bài 9.'
             : exam08Continuation
             ? 'Sao chép tuyến bên dưới vào autoDriveRoutes.ts. Waypoint đầu tiên trùng điểm cuối tuyến vào bài 8.'
@@ -443,9 +454,12 @@ export class Hud {
         continueButton.textContent = 'Đã đọc, tiếp tục';
         const recordButton = this.el('autoLessonRecord');
         const canRecordLesson09 = lesson.id === 8 && canRecordContinuation;
-        recordButton.textContent = 'Tạo waypoint mới cho bài 9';
+        const canRecordFromLesson09 = lesson.id === 9 && canRecordContinuation;
+        const canRecordFromLesson10 = lesson.id === 10 && canRecordContinuation;
+        recordButton.textContent = canRecordFromLesson10 ? 'Ghi waypoint mới từ đây' : canRecordFromLesson09
+            ? 'Tạo waypoint mới từ đây' : 'Tạo waypoint mới cho bài 9';
         recordButton.dataset.nextLesson = canRecordLesson09 ? '9' : '';
-        recordButton.toggleAttribute('hidden', !canRecordLesson09);
+        recordButton.toggleAttribute('hidden', !canRecordLesson09 && !canRecordFromLesson09 && !canRecordFromLesson10);
         continueButton.removeAttribute('hidden');
         continueButton.focus();
     }

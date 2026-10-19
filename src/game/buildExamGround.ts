@@ -40,6 +40,7 @@ import {
 
 /** Positions and dimensions of the examination ground. */
 export function buildExamGround(objects: TrackObjects) {
+    const showRoadLaneNumbers = true;
     const ground=new THREE.Mesh(new THREE.PlaneGeometry(500,500),
     new THREE.MeshStandardMaterial({color:0x63735a,roughness:1}));
 
@@ -639,6 +640,7 @@ export function buildExamGround(objects: TrackObjects) {
     // Một object gồm hai section nối liền: 3 làn chuyển thành 1 làn.
     // section 1 nằm ở làn thứ 3 (phía phải) của section 3 làn.
     const wheelTrackExitRoad = objects.addFourLaneRoad({
+        withLaneNumbers: showRoadLaneNumbers,
         x: 19.4,
         z: -17.4,
         lengthM: 42,
@@ -907,8 +909,8 @@ export function buildExamGround(objects: TrackObjects) {
         lengthM: westJunctionRoadLengthM,
         laneWidthM: westJunctionLaneWidthM,
         rotationY: Math.PI / 2,
-        withLaneNumbers: false,
-        withPositiveXCornerLaneNumbers: false,
+        withLaneNumbers: showRoadLaneNumbers,
+        withPositiveXCornerLaneNumbers: showRoadLaneNumbers,
         positiveXCornerInnerArrowType: 'diagonal-right',
         // Road xoay +90°: local +X 8 m tương ứng world -Z 8 m so với vị trí gốc.
         positiveXCornerInnerArrowShiftXM: 8,
@@ -1401,7 +1403,7 @@ export function buildExamGround(objects: TrackObjects) {
         rotationY: Math.PI / 2 + Math.PI,
         withArrows: false,
         outlineOnly: false,
-        withLaneNumbers: false,
+        withLaneNumbers: showRoadLaneNumbers,
         sectionAlignment: 'left',
         dividerSide: 'left',
         dividerColor: 0xffffff,
@@ -1950,6 +1952,45 @@ export function buildExamGround(objects: TrackObjects) {
         material.map?.dispose();
         material.dispose();
         if (arrowGroup?.children.length === 0) arrowGroup.removeFromParent();
+    }
+
+    // Số làn trên các đoạn thẳng và cung cong của đường xe lửa 11A.
+    if (showRoadLaneNumbers) {
+        const addRailwayLaneNumber = (parent: THREE.Group, lane: number,
+            x: number, z: number, rotationY = 0) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = canvas.height = 128;
+            const ctx = canvas.getContext('2d')!;
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 88px Arial, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(String(lane), 64, 64);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.anisotropy = 8;
+            const label = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1),
+                new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }));
+            label.name = `lane-number-${lane}`;
+            label.rotation.x = -Math.PI / 2;
+            label.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), rotationY);
+            label.position.set(x, .095, z);
+            parent.add(label);
+        };
+        for (const [lane, laneX] of [[1, road11AWidthM / 4], [2, -road11AWidthM / 4]]) {
+            addRailwayLaneNumber(road11ALead, lane, laneX, 0);
+            addRailwayLaneNumber(road11ADiagonalRoad, lane, laneX, -road11ADiagonalM / 4);
+            addRailwayLaneNumber(road11AEndRoad, lane, laneX, 0);
+            for (const [curve, radius, sweep] of [
+                [road11AFirstCurve, road11AFirstRadiusM, road11AFirstSweep],
+                [road11ASecondCurve, road11ASecondRadiusM, road11ASecondSweep],
+            ] as const) {
+                const angle = Math.PI + sweep / 2;
+                const laneRadius = radius - laneX;
+                addRailwayLaneNumber(curve, lane,
+                    laneRadius * Math.cos(angle), laneRadius * Math.sin(angle), -sweep / 2);
+            }
+        }
     }
 
     // 3 làn × 3.70 m, cùng bề rộng làn với addFourLaneBidirectionalRoad().
@@ -3075,7 +3116,7 @@ export function buildExamGround(objects: TrackObjects) {
     const road8A9A = objects.addRoadCornerCurveR8R9({
         x: -52.1,
         z: -68.7,
-        withLaneNumbers: false,
+        withLaneNumbers: showRoadLaneNumbers,
         // distanceM đo từ đầu segmentIndex (mặc định đoạn chéo 1); shiftWorldXM/ZM theo tọa độ sân.
         lane4Arrows: [
             { type: 'straight-right', distanceM:13 , shiftWorldXM: 0, shiftWorldZM: 0 },

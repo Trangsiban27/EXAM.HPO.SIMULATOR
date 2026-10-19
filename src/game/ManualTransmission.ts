@@ -6,7 +6,7 @@ import { notify } from '../ui/Notify';
 
 const SPEED_CAP_CLUTCH_PEDAL = .38;
 
-/** Simplified manual drivetrain; clutch release is gradual for keyboard controls. */
+/** Slow clutch release for first-gear starts; quick release in higher forward gears. */
 export class ManualTransmission {
     car = new ManualCar();
     pedals = new Pedals();
@@ -16,12 +16,14 @@ export class ManualTransmission {
     get clutch() { return this.car.clutch.pedal; }
     get rpm() { return Math.round(this.car.engine.rpm); }
     status = 'Máy tắt';
+    preventStall = false;
     private held = new Set<string>();
 
 
     reset() {
         this.car = new ManualCar(); this.status = 'Máy tắt';
         this.pedals = new Pedals();
+        this.preventStall = false;
         // Preserve held keys so restarting does not retrigger ignition.
     }
 
@@ -69,8 +71,9 @@ export class ManualTransmission {
         const brake = input.isDown('KeyS') || input.isDown('ArrowDown') || input.isDown('Space');
         this.pedals.update(dt, gas ? 1 : input.getAnalog('gas') ?? 0, brake ? 1 : 0);
         this.car.physics.speed = speed;
+        const fastClutchRelease = this.gear > 1 || input.isDown('KeyF');
         this.car.update(dt, this.pedals.gas,
-            clutchTarget, input.isDown('KeyF'), this.pedals.brake, slope);
+            clutchTarget, fastClutchRelease, this.pedals.brake, slope, this.preventStall);
         if (this.car.stalled) this.status = 'Chết máy — về N, đạp hết côn rồi nhấn Enter';
         else if (this.car.clutch.riding && !cappedBelowIdle) this.status = 'Đang rà côn';
         else if (this.status === 'Đang rà côn') this.status = this.running ? 'Máy đang chạy' : 'Máy tắt';
