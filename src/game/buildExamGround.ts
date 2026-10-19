@@ -40,7 +40,7 @@ import {
 
 /** Positions and dimensions of the examination ground. */
 export function buildExamGround(objects: TrackObjects) {
-    const showRoadLaneNumbers = true;
+    const showRoadLaneNumbers = false;
     const ground=new THREE.Mesh(new THREE.PlaneGeometry(500,500),
     new THREE.MeshStandardMaterial({color:0x63735a,roughness:1}));
 
