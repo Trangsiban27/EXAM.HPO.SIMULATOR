@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createStripedSignPost } from './StripedSignPost';
 
-const modelFile = 'R.306_Tốc độ tối thiểu cho phép 20.glb';
+const modelFile = 'r.306_tocdotoithieuchophep_20.glb';
 let minimumSpeed20Model: THREE.Group | undefined;
 
 /** Biển R.306 tốc độ tối thiểu 20 cùng bảng bắt đầu giảm số, tốc độ. */
@@ -10,7 +10,7 @@ export class MinimumSpeed20StartDecelerationSign {
     readonly root = new THREE.Group();
 
     static async preload(): Promise<void> {
-        const url = new URL(`bienbao/${encodeURIComponent(modelFile)}`, document.baseURI);
+        const url = new URL(`bienbao/${modelFile}`, document.baseURI);
         minimumSpeed20Model = (await new GLTFLoader().loadAsync(url.href)).scene;
     }
 

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createStripedSignPost } from './StripedSignPost';
 
-const modelFile = 'P.127_Tốc độ tối đa cho phép - 20.glb';
+const modelFile = 'p.127_tocdotoidachophep_20.glb';
 let speedLimit20Model: THREE.Group | undefined;
 
 /** Biển P.127 tốc độ 20 cùng bảng kết thúc giảm số, tốc độ. */
@@ -10,7 +10,7 @@ export class SpeedLimit20EndAccelerationSign {
     readonly root = new THREE.Group();
 
     static async preload(): Promise<void> {
-        const url = new URL(`bienbao/${encodeURIComponent(modelFile)}`, document.baseURI);
+        const url = new URL(`bienbao/${modelFile}`, document.baseURI);
         speedLimit20Model = (await new GLTFLoader().loadAsync(url.href)).scene;
     }
 

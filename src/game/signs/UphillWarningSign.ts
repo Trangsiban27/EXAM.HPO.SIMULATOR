@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createStripedSignPost } from './StripedSignPost';
 
-const modelFile = 'W.220_Dốc lên nguy hiểm - 10%.glb';
+const modelFile = 'w.220_doclennguyhiem_10.glb';
 let warningModel: THREE.Group | undefined;
 
 /** W.220 warning sign placed before the uphill entrance. */
@@ -10,7 +10,7 @@ export class UphillWarningSign {
     readonly root = new THREE.Group();
 
     static async preload(): Promise<void> {
-        const url = new URL(`bienbao/${encodeURIComponent(modelFile)}`, document.baseURI);
+        const url = new URL(`bienbao/${modelFile}`, document.baseURI);
         warningModel = (await new GLTFLoader().loadAsync(url.href)).scene;
     }
 
