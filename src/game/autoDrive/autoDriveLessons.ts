@@ -21,3 +21,4 @@ export const EXAM_07_LESSON: AutoDriveLesson = fullLessonData.exams.find(lesson 
 export const EXAM_08_LESSON: AutoDriveLesson = fullLessonData.exams.find(lesson => lesson.id === 8)!;
 export const EXAM_09_LESSON: AutoDriveLesson = fullLessonData.exams.find(lesson => lesson.id === 9)!;
 export const EXAM_10_LESSON: AutoDriveLesson = fullLessonData.exams.find(lesson => lesson.id === 10)!;
+export const EXAM_11_LESSON: AutoDriveLesson = fullLessonData.exams.find(lesson => lesson.id === 11)!;

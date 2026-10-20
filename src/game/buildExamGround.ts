@@ -153,6 +153,7 @@ export function buildExamGround(objects: TrackObjects) {
             new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }),
         );
         label.name = `lane-number-${lane}`;
+        label.visible = showRoadLaneNumbers;
         label.rotation.x = -Math.PI / 2;
         label.position.set(localX, .09, finishRoadLaneNumberLocalZ);
         finishRoad.add(label);
@@ -684,7 +685,7 @@ export function buildExamGround(objects: TrackObjects) {
     // Một object gồm hai section nối liền: 3 làn chuyển thành 1 làn.
     // section 1 nằm ở làn thứ 3 (phía phải) của section 3 làn.
     const wheelTrackExitRoad = objects.addFourLaneRoad({
-        withLaneNumbers: true,
+        withLaneNumbers: showRoadLaneNumbers,
         x: 19.4,
         z: -17.4,
         lengthM: 42,
@@ -956,8 +957,8 @@ export function buildExamGround(objects: TrackObjects) {
         lengthM: westJunctionRoadLengthM,
         laneWidthM: westJunctionLaneWidthM,
         rotationY: Math.PI / 2,
-        withLaneNumbers: true,
-        withPositiveXCornerLaneNumbers: true,
+        withLaneNumbers: showRoadLaneNumbers,
+        withPositiveXCornerLaneNumbers: showRoadLaneNumbers,
         positiveXCornerInnerArrowType: 'diagonal-right',
         // Road xoay +90°: local +X 8 m tương ứng world -Z 8 m so với vị trí gốc.
         positiveXCornerInnerArrowShiftXM: 8,

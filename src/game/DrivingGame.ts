@@ -142,6 +142,7 @@ this.cameras.attach(this.renderer.domElement);
     this.hud.setExam08Selectable(this.autoDrive.hasExam08PopupWaypoint);
     this.hud.setExam09Selectable(this.autoDrive.hasExam09PopupWaypoint);
     this.hud.setExam10Selectable(this.autoDrive.hasExam10PopupWaypoint);
+    this.hud.setExam11Selectable(this.autoDrive.hasExam11PopupWaypoint);
 if(this.develop){
 this.probeCtrl=new ProbeController(this.cameras.camera,this.track,this.renderer.domElement,this.devProbePanel,true);
 }
@@ -281,6 +282,7 @@ if(lessonId===6?!this.autoDrive.hasSavedExam06Approach:
     lessonId===8?!this.autoDrive.hasExam08PopupWaypoint:
     lessonId===9?!this.autoDrive.hasExam09PopupWaypoint:
     lessonId===10?!this.autoDrive.hasExam10PopupWaypoint:
+    lessonId===11?!this.autoDrive.hasExam11PopupWaypoint:
     !AUTO_DRIVE_LESSONS.some(lesson=>lesson.id===lessonId))return;
 this.redWhiteCurbContact.reset();
 this.hud.setAutoDriveMode(false);

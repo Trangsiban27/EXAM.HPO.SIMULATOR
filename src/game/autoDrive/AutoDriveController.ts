@@ -6,6 +6,7 @@ import type { Vehicle } from '../Vehicle';
 import type { TrafficLight } from '../TrafficLight';
 import type { AutoDriveWaypointStop } from '../TrackObjects';
 import type { AutoDriveLesson } from './autoDriveLessons';
+import { EXAM_11_LESSON } from './autoDriveLessons';
 import { AUTO_DRIVE_WAYPOINTS_BY_CLASS, type AutoDriveWaypoint } from './autoDriveRoutes';
 import { EXAM_01_START_RULES, type ExamVehicleClass } from '../exam/examRules';
 
@@ -136,6 +137,7 @@ export class AutoDriveController {
     }
 
     get currentExamNumber(): number {
+        if (this.finishRightSignalOn) return 11;
         if (this.waypointStopKind === 'exam10') return 10;
         if (this.waypointStopKind === 'exam09' || (this.exam09ApproachStarted
             && this.waypointStopKind === 'exam08')) return 9;
@@ -236,20 +238,34 @@ export class AutoDriveController {
     }
 
     /** Start later lessons shortly before their saved-route popup. */
+    private get exam11StartIndex(): number {
+        if (this.exam10PopupWaypointIndex === undefined || !this.finishTrafficLight) return -1;
+        return this.exam09ApproachRoute?.findIndex((point, index) =>
+            index > this.exam10PopupWaypointIndex!
+            && this.finishTrafficLight!.isVehicleInTriggerZone(point)) ?? -1;
+    }
+
+    get hasExam11PopupWaypoint(): boolean {
+        return this.exam11StartIndex >= 0;
+    }
+
     jumpToLesson(lessonId: number, vehicle: Vehicle): boolean {
         const selectingExam06 = lessonId === 6;
         const selectingExam07 = lessonId === 7;
         const selectingExam08 = lessonId === 8;
         const selectingExam09 = lessonId === 9;
         const selectingExam10 = lessonId === 10;
-        const index = selectingExam06 || selectingExam07 || selectingExam08 || selectingExam09 || selectingExam10 ? 4
+        const selectingExam11 = lessonId === 11;
+        const exam11Index = selectingExam11 ? this.exam11StartIndex : -1;
+        const index = selectingExam06 || selectingExam07 || selectingExam08 || selectingExam09 || selectingExam10 || selectingExam11 ? 4
             : this.stops.findIndex(stop => stop.lesson.id === lessonId);
         if (!this.enabled || index < 0 || (selectingExam06
             && (!this.hasSavedExam06Approach || !this.capturedRoute?.length))
             || (selectingExam07 && !this.hasSavedExam07Approach)
             || (selectingExam08 && !this.hasExam08PopupWaypoint)
             || (selectingExam09 && !this.hasExam09PopupWaypoint)
-            || (selectingExam10 && !this.hasExam10PopupWaypoint)) return false;
+            || (selectingExam10 && !this.hasExam10PopupWaypoint)
+            || (selectingExam11 && exam11Index < 0)) return false;
 
         const stop = this.stops[index];
         this.finishRightSignalOn = false;
@@ -257,7 +273,7 @@ export class AutoDriveController {
         this.stopIndex = index;
         this.waypointIndex = 0;
         this.currentSpeed = 0;
-        this.exam05LessonShown = selectingExam06 || selectingExam07 || selectingExam08 || selectingExam09 || selectingExam10;
+        this.exam05LessonShown = selectingExam06 || selectingExam07 || selectingExam08 || selectingExam09 || selectingExam10 || selectingExam11;
         this.exam06ApproachStarted = false;
         this.exam07ApproachStarted = false;
         this.exam08ApproachStarted = false;
@@ -309,14 +325,26 @@ export class AutoDriveController {
             this.exam09ApproachStarted = true;
             vehicle.root.position.copy(pose.position);
             vehicle.root.rotation.set(0, pose.heading, 0);
-        } else if (selectingExam10) {
-            const anchor = this.exam09ApproachRoute![this.exam10PopupWaypointIndex!];
-            this.waypointIndex = this.exam10PopupWaypointIndex! + 1;
+        } else if (selectingExam11) {
+            const pose = this.poseBeforeRouteEnd(
+                this.exam09ApproachRoute!.slice(0, exam11Index + 1),
+                SELECTED_LESSON_APPROACH_M);
+            this.waypointIndex = pose.waypointIndex;
             this.waypointStopKind = 'exam10';
-            this.waypointStopReady = true;
             this.exam09ApproachStarted = true;
-            vehicle.root.position.copy(anchor);
-            vehicle.root.rotation.set(0, this.recordedHeadings.get(anchor)!, 0);
+            this.exam08DirectionChangeCursor = this.exam10DirectionChangeIndices
+                .filter(index => index < pose.waypointIndex).length;
+            vehicle.root.position.copy(pose.position);
+            vehicle.root.rotation.set(0, pose.heading, 0);
+        } else if (selectingExam10) {
+            const pose = this.poseBeforeRouteEnd(
+                this.exam09ApproachRoute!.slice(0, this.exam10PopupWaypointIndex! + 1),
+                SELECTED_LESSON_APPROACH_M);
+            this.waypointIndex = pose.waypointIndex;
+            this.waypointStopKind = 'exam09';
+            this.exam09ApproachStarted = true;
+            vehicle.root.position.copy(pose.position);
+            vehicle.root.rotation.set(0, pose.heading, 0);
         } else if (index === 0) {
             vehicle.root.position.copy(stop.position);
             vehicle.root.position.x -= SELECTED_LESSON_APPROACH_M;
@@ -339,7 +367,6 @@ export class AutoDriveController {
         vehicle.setSignal({ left: false, right: false, hazard: false });
         this.publishLesson(null);
         if (selectingExam06) this.onWaypointStop('exam05');
-        if (selectingExam10) this.onWaypointStop('exam10');
         return true;
     }
 
@@ -478,6 +505,11 @@ export class AutoDriveController {
             return;
         }
         if (!this.enabled || !this.waitingForLesson) return;
+        if (this.exam09ApproachStarted && this.finishRightSignalOn) {
+            this.waitingForLesson = false;
+            this.publishLesson(null);
+            return;
+        }
         this.waitingForLesson = false;
         this.waitingForTrafficLight = false;
         this.trafficGreenCommitted = false;
@@ -700,8 +732,15 @@ export class AutoDriveController {
     ): void {
         const replayExam10 = waypointStopAtEnd === 'routeEnd' && this.waypointStopKind === 'exam10';
         if (replayExam10) {
-            if (this.finishTrafficLight?.isVehicleInTriggerZone(vehicle.root.position)) {
+            if (!this.finishRightSignalOn
+                && this.finishTrafficLight?.isVehicleInTriggerZone(vehicle.root.position)) {
                 this.finishRightSignalOn = true;
+                vehicle.setSignal({ left: false, right: true, hazard: false });
+                this.currentSpeed = 0;
+                vehicle.updateAutomatic(dt, 0, 0);
+                this.waitingForLesson = true;
+                this.publishLesson(EXAM_11_LESSON);
+                return;
             }
             if (this.finishRightSignalOn) {
                 vehicle.setSignal({ left: false, right: true, hazard: false });
@@ -758,6 +797,9 @@ export class AutoDriveController {
         }
         const waitForGreen = lessonStopIndex === undefined
             && trafficStopIndex !== undefined
+            // Later legs can return across the same world coordinate. Only
+            // this approach may wait at the light (including a stopped car).
+            && this.waypointIndex <= trafficStopIndex + 1
             && stopLineWorld !== undefined
             && (frontCoordinate - stopLineWorld) * trafficTravelSign < 0
             && (!light || light.phase !== 'green'

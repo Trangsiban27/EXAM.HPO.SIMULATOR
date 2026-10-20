@@ -14,11 +14,12 @@ import {
     EXAM_08_LESSON,
     EXAM_09_LESSON,
     EXAM_10_LESSON,
+    EXAM_11_LESSON,
     type AutoDriveLesson,
 } from '../game/autoDrive/autoDriveLessons';
 
 const LOCKED_AUTO_DRIVE_LESSONS = [
-    EXAM_06_LESSON, EXAM_07_LESSON, EXAM_08_LESSON, EXAM_09_LESSON, EXAM_10_LESSON,
+    EXAM_06_LESSON, EXAM_07_LESSON, EXAM_08_LESSON, EXAM_09_LESSON, EXAM_10_LESSON, EXAM_11_LESSON,
 ] as const;
 
 function lessonPickerLabel(lesson: AutoDriveLesson): string {
@@ -352,6 +353,11 @@ export class Hud {
         if (option) option.disabled = !available;
     }
 
+    setExam11Selectable(available: boolean): void {
+        const option = this.host.querySelector<HTMLOptionElement>('#lessonSelect option[value="11"]');
+        if (option) option.disabled = !available;
+    }
+
     showWaypointStopPrompt(kind: 'bridge' | 'exam05' | 'exam06' | 'exam07' | 'exam08' | 'exam09' = 'bridge'): void {
         this.el('autoLesson').setAttribute('hidden', '');
         this.el('waypointTitle').textContent = kind === 'exam09' ? 'Xe đã đến lối vào bài 9'
@@ -372,7 +378,7 @@ export class Hud {
                 : 'Bấm “Bắt đầu ghi tuyến”, tự lái liên tục từ cuối cầu qua bài 4 đến gần bài 5 rồi bấm “Lưu tuyến”. Vị trí và hướng xe được ghi mỗi 0,4 m. Điều khiển bằng Enter, số 1/R, Shift, W/↑, A/D và S/↓.';
         (this.el('waypointRouteOutput') as HTMLTextAreaElement).value = '';
         this.el('waypointRouteOutput').setAttribute('hidden', '');
-        this.el('waypointRecordStart').removeAttribute('hidden');
+        this.el('waypointRecordStart').setAttribute('hidden', '');
         this.el('waypointCopy').setAttribute('hidden', '');
         this.el('waypointDone').setAttribute('hidden', '');
         this.el('waypointPrompt').removeAttribute('hidden');
@@ -476,7 +482,7 @@ export class Hud {
         recordButton.textContent = canRecordFromLesson10 ? 'Ghi waypoint mới từ đây' : canRecordFromLesson09
             ? 'Tạo waypoint mới từ đây' : 'Tạo waypoint mới cho bài 9';
         recordButton.dataset.nextLesson = canRecordLesson09 ? '9' : '';
-        recordButton.toggleAttribute('hidden', !canRecordLesson09 && !canRecordFromLesson09 && !canRecordFromLesson10);
+        recordButton.setAttribute('hidden', '');
         continueButton.removeAttribute('hidden');
         continueButton.focus();
     }
