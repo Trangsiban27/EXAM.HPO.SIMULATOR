@@ -134,6 +134,8 @@ this.cameras.attach(this.renderer.domElement);
         this.track.getTrafficLight('EAST'),
         this.track.root.getObjectByName('road-11a-railway-white-line'),
         accelerationPositions,
+        this.track.getTrafficLight('WEST'),
+        this.track.getTrafficLight('SOUTH_EXIT'),
     );
     this.hud.setExam06Selectable(this.autoDrive.hasSavedExam06Approach);
     this.hud.setExam07Selectable(this.autoDrive.hasSavedExam07Approach);
@@ -321,7 +323,9 @@ const inExam04=this.exam04SpeedZone.update(front,rear);
 const inSCurve=this.sCurveSpeedZone.update(front,rear);
 const inParkingBayB=this.parkingBayBSpeedZone.update(wheels);
 const inExam10=this.autoDrive.enabled&&this.autoDrive.currentExamNumber===10;
-this.vehicle.setSpeedLimitKmh(inExam10?EXAM_10_SPEED_LIMIT_KMH:
+this.vehicle.setSpeedLimitKmh(inExam10
+    ? this.autoDrive.isWaypointRecording ? EXAM_10_SPEED_LIMIT_KMH : undefined
+    :
     inParkingBayB?PARKING_BAY_B_SPEED_LIMIT_KMH:
     inExam04||inSCurve?EXAM_04_SPEED_LIMIT_KMH:undefined);
 }

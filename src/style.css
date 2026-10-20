@@ -145,7 +145,7 @@ button:active {
   font-weight: 800;
 }
 .lesson-picker select {
-  max-width: 108px;
+  max-width: 280px;
   padding: 6px 26px 6px 8px;
   color: #eef5ff;
   background: #253444;

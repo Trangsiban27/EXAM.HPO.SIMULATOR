@@ -41,10 +41,10 @@ import {
 /** Positions and dimensions of the examination ground. */
 export function buildExamGround(objects: TrackObjects) {
     const showRoadLaneNumbers = false;
-    const ground=new THREE.Mesh(new THREE.PlaneGeometry(500,500),
-    new THREE.MeshStandardMaterial({color:0x63735a,roughness:1}));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 500),
+        new THREE.MeshStandardMaterial({ color: 0x63735a, roughness: 1 }));
 
-    ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;
+    ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
 
     objects.root.add(ground);
 
@@ -111,7 +111,7 @@ export function buildExamGround(objects: TrackObjects) {
         },
     };
 
-  
+
     // Đoạn đường 2 làn, mỗi làn 3.70 m; chỉnh x/z/góc trực tiếp khi cần.
     // Mép -X của đường kết thúc ngang mép ngoài nhánh road-corner-positive-x.
     const westJunctionRoadX = -13.95;
@@ -129,7 +129,35 @@ export function buildExamGround(objects: TrackObjects) {
         -20.9, 2 * 3.7, finishRoadEastEdgeX - finishRoadWestEdgeX,
         'horizontal', 'none', 'white-dashed', 2,
     );
-   
+    const finishRoadLaneWidthM = 3.7;
+    // Số làn đặt trên đoạn 2 làn phía tiếp cận vạch kết thúc, trước chỗ nối 1/3 làn.
+    const finishRoadLaneNumberWorldX = finishLineX + 10;
+    const finishRoadLaneNumberLocalZ = finishRoad.position.x - finishRoadLaneNumberWorldX;
+    for (const [lane, localX] of [
+        [1, -finishRoadLaneWidthM / 2],
+        [2, finishRoadLaneWidthM / 2],
+    ] as const) {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 128;
+        const context = canvas.getContext('2d');
+        if (!context) continue;
+        context.fillStyle = '#ffffff';
+        context.font = 'bold 88px Arial, sans-serif';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(String(lane), 64, 64);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const label = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.1, 1.1),
+            new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }),
+        );
+        label.name = `lane-number-${lane}`;
+        label.rotation.x = -Math.PI / 2;
+        label.position.set(localX, .09, finishRoadLaneNumberLocalZ);
+        finishRoad.add(label);
+    }
+
     const finishRoadConnectorX = 1.55;
     const finishRoadConnectorZ = -1.41;
     const finishRoadConnectorWidthM = 35.4;
@@ -141,7 +169,7 @@ export function buildExamGround(objects: TrackObjects) {
         z: finishRoadConnectorZ,
         widthM: finishRoadConnectorWidthM,
         lengthM: finishRoadConnectorLengthM,
-        rotationY:  Math.PI / 2 ,
+        rotationY: Math.PI / 2,
         showDebug: false,
         highlight: false,
         showEdges: false,
@@ -168,7 +196,9 @@ export function buildExamGround(objects: TrackObjects) {
     // Giữ đảo rộng 2 m cạnh đường xuất phát. Chừa 0,1 m ở mỗi mép;
     // đầu đảo cách vạch xuất phát 11,17 m và bo gần R1.
     const islandLeftZ = connectorFarZ + CURB_VISUAL_WIDTH_M;
-    const islandRightZ = startRoadLeftEdgeZ - CURB_VISUAL_WIDTH_M;
+    // Mép phải đảo trùng mép startRoad để bó vỉa đầu bo nối thẳng vào lề
+    // trong của startRoad (z 14,5–14,6), không phải dịch ngang 0,1 m gây gãy.
+    const islandRightZ = startRoadLeftEdgeZ;
     const islandRadiusM = (islandRightZ - islandLeftZ) / 2;
     const islandTipX = startRoadEastEdgeX - 11.17;
     const islandCenterX = islandTipX + islandRadiusM;
@@ -254,15 +284,11 @@ export function buildExamGround(objects: TrackObjects) {
             child.position.z = fromZ + keptLengthM / 2;
         }
     }
-    // Dịch mép đảo 0,1 m sang lề startRoad trong 0,8 m, tiếp tuyến ở hai đầu.
-    const islandToStartRoad: Point[] = Array.from({ length: 9 }, (_, index) => {
-        const t = index / 8;
-        const eased = t * t * (3 - 2 * t);
-        return [
-            islandCenterX + startRoadInnerCurbJoinLengthM * t,
-            islandRightZ + CURB_VISUAL_WIDTH_M * eased,
-        ];
-    });
+    // Đầu bo đã tiếp tuyến đúng lề startRoad: nối thẳng 0,8 m tới đầu lề trong.
+    const islandToStartRoad: Point[] = [
+        [islandCenterX, islandRightZ],
+        [islandCenterX + startRoadInnerCurbJoinLengthM, islandRightZ],
+    ];
     const apronKnee: Point = [finishRoadWestEdgeX + 20, startRoadRightEdgeZ];
     // Mép chéo mới bắt đầu từ góc ngoài của finishRoad, uốn theo nét xanh
     // rồi tiếp tuyến với phần cuối của cạnh chéo cũ.
@@ -367,26 +393,42 @@ export function buildExamGround(objects: TrackObjects) {
     grassCutout.receiveShadow = true;
     objects.root.add(grassCutout);
     finishRoadConnector.root.updateMatrixWorld(true);
-    const apronShape = new THREE.Shape(roundedApron.map(([x, z]) => {
+    const toApronLocal = (x: number, z: number) => {
         const local = finishRoadConnector.root.worldToLocal(new THREE.Vector3(x, 0, z));
         return new THREE.Vector2(local.x, -local.z);
-    }));
+    };
+    const apronShape = new THREE.Shape(roundedApron.map(([x, z]) => toApronLocal(x, z)));
+    // Không phủ asphalt sân lên mặt đường xuất phát: polygonOffset của sân
+    // làm vạch đứt giữa làn trước vạch xuất phát lúc ẩn lúc hiện.
+    const startRoadHolePoints = [
+        [startRoadWestEdgeX, startRoadLeftEdgeZ],
+        [startRoadEastEdgeX, startRoadLeftEdgeZ],
+        [startRoadEastEdgeX, startRoadRightEdgeZ],
+        [startRoadWestEdgeX, startRoadRightEdgeZ],
+    ].map(([x, z]) => toApronLocal(x, z));
+    if (Math.sign(THREE.ShapeUtils.area(apronShape.getPoints()))
+        === Math.sign(THREE.ShapeUtils.area(startRoadHolePoints))) {
+        startRoadHolePoints.reverse();
+    }
+    apronShape.holes.push(new THREE.Path(startRoadHolePoints));
     const apronSurface = finishRoadConnector.surfaceGroup.getObjectByName('AsphaltRoad');
     if (!(apronSurface instanceof THREE.Mesh)) throw new Error('Finish road connector surface is missing');
-    const apronGeometry = new THREE.ExtrudeGeometry(apronShape, { depth: 0.08, bevelEnabled: false });
+    // Mặt sân chồng lên finishRoad: chỉ dựng mặt trên để cạnh khối không
+    // tạo một nét tối cắt ngang mặt đường tại đầu đảo cạnh vạch kết thúc.
+    const apronGeometry = new THREE.ShapeGeometry(apronShape);
     apronGeometry.rotateX(-Math.PI / 2);
     apronSurface.geometry.dispose();
     apronSurface.geometry = apronGeometry;
-    apronSurface.position.y = -.019;
+    apronSurface.position.y = .061;
     if (apronSurface.material instanceof THREE.MeshStandardMaterial) {
         apronSurface.material.polygonOffset = true;
         apronSurface.material.polygonOffsetFactor = -1;
         apronSurface.material.polygonOffsetUnits = -1;
     }
- 
+
     // Dải song song: tổng 43.79 m, chia thành 4 đoạn liền nhau.
-   
- 
+
+
     // CAD bài 2A: 14.79 m tiếp cận, vạch trắng, rồi 6.83 m chứa vạch qua đường.
     const crossingRoadX = EXAM_02_ROAD_CENTER_X;
     const crossingRoadZ = 18.2;
@@ -468,7 +510,7 @@ export function buildExamGround(objects: TrackObjects) {
     const wheelTrackApproachRoad = objects.addRoad(
         109.1, -14.65, 7.4, 58.5, 'vertical', 'none', 'white-dashed', 2, Math.PI,
     );
-   
+
 
     // ZONE_04_HILL (4A) — DỪNG VÀ KHỞI HÀNH XE NGANG DỐC
     // Nested courses: each successive entry extends one lane pitch farther
@@ -501,18 +543,18 @@ export function buildExamGround(objects: TrackObjects) {
     });
     // Chuồng vuông góc 1
     const course1 = objects.addWheelTrackCourse({
-        x: 105.4, 
+        x: 105.4,
         z: 1.3,
-         direction: 'horizontal', 
-         entryLength: 10.94,
+        direction: 'horizontal',
+        entryLength: 10.94,
         a: 4.410,
         b: 1.700,
         B1: 0.185,
         entrySvM: 6.62,
-        exitLength:53.8,
+        exitLength: 53.8,
     });
     objects.wheelTrackCourseSensors.push(course1);
-   
+
 
     // Chuồng vuông góc 2
     const course2 = objects.addWheelTrackCourse({
@@ -559,8 +601,10 @@ export function buildExamGround(objects: TrackObjects) {
     const classSignX = course1.entryWorld.x - 2.4;
     const classSignPlacements = [
         { vehicleClass: 'B', z: course1.entryWorld.z - course1.roadWidthM / 2 - 1 },
-        { vehicleClass: 'C', z: (course2.entryWorld.z - course2.roadWidthM / 2
-            + course3.entryWorld.z + course3.roadWidthM / 2) / 2 },
+        {
+            vehicleClass: 'C', z: (course2.entryWorld.z - course2.roadWidthM / 2
+                + course3.entryWorld.z + course3.roadWidthM / 2) / 2
+        },
         { vehicleClass: 'D', z: course3.entryWorld.z - course3.roadWidthM / 2 - 1 },
         { vehicleClass: 'E', z: course4.entryWorld.z - course4.roadWidthM / 2 - 1 },
     ] as const;
@@ -640,7 +684,7 @@ export function buildExamGround(objects: TrackObjects) {
     // Một object gồm hai section nối liền: 3 làn chuyển thành 1 làn.
     // section 1 nằm ở làn thứ 3 (phía phải) của section 3 làn.
     const wheelTrackExitRoad = objects.addFourLaneRoad({
-        withLaneNumbers: showRoadLaneNumbers,
+        withLaneNumbers: true,
         x: 19.4,
         z: -17.4,
         lengthM: 42,
@@ -649,7 +693,8 @@ export function buildExamGround(objects: TrackObjects) {
         withLaneMarkings: false,
         sectionAlignment: 'right',
         sections: [
-            { lengthM: 25, laneCount: 3 },
+            // Tâm section 3 làn trùng mép bắc đường 4 làn; lệch +Z để số nằm trên mặt đường.
+            { lengthM: 25, laneCount: 3, laneNumberOffsetM: 6.5 },
             { lengthM: 34.5, laneCount: 1 },
         ],
     });
@@ -689,7 +734,7 @@ export function buildExamGround(objects: TrackObjects) {
     // Mặt bảng quay về +X để xe chạy hướng -X nhìn thấy.
     const finishSign = new AccelerationInstructionSign(
         finishArrowX + 1,
-        finishRoad.position.z -4.5,
+        finishRoad.position.z - 4.5,
         Math.PI / 2,
         { lines: ['KẾT THÚC'], name: 'EX11_FINISH_SIGN' },
     );
@@ -777,7 +822,7 @@ export function buildExamGround(objects: TrackObjects) {
             (minX + maxX) / 2, 0, road.position.z,
         )).z;
     };
-    const stopBarLeftX = hatchEdgeXAt(exam05StopBarZ) ;
+    const stopBarLeftX = hatchEdgeXAt(exam05StopBarZ);
     const stopBarNearZ = exam05StopBarZ + exam05StopBarWidthM / 2;
     const stopBarFarZ = exam05StopBarZ - exam05StopBarWidthM / 2;
 
@@ -841,7 +886,7 @@ export function buildExamGround(objects: TrackObjects) {
         + stopBarCurbOverlapM;
     // Cụm đèn hướng bắc của eastJunctionRoad (objects.addRoad).
     const eastStopBarToCrosswalkM = exam05StopBarToCrosswalkM;
-    const eastLightToCrosswalkM = exam05LightToCrosswalkM ;
+    const eastLightToCrosswalkM = exam05LightToCrosswalkM;
     const eastYellowToLightM = exam05YellowToLightM;
     const eastTriggerToYellowM = exam05TriggerToYellowM;
     const eastTriggerLengthM = exam05TriggerLengthM;
@@ -859,8 +904,10 @@ export function buildExamGround(objects: TrackObjects) {
     const eastStopBarGeometry = new THREE.ShapeGeometry(eastStopBarShape);
     eastStopBarGeometry.rotateX(-Math.PI / 2);
     const eastStopBar = new THREE.Mesh(eastStopBarGeometry,
-        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .7,
-            side: THREE.DoubleSide }));
+        new THREE.MeshStandardMaterial({
+            color: 0xffffff, roughness: .7,
+            side: THREE.DoubleSide
+        }));
     eastStopBar.name = 'exam-05-east-stop-bar';
     eastStopBar.position.y = .095;
     eastStopBar.receiveShadow = true;
@@ -871,24 +918,24 @@ export function buildExamGround(objects: TrackObjects) {
     const eastLocalLaneX = eastJunctionRoadZ - eastIncomingLaneZ;
     objects.addTrafficLight(eastLightX, eastJunctionRoadZ, 2 * eastJunctionLaneWidthM,
         Math.PI / 2, {
-            poleOffsetX: 2 * eastJunctionLaneWidthM + 1.1,
-            realisticHead: true,
-            stopLineZ: eastYellowToLightM,
-            stopLineX: eastLocalLaneX,
-            stopLineLength: eastLaneMarkingLengthM,
-            stopLineDashed: true,
-            triggerStart: eastYellowToLightM + eastTriggerToYellowM,
-            triggerLength: eastTriggerLengthM,
-            triggerStartX: eastLocalLaneX - eastLaneMarkingLengthM / 2,
-            triggerLengthX: eastLaneMarkingLengthM,
-            showTriggerZone: false,
-            markerId: 'EAST',
-        });
+        poleOffsetX: 2 * eastJunctionLaneWidthM + 1.1,
+        realisticHead: true,
+        stopLineZ: eastYellowToLightM,
+        stopLineX: eastLocalLaneX,
+        stopLineLength: eastLaneMarkingLengthM,
+        stopLineDashed: true,
+        triggerStart: eastYellowToLightM + eastTriggerToYellowM,
+        triggerLength: eastTriggerLengthM,
+        triggerStartX: eastLocalLaneX - eastLaneMarkingLengthM / 2,
+        triggerLengthX: eastLaneMarkingLengthM,
+        showTriggerZone: false,
+        markerId: 'EAST',
+    });
     trimYellowDividerAtStopBar(
         eastJunctionRoad, 'road-center-line', eastStopBarX, -1, .08,
     );
     objects.root.add(new Exam05JunctionSigns(
-        eastLightX + eastYellowToLightM ,
+        eastLightX + eastYellowToLightM,
         eastJunctionRoadZ - eastJunctionLaneWidthM - .7,
         Math.PI / 2,
     ).root);
@@ -897,7 +944,7 @@ export function buildExamGround(objects: TrackObjects) {
         if (arrow instanceof THREE.Mesh && arrow.geometry instanceof THREE.PlaneGeometry
             && arrow.position.x < 0) arrow.position.z = -0.2;
     }
-     // ============================================================
+    // ============================================================
     // FOUR-LANE BIDIRECTIONAL ROAD — đường 4 làn hai chiều
     // Theo spec/road/road_4lane_bidirectional_spec.md
     // Layout: L1 ↓ | WHITE_DASHED | L2 ↓ | YELLOW_SOLID | L3 ↑ | WHITE_DASHED | L4 ↑
@@ -909,8 +956,8 @@ export function buildExamGround(objects: TrackObjects) {
         lengthM: westJunctionRoadLengthM,
         laneWidthM: westJunctionLaneWidthM,
         rotationY: Math.PI / 2,
-        withLaneNumbers: showRoadLaneNumbers,
-        withPositiveXCornerLaneNumbers: showRoadLaneNumbers,
+        withLaneNumbers: true,
+        withPositiveXCornerLaneNumbers: true,
         positiveXCornerInnerArrowType: 'diagonal-right',
         // Road xoay +90°: local +X 8 m tương ứng world -Z 8 m so với vị trí gốc.
         positiveXCornerInnerArrowShiftXM: 8,
@@ -966,20 +1013,21 @@ export function buildExamGround(objects: TrackObjects) {
     const westLocalLaneX = westIncomingLaneZ - westRoadCenterZ;
     objects.addTrafficLight(westLightX, westRoadCenterZ, westJunctionRoad.widthM,
         -Math.PI / 2, {
-            poleOffsetX: westJunctionRoad.widthM + 2,
-            poleOffsetZ: -2, // Góc xoay -90°: local -Z dịch riêng cột và đầu đèn về world +X.
-            realisticHead: true,
-            stopLineZ: westYellowToLightM,
-            stopLineX: westLocalLaneX,
-            stopLineLength: westLaneMarkingLengthM,
-            stopLineDashed: true,
-            triggerStart: westYellowToLightM + westTriggerToYellowM,
-            triggerLength: westTriggerLengthM,
-            triggerStartX: westLocalLaneX - westLaneMarkingLengthM / 2,
-            triggerLengthX: westLaneMarkingLengthM,
-            showTriggerZone: false,
-            markerId: 'WEST',
-        });
+        poleOffsetX: westJunctionRoad.widthM + 2,
+        poleOffsetZ: -2, // Góc xoay -90°: local -Z dịch riêng cột và đầu đèn về world +X.
+        realisticHead: true,
+        stopLineZ: westYellowToLightM,
+        stopLineX: westLocalLaneX,
+        stopLineLength: westLaneMarkingLengthM,
+        stopLineDashed: true,
+        triggerStart: westYellowToLightM + westTriggerToYellowM,
+        triggerLength: westTriggerLengthM,
+        triggerStartX: westLocalLaneX - westLaneMarkingLengthM / 2,
+        triggerLengthX: westLaneMarkingLengthM,
+        showTriggerZone: false,
+        markerId: 'WEST',
+        alwaysGreen: true,
+    });
     // Hai vạch trắng dọc dừng trước vạch vàng đứt, không kéo tiếp tới stopbar/vạch qua đường.
     // Đèn xoay -90° nên vạch vàng nằm tại world X = westLightX - stopLineZ.
     const westWhiteDashEndX = westLightX - westYellowToLightM - .09;
@@ -1006,7 +1054,7 @@ export function buildExamGround(objects: TrackObjects) {
         westJunctionRoad.root, 'yellow-solid-center', westStopBarX, 1,
     );
     objects.root.add(new Exam05JunctionSigns(
-        westLightX - westYellowToLightM +2,
+        westLightX - westYellowToLightM + 2,
         westJunctionRoad.root.position.z + westJunctionRoad.widthM / 2 + .7,
         -Math.PI / 2,
         'right',
@@ -1047,7 +1095,7 @@ export function buildExamGround(objects: TrackObjects) {
         EXAM_05_FINISH_CROSSWALK_WIDTH_M,
         EXAM_05_FINISH_CROSSWALK_DEPTH_M,
     );
-    
+
     // Pole luôn lệch local -X (TrafficLight.ts: poleX = -width/2 - 0.55).
     // Đường dọc NS trải X ∈ [17, 25]; đường ngang EW trải Z ∈ [-46, -38].
     // Pole phải nằm ngoài lane; panel chính hướng về chiều xe đến.
@@ -1082,7 +1130,7 @@ export function buildExamGround(objects: TrackObjects) {
             - CURB_VISUAL_WIDTH_M * blend;
     };
     const southTriggerRightX = apronCurbRoadEdgeXAt(southTriggerStartWorldZ + southTriggerLengthM);
-   //đèn hướng đông
+    //đèn hướng đông
     objects.addTrafficLight(southLightX, southLightZ, 8, 0, {
         poleOffsetX: .7,
         realisticHead: true,
@@ -1112,7 +1160,7 @@ export function buildExamGround(objects: TrackObjects) {
     // Cụm biển nằm trong phần cỏ bo R7,5 cạnh đèn tín hiệu, tại vùng khoanh bài 5.
     // Giữ khoảng lùi khỏi cả mép cong và cột đèn; mặt biển hướng về xe từ phía nam.
     objects.root.add(new Exam05JunctionSigns(
-        eastCornerCenterX -6,
+        eastCornerCenterX - 6,
         eastCornerCenterZ - 1.2,
     ).root);
     // Tâm vạch qua đường ở Z=-51 là mốc kết thúc bài 5; cảm biến logic không vẽ lên đường.
@@ -1153,7 +1201,7 @@ export function buildExamGround(objects: TrackObjects) {
         southLaneWidthM, southRoadLengthM,
     );
     objects.addDiagonalTurnRoadArrow(
-        southLowerArrowX, southLowerArrowZ +5,
+        southLowerArrowX, southLowerArrowZ + 5,
         southLaneWidthM, southRoadLengthM, 'left', true,
     );
     // Theo bản vẽ, stopbar nằm ở làn trái đi về +Z, phía -Z của vạch qua đường.
@@ -1176,7 +1224,7 @@ export function buildExamGround(objects: TrackObjects) {
     objects.root.add(southStopBar);
     // Cụm W.202a, W.205a, R.301e đặt ngoài lề phải và quay về hướng -Z.
     const southRightShoulderOffsetM = -8.5;
-    const southSignApproachOffsetM =1;
+    const southSignApproachOffsetM = 1;
     const southTurnSignX = southRoadX + southRoadWidthM / 2 + southRightShoulderOffsetM;
     const southTurnSignZ = southStopBar.position.z - southSignApproachOffsetM - 1;
     objects.root.add(new Exam05TurnJunctionSigns(southTurnSignX, southTurnSignZ).root);
@@ -1187,7 +1235,7 @@ export function buildExamGround(objects: TrackObjects) {
     const southSideLightWidthM = 8;
     const southSideLightPoleOffsetX = .7;
     const southSideLightPoleLocalX = -southSideLightWidthM / 2 - .55 + southSideLightPoleOffsetX;
-    const southSideLightX = southTurnSignX - Math.abs(southSideLightPoleLocalX)-0.8;
+    const southSideLightX = southTurnSignX - Math.abs(southSideLightPoleLocalX) - 0.8;
     const southSideLightZ = EXAM_05_FINISH_CROSSWALK_Z - exam05LightToCrosswalkM;
     // Cùng chuỗi khoảng cách với đèn ở vạch qua đường phía bắc.
     const southSideLightStopLineZ = exam05YellowToLightM;
@@ -1383,8 +1431,8 @@ export function buildExamGround(objects: TrackObjects) {
     yellowTipJoin.position.set(southRoadX, .088, herringboneTipZ);
     objects.root.add(yellowTipJoin);
 
-//đường 5 lane cho bài tăng tốc
-   
+    //đường 5 lane cho bài tăng tốc
+
     // Đoạn 6 làn đặt liền về phía +Z, không chồng lên đoạn 5 làn.
     // 6A theo CAD: mép trái thẳng tại z = -112.05 (nối tiếp mép ngoài 8A), x từ 22.4 tới 70.6.
     // Làn 12A ngoài cùng bên trái đi ngược chiều, ngăn bằng vạch liền; phía đảo chuồng
@@ -1517,16 +1565,16 @@ export function buildExamGround(objects: TrackObjects) {
         direction: 'straight' | 'turn' | 'diagonal-right';
         offsetXM?: number;
     }> = [
-        { sectionIndex: 0, laneNumber: 2, direction: 'diagonal-right', offsetXM: +6 },
-        { sectionIndex: 0, laneNumber: 3, direction: 'diagonal-right', offsetXM: +6 },
-        { sectionIndex: 0, laneNumber: 2, direction: 'straight', offsetXM: -6 },
-        { sectionIndex: 0, laneNumber: 3, direction: 'straight' ,offsetXM: -6},
-        { sectionIndex: 1, laneNumber: 4, direction: 'straight' ,offsetXM: -1.5},
-        { sectionIndex: 1, laneNumber: 3, direction: 'straight', offsetXM: -1.5},
-         { sectionIndex: 1, laneNumber: 1, direction: 'turn' ,offsetXM: +11},
-        { sectionIndex: 1, laneNumber: 1, direction: 'turn' ,offsetXM: -1},
-        { sectionIndex: 2, laneNumber: 2, direction: 'turn' ,offsetXM: +3},
-    ];
+            { sectionIndex: 0, laneNumber: 2, direction: 'diagonal-right', offsetXM: +6 },
+            { sectionIndex: 0, laneNumber: 3, direction: 'diagonal-right', offsetXM: +6 },
+            { sectionIndex: 0, laneNumber: 2, direction: 'straight', offsetXM: -6 },
+            { sectionIndex: 0, laneNumber: 3, direction: 'straight', offsetXM: -6 },
+            { sectionIndex: 1, laneNumber: 4, direction: 'straight', offsetXM: -1.5 },
+            { sectionIndex: 1, laneNumber: 3, direction: 'straight', offsetXM: -1.5 },
+            { sectionIndex: 1, laneNumber: 1, direction: 'turn', offsetXM: +11 },
+            { sectionIndex: 1, laneNumber: 1, direction: 'turn', offsetXM: -1 },
+            { sectionIndex: 2, laneNumber: 2, direction: 'turn', offsetXM: +3 },
+        ];
     sixAFourLaneRoad.root.updateMatrixWorld(true);
     for (const { sectionIndex, laneNumber, direction, offsetXM = 0 } of sCourseApproachArrows) {
         const section = sixAFourLaneRoad.footprints[sectionIndex];
@@ -1822,7 +1870,7 @@ export function buildExamGround(objects: TrackObjects) {
             const dz = after.y - before.y;
             const length = Math.hypot(dx, dz);
             return [point.x - side * dz / length * halfWidthM,
-                point.y + side * dx / length * halfWidthM] as [number, number];
+            point.y + side * dx / length * halfWidthM] as [number, number];
         });
         const borderGeometry = new THREE.ShapeGeometry(road11AFilletShape([
             ...borderSide(1), ...borderSide(-1).reverse(),
@@ -2025,7 +2073,7 @@ export function buildExamGround(objects: TrackObjects) {
     // Làn ngoài cùng bên phải, giữa vạch vàng và mép đường: đặt mũi tên
     // rẽ trái cùng kiểu lối ra bài 05 gần điểm chuyển sang cung trắng đứt.
     const outerRightLeftTurnArrow = objects.addDiagonalTurnRoadArrow(
-        markingTransitionX +1,
+        markingTransitionX + 1,
         threeLaneRoadZ + eastJunctionLaneWidthM,
         eastJunctionLaneWidthM,
         threeLaneRoadEndX - threeLaneRoadStartX,
@@ -2118,7 +2166,7 @@ export function buildExamGround(objects: TrackObjects) {
         new THREE.MeshStandardMaterial({ color, roughness: .85 }));
     // Đặt tâm hai dải curb trùng tâm các curb thẳng ở mép đường 3 làn và chuồng E.
     for (const edgeZ of [eIslandSouthZ - CURB_VISUAL_WIDTH_M / 2,
-        eIslandNorthZ - CURB_VISUAL_WIDTH_M / 2]) {
+    eIslandNorthZ - CURB_VISUAL_WIDTH_M / 2]) {
         for (let x = eIslandStartX, stripe = 0; x < eIslandEndX - .0001; stripe++) {
             const lengthM = Math.min(.8, eIslandEndX - x);
             const curb = new THREE.Mesh(
@@ -2238,7 +2286,7 @@ export function buildExamGround(objects: TrackObjects) {
         bLeftCornerRadiusM, 'east', 'south', 0, .10);
     windingCourseB.course.trimExitOuterCurbAtWorldPoint(bOuterCurbTangent);
     objects.addRoadJunctionCorner(bExitLeftX, eastJunctionSouthZ, 5, 'west', 'south', 0, .10);
-   
+
     // Hạng C — THACO OLLIN450A (b = 2.240 m → width = 4.928 m)
     const windingCourseC = objects.addWindingCourse({
         x: 43.5, z: -93.55, entryLength: 25.05, exitLength: 10, vehicleClass: 'C', withArrows: false,
@@ -2261,11 +2309,11 @@ export function buildExamGround(objects: TrackObjects) {
         x: 80.4,
         z: -59,
         widthM: 5.90,
-        lengthM:20
+        lengthM: 20
         ,
         curbWidthM: 0.10,
         curbPlacement: 'inside',
-        rotationY: Math.PI /2 ,
+        rotationY: Math.PI / 2,
         showDebug: false,
         highlight: false,
         showEdges: true,
@@ -2282,18 +2330,18 @@ export function buildExamGround(objects: TrackObjects) {
         eExitLeftX, threeLaneRoadSouthEdgeZ, 1, 'east', 'south', 0, .10);
     objects.addRoadJunctionCorner(
         eExitRightX, threeLaneRoadSouthEdgeZ, 4, 'west', 'south', 0, .10);
-   
+
     // Hạng E — COUTY HD29 E3 (b = 2.080 m → width = 4.576 m)
     const windingCourseE = objects.addWindingCourse({
         x: 53.4,
-        z: -82.4    ,
+        z: -82.4,
         entryLength: 0,
         exitLength: 0,
         vehicleClass: 'E',
         withArrows: false,
         rotationY: Math.PI / 2 + THREE.MathUtils.degToRad(-2),
     });
-  
+
     // Lối vào E rộng 5,90 m: mép trái nối đảo C/E, mép phải bo R4 vào đảo E/D.
     const eEntryRotationY = windingCourseE.course.root.rotation.y;
     const eEntryDirection = new THREE.Vector3(
@@ -2415,7 +2463,7 @@ export function buildExamGround(objects: TrackObjects) {
     // Hạng D — COUTY HD29 E3 (b = 2.080 m → width = 4.576 m)
     const dRotationY = Math.PI / 2;
     const windingCourseD = objects.addWindingCourse({
-        x: 65.5+1.5,
+        x: 65.5 + 1.5,
         z: -91,
         entryLength: 0,
         exitLength: 0,
@@ -2527,7 +2575,7 @@ export function buildExamGround(objects: TrackObjects) {
     const sCourseSignPositions = [
         {
             vehicleClass: 'B',
-            x: (southRoadX + southRoadWidthM / 2 + bEntryLeftX +3.5) / 2,
+            x: (southRoadX + southRoadWidthM / 2 + bEntryLeftX + 3.5) / 2,
             z: sixANorthEdgeZ + 2.9,
         },
         {
@@ -2537,12 +2585,12 @@ export function buildExamGround(objects: TrackObjects) {
         },
         {
             vehicleClass: 'E',
-            x: (cEntryRightX + eLowerAtFiveLaneEdge.x) / 2 +0.5 ,
+            x: (cEntryRightX + eLowerAtFiveLaneEdge.x) / 2 + 0.5,
             z: sixAFiveLaneEdgeZ + 1,
         },
         {
             vehicleClass: 'D',
-            x: (eSidePointAtZ(1, sixAFourLaneEdgeZ).x + dEntryPoint.x - dEntryEndLowerWidthM) / 2 +2,
+            x: (eSidePointAtZ(1, sixAFourLaneEdgeZ).x + dEntryPoint.x - dEntryEndLowerWidthM) / 2 + 2,
             z: sixAFourLaneEdgeZ + 1
             ,
         },
@@ -2557,11 +2605,13 @@ export function buildExamGround(objects: TrackObjects) {
     // Chữ vàng ở đầu đường vào từng chuồng S, đầu chữ hướng +X để đứng thẳng trong góc nhìn dọc đường 6A.
     const sCourseEntryLabelInsetM = 2.3;
     const sCourseEntryLabels = [
-        { letter: 'B', x: (bEntryLeftX + bEntryRightX) / 2 -0.8, z: sixANorthEdgeZ + sCourseEntryLabelInsetM -5},
-        { letter: 'C1', x: (cEntryLeftX + cEntryRightX) / 2, z: sixAFiveLaneNorthEdgeZ + sCourseEntryLabelInsetM-2 },
-        { letter: 'E', x: eSidePointAtZ(0, sixAFiveLaneEdgeZ + sCourseEntryLabelInsetM).x -1,
-            z: sixAFiveLaneEdgeZ + sCourseEntryLabelInsetM -3 },
-        { letter: 'D', x: dEntryPoint.x, z: sixAFourLaneEdgeZ + sCourseEntryLabelInsetM -5},
+        { letter: 'B', x: (bEntryLeftX + bEntryRightX) / 2 - 0.8, z: sixANorthEdgeZ + sCourseEntryLabelInsetM - 5 },
+        { letter: 'C1', x: (cEntryLeftX + cEntryRightX) / 2, z: sixAFiveLaneNorthEdgeZ + sCourseEntryLabelInsetM - 2 },
+        {
+            letter: 'E', x: eSidePointAtZ(0, sixAFiveLaneEdgeZ + sCourseEntryLabelInsetM).x - 1,
+            z: sixAFiveLaneEdgeZ + sCourseEntryLabelInsetM - 3
+        },
+        { letter: 'D', x: dEntryPoint.x, z: sixAFourLaneEdgeZ + sCourseEntryLabelInsetM - 5 },
     ] as const;
     for (const { letter, x, z } of sCourseEntryLabels) {
         const canvas = document.createElement('canvas');
@@ -2599,7 +2649,7 @@ export function buildExamGround(objects: TrackObjects) {
     const dExitEndLowerWidthM = 2.488; // góc dưới bên phải
     const dExitLengthM = 30; // chiều dài tổng của connector
     const dExitConnector = objects.addRoadStraight955({
-        x: dExitCenterX +1.5,
+        x: dExitCenterX + 1.5,
         z: dExitCenterZ,
         widthM: 4.98,
         lengthM: dExitLengthM,
@@ -2674,7 +2724,7 @@ export function buildExamGround(objects: TrackObjects) {
         },
         {
             bay: objects.addParallelParkingBayB({
-                x: westBay2X , z: westBayRoadEdgeZ, rotationY: -Math.PI / 2,
+                x: westBay2X, z: westBayRoadEdgeZ, rotationY: -Math.PI / 2,
                 cornerRadiusM: 0.3, vehicleClass: 'B',
                 ...westBayEntranceMarkings,
             }),
@@ -2821,8 +2871,8 @@ export function buildExamGround(objects: TrackObjects) {
     };
     const firstPerpendicularCBay = objects.addPerpendicularParkingBayC({
         x: 0,
-        z:-66.78,
-        rotationY:-Math.PI / 2,
+        z: -66.78,
+        rotationY: -Math.PI / 2,
         capEnd: false,
         mainRoadBottomRadiusM: 1,
         parkingBottomRadiusM: 0.5,
@@ -2878,10 +2928,10 @@ export function buildExamGround(objects: TrackObjects) {
     const secondPerpendicularCBay = objects.addPerpendicularParkingBayC({
         x: -21,
         z: -77.6,
-        rotationY:-Math.PI / 2,       
+        rotationY: -Math.PI / 2,
         capEnd: false,
-         showDebug: false,
-                 mainRoadBottomRadiusM: 1,
+        showDebug: false,
+        mainRoadBottomRadiusM: 1,
         parkingBottomRadiusM: 0.5,
     });
     addPerpendicularBaySign(secondPerpendicularCBay, 'C', 'second-perpendicular-c-parking-sign', {
@@ -2899,10 +2949,10 @@ export function buildExamGround(objects: TrackObjects) {
         x: -28,
         z: -67.3,
         capEnd: false,
-        rotationY:-Math.PI / 2,         showDebug: false,
+        rotationY: -Math.PI / 2, showDebug: false,
     });
     addPerpendicularBaySign(firstPerpendicularBBay, 'B', 'first-perpendicular-b-parking-sign', {
-        sign: { x: 12.8, y: 0, z: -1},
+        sign: { x: 12.8, y: 0, z: -1 },
         pBoard: { x: 0, y: 0, z: 0 },
         classBoard: { x: 0, y: 0, z: 0 },
     });
@@ -2914,7 +2964,7 @@ export function buildExamGround(objects: TrackObjects) {
         x: -41.1,
         z: -67.3,
         capEnd: false,
-        rotationY:-Math.PI / 2,         showDebug: false,
+        rotationY: -Math.PI / 2, showDebug: false,
     });
     addPerpendicularBaySign(secondPerpendicularBBay, 'B', 'second-perpendicular-b-parking-sign', {
         sign: { x: 12.5, y: 0, z: 0 },
@@ -2929,7 +2979,7 @@ export function buildExamGround(objects: TrackObjects) {
         x: 9.4,
         z: -85.8,
         capEnd: false,
-        rotationY: Math.PI / 2,         showDebug: false,
+        rotationY: Math.PI / 2, showDebug: false,
     });
     addPerpendicularBaySign(firstSouthPerpendicularBBay, 'B', 'first-south-perpendicular-b-parking-sign', {
         sign: { x: 5.8, y: 0, z: -9 },
@@ -2993,7 +3043,7 @@ export function buildExamGround(objects: TrackObjects) {
         x: -3.8,
         z: -85.8,
         capEnd: false,
-        rotationY: Math.PI / 2,         showDebug: false,
+        rotationY: Math.PI / 2, showDebug: false,
     });
     addPerpendicularBaySign(secondSouthPerpendicularBBay, 'B', 'second-south-perpendicular-b-parking-sign', {
         sign: { x: 6, y: 0, z: -10 },
@@ -3097,8 +3147,8 @@ export function buildExamGround(objects: TrackObjects) {
     addPerpendicularConnectorClassLabel(secondSouthPerpendicularBConnector, 'B', 'second-south-perpendicular-b-road-label');
     const southParallelParkingBayD = objects.addParallelParkingBayB({
         x: -52.1,
-        z: -59,  
-        rotationY: 0,        cornerRadiusM: 0.3,
+        z: -59,
+        rotationY: 0, cornerRadiusM: 0.3,
         vehicleClass: 'D',
         examBoundaryWidthM: 0.05,
         examBoundaryStartM: 0,
@@ -3119,9 +3169,9 @@ export function buildExamGround(objects: TrackObjects) {
         withLaneNumbers: showRoadLaneNumbers,
         // distanceM đo từ đầu segmentIndex (mặc định đoạn chéo 1); shiftWorldXM/ZM theo tọa độ sân.
         lane4Arrows: [
-            { type: 'straight-right', distanceM:13 , shiftWorldXM: 0, shiftWorldZM: 0 },
-            { type: 'straight-right', distanceM:47, shiftWorldXM: 0, shiftWorldZM: 0 },
-                   { type: 'straight-right', distanceM:47, shiftWorldXM: 0, shiftWorldZM: 0 },
+            { type: 'straight-right', distanceM: 13, shiftWorldXM: 0, shiftWorldZM: 0 },
+            { type: 'straight-right', distanceM: 47, shiftWorldXM: 0, shiftWorldZM: 0 },
+            { type: 'straight-right', distanceM: 47, shiftWorldXM: 0, shiftWorldZM: 0 },
             // Trước lối vào chuồng B phía +X trên đoạn 8A.
             { type: 'straight-right', segmentIndex: 2, distanceM: 7, shiftWorldXM: 0, shiftWorldZM: 0 },
             { type: 'diagonal-right', segmentIndex: 2, distanceM: 19, shiftWorldXM: 0, shiftWorldZM: 0 },

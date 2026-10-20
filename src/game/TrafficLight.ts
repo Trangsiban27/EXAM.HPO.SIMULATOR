@@ -33,6 +33,8 @@ export interface TrafficLightOptions {
     realisticHead?: boolean;
     /** Marker ID surfaced to {@link TrafficLight.onMarkerTriggered} (e.g. `'A'`, `'START'`). Default `undefined`. */
     markerId?: string;
+    /** Giữ đèn xanh suốt, không chờ trigger và không quay lại đỏ. */
+    alwaysGreen?: boolean;
 }
 
 /** Vehicle-triggered signal. Local -Z points toward the intersection. */
@@ -56,6 +58,7 @@ export class TrafficLight {
     private readonly triggerLengthX: number | any;
     private readonly triggerMaxXAtZ?: (localZ: number) => number;
     private readonly realisticHead: boolean;
+    private readonly alwaysGreen: boolean;
     /** Length of the yellow stop line along local X (matches the box() drawn in the constructor). */
     readonly stopLineLength: number;
     /** Optional callback fired the first time a vehicle enters the trigger zone. Receives the marker ID. */
@@ -123,6 +126,7 @@ export class TrafficLight {
         this.triggerLengthX = options.triggerLengthX ?? (this.stopLineHalfWidth * 2);
         this.triggerMaxXAtZ = options.triggerMaxXAtZ;
         this.realisticHead = options.realisticHead ?? false;
+        this.alwaysGreen = options.alwaysGreen ?? false;
         if (this.realisticHead) {
             this.green.color.setHex(0x124943);
             this.green.emissive.setHex(0x19ffe1);
@@ -272,22 +276,32 @@ export class TrafficLight {
         }
 
         this.refresh();
+        if (this.alwaysGreen) this.goGreenNow();
+    }
+
+    /** Query the sensor footprint independently of the current light phase. */
+    isVehicleInTriggerZone(vehiclePosition: THREE.Vector3): boolean {
+        this.root.updateWorldMatrix(true, false);
+        this.probe.copy(vehiclePosition);
+        this.root.worldToLocal(this.probe);
+        return this.probe.x >= this.triggerStartX
+            && this.probe.x < (this.triggerMaxXAtZ?.(this.probe.z)
+                ?? this.triggerStartX + this.triggerLengthX)
+            && this.probe.z >= this.triggerStart
+            && this.probe.z < this.triggerStart + this.triggerLength;
     }
 
     update(dt: number, vehiclePosition: THREE.Vector3) {
+        if (this.alwaysGreen) {
+            this.goGreenNow();
+            return;
+        }
         if (!this.active) {
-            this.root.updateWorldMatrix(true, false);
-            this.probe.copy(vehiclePosition);
-            this.root.worldToLocal(this.probe);
             // Trigger zone is a 2D rectangle in local XZ. X extent comes from
             // triggerStartX/triggerLengthX (defaults mirror the yellow stop line);
             // Z extent comes from triggerStart/triggerLength. Caller can shrink
             // either axis for non-rectangular detection footprints.
-            if (this.probe.x >= this.triggerStartX
-                && this.probe.x < (this.triggerMaxXAtZ?.(this.probe.z)
-                    ?? this.triggerStartX + this.triggerLengthX)
-                && this.probe.z >= this.triggerStart
-                && this.probe.z < this.triggerStart + this.triggerLength) {
+            if (this.isVehicleInTriggerZone(vehiclePosition)) {
                 this.active = true;
                 this.elapsed = 0;
                 if (this.markerId) this.onMarkerTriggered?.(this.markerId);
@@ -299,6 +313,10 @@ export class TrafficLight {
     }
 
     reset() {
+        if (this.alwaysGreen) {
+            this.goGreenNow();
+            return;
+        }
         this.active = false;
         this.elapsed = 0;
         this.refresh();

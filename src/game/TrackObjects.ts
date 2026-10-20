@@ -50,9 +50,9 @@ export type WindingCourseEntry = {
     /** Length of the straight exit road segment that follows the winding course. */
     _exitLength: number;
 };
-export class TrackObjects{
-    readonly root=new THREE.Group();
-    readonly penaltyZones:THREE.Box3[]=[];
+export class TrackObjects {
+    readonly root = new THREE.Group();
+    readonly penaltyZones: THREE.Box3[] = [];
     /** Các đoạn vạch trong cùng một chuồng S dùng chung thời gian chờ báo lỗi. */
     readonly penaltyZoneGroupIndices: number[] = [];
     private readonly bridges: Bridge[] = [];
@@ -214,7 +214,7 @@ export class TrackObjects{
                     const offset = -CURB_VISUAL_WIDTH_M / 2 * (1 - side);
                     roadSide.push([x + normalX * offset, z + normalZ * offset]);
                     grassSide.push([x + normalX * (offset + CURB_VISUAL_WIDTH_M),
-                        z + normalZ * (offset + CURB_VISUAL_WIDTH_M)]);
+                    z + normalZ * (offset + CURB_VISUAL_WIDTH_M)]);
                 });
                 const outline = roadSide.concat(grassSide.reverse());
                 const geometry = new THREE.ExtrudeGeometry(shape(outline), {
@@ -430,14 +430,19 @@ export class TrackObjects{
             return [centerX + radius * Math.cos(angle), centerZ + radius * Math.sin(angle)];
         };
         const arc = Array.from({ length: 33 }, (_, i) => arcPoint(i / 32, radiusM));
-        addGrass([[leftX, exitTopZ], ...arc, [leftX, centerZ]]);
-        // The one-lane road ends slightly past the exit curb; cover that thin strip.
-        if (roadTopZ > exitTopZ) {
-            addGrass([
-                [leftX, exitTopZ], [rightX, exitTopZ],
-                [rightX, roadTopZ], [leftX, roadTopZ],
-            ]);
-        }
+        // Một miếng cỏ duy nhất che góc vuông thừa của mặt đường section 1 làn
+        // (BoxGeometry cao -0,02..0,06). Miếng cỏ lấn ra ngoài mép hộp asphalt
+        // một khoảng để che luôn thành đứng của hộp — nếu không, khi nhìn xiên
+        // thành hộp lộ ra thành nét đen hình chữ L quanh góc bo.
+        const wallCoverM = .3;
+        const coverTopZ = Math.max(roadTopZ, exitTopZ) + wallCoverM;
+        addGrass([
+            [leftX - wallCoverM, centerZ],
+            [leftX - wallCoverM, coverTopZ],
+            [rightX + wallCoverM, coverTopZ],
+            [rightX + wallCoverM, exitTopZ],
+            ...arc,
+        ]);
 
         const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
             new THREE.MeshStandardMaterial({ color, roughness: .85 }));
@@ -926,8 +931,10 @@ export class TrackObjects{
                 const to = northEdge[i + 1];
                 if (to.x <= from.x || x < from.x || x > to.x) continue;
                 const t = (x - from.x) / (to.x - from.x);
-                return { index: i, point: new THREE.Vector3(x, 0,
-                    from.z + t * (to.z - from.z)) };
+                return {
+                    index: i, point: new THREE.Vector3(x, 0,
+                        from.z + t * (to.z - from.z))
+                };
             }
             throw new Error('Connector does not reach the sloped road edge');
         };
@@ -1239,9 +1246,9 @@ export class TrackObjects{
         const arrow = new THREE.Mesh(
             new THREE.PlaneGeometry(arrowWidthM, arrowLengthM),
             new THREE.MeshBasicMaterial({
-            map: texture,
-            transparent: true,
-            depthWrite: false,
+                map: texture,
+                transparent: true,
+                depthWrite: false,
             })
         );
 
@@ -1330,16 +1337,16 @@ export class TrackObjects{
             const color = i % 2 === 0 ? 0xffffff : 0xd83b3b;
 
             const curb = new THREE.Mesh(
-            new THREE.BoxGeometry(curbWidth, curbHeight, length - gap),
-            new THREE.MeshStandardMaterial({
-                color,
-                roughness: 0.85
-            })
+                new THREE.BoxGeometry(curbWidth, curbHeight, length - gap),
+                new THREE.MeshStandardMaterial({
+                    color,
+                    roughness: 0.85
+                })
             );
 
             const offsetX = side === 'left'
-            ? x - w / 2 + (curbOutside ? -curbGap - curbWidth / 2 : curbWidth / 2)
-            : x + w / 2 + (curbOutside ? curbGap + curbWidth / 2 : -curbWidth / 2);
+                ? x - w / 2 + (curbOutside ? -curbGap - curbWidth / 2 : curbWidth / 2)
+                : x + w / 2 + (curbOutside ? curbGap + curbWidth / 2 : -curbWidth / 2);
 
             curb.position.set(
                 offsetX,
@@ -1797,7 +1804,7 @@ export class TrackObjects{
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '6e3cd6' },
             body: JSON.stringify({ sessionId: '6e3cd6', location: 'TrackObjects.ts:connectRoadIntersections', message: msg, data, timestamp: Date.now() })
-        }).catch(() => {});
+        }).catch(() => { });
 
         this.root.updateMatrixWorld(true);
         log('connectRoadIntersections: START', { roadCount: this.roads.length });
@@ -1907,7 +1914,7 @@ export class TrackObjects{
                 if (!parent) continue;
                 // Mặt asphalt hình thang của RoadStraight955 không phải vạch: cắt thành box
                 // sẽ mất hình côn và khoét hụt khi connector xoay lệch trục.
-                if (child.name === 'AsphaltRoad') continue;
+                if (child.name === 'AsphaltRoad' || child.name.startsWith('lane-number-')) continue;
                 log('child_mesh', { roadIndex: index, childName: child.name, childType: child.geometry?.constructor?.name });
                 // Only crossing roads open curbs/markings. Later surfaces are trimmed against
                 // all earlier roads as well, eliminating coplanar overlapping asphalt.
@@ -2290,30 +2297,30 @@ export class TrackObjects{
     }
 
     addLine(
-        x:number,
-        z:number,
-        w:number,
-        d:number,
-        color=0xf0cc3e,
-        penalty=false
-    ){
-        const m=new THREE.Mesh(new THREE.BoxGeometry(w,.03,d),
-        new THREE.MeshStandardMaterial({color,roughness:.7}));
+        x: number,
+        z: number,
+        w: number,
+        d: number,
+        color = 0xf0cc3e,
+        penalty = false
+    ) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, .03, d),
+            new THREE.MeshStandardMaterial({ color, roughness: .7 }));
 
-        m.position.set(x,.075,z);this.root.add(m);
-        
-        if(penalty) 
+        m.position.set(x, .075, z); this.root.add(m);
+
+        if (penalty)
             this.penaltyZones.push(new THREE.Box3()
-            .setFromCenterAndSize(new THREE.Vector3(x,.5,z),
-            new THREE.Vector3(w+.15,1,d+.15)))
+                .setFromCenterAndSize(new THREE.Vector3(x, .5, z),
+                    new THREE.Vector3(w + .15, 1, d + .15)))
     }
 
-    addCone(x:number,z:number){
-        const c=new THREE.Mesh(new THREE.ConeGeometry(.18,.5,20),
-        new THREE.MeshStandardMaterial({color:0xff7a22}));
+    addCone(x: number, z: number) {
+        const c = new THREE.Mesh(new THREE.ConeGeometry(.18, .5, 20),
+            new THREE.MeshStandardMaterial({ color: 0xff7a22 }));
 
-        c.position.set(x,.25,z);
-        c.castShadow=true;this.root.add(c)
+        c.position.set(x, .25, z);
+        c.castShadow = true; this.root.add(c)
     }
 
     /**
@@ -2358,7 +2365,7 @@ export class TrackObjects{
     }
 
     // Vạch kẻ đường dành cho người đi bộ
-    addPedestrianCrossing( 
+    addPedestrianCrossing(
         x: number,
         z: number,
         direction: RoadDirection = 'vertical',
@@ -2401,15 +2408,15 @@ export class TrackObjects{
         z = -2.5,
         direction: RoadDirection = 'vertical',
         roadWidth = 8
-    ){
+    ) {
         // Vạch trắng mảnh cắt ngang mặt đường, không có nền xanh lá.
         const marking = new THREE.Mesh(
             new THREE.PlaneGeometry(roadWidth - .2, .18),
             new THREE.MeshBasicMaterial({ color: 0xffffff }),
         );
         marking.rotation.x = -Math.PI / 2;
-        marking.rotateOnWorldAxis(new THREE.Vector3(0,1,0),
-            direction==='horizontal' ? -Math.PI/2 : 0);
+        marking.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0),
+            direction === 'horizontal' ? -Math.PI / 2 : 0);
         marking.position.set(x, .095, z);
         marking.name = 'START_LINE';
         this.root.add(marking);

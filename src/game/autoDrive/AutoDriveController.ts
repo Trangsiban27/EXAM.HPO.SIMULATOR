@@ -66,11 +66,17 @@ export class AutoDriveController {
     private exam08ShiftPauseRemaining = 0;
     private readonly recordedHeadings = new WeakMap<THREE.Vector3, number>();
     private readonly recordedSpeeds = new WeakMap<THREE.Vector3, number>();
+    private readonly recordedPopupLessons = new WeakMap<THREE.Vector3, number>();
+    private southExitStopIndex?: number;
+    private southExitStopLineZ?: number;
+    private southExitTurnEndIndex?: number;
+    private southExitLeftSignalOn = false;
     private waypointStopKind: WaypointStopKind = 'bridge';
     private waitingForLesson = false;
     private waitingForTrafficLight = false;
     private trafficGreenCommitted = false;
     private currentSpeed = 0;
+    private finishRightSignalOn = false;
     private brakingForWaypointStop = false;
     private waypointStopReady = false;
     private waypointStopConsumed = false;
@@ -93,6 +99,8 @@ export class AutoDriveController {
         private readonly eastTrafficLight?: TrafficLight,
         railwayStopLine?: THREE.Object3D,
         private readonly exam09AccelerationPositions?: readonly [number, number, number],
+        private readonly finishTrafficLight?: TrafficLight,
+        private readonly southExitTrafficLight?: TrafficLight,
     ) {
         const savedRoutes = AUTO_DRIVE_WAYPOINTS_BY_CLASS[this.vehicleClass];
         this.capturedRoute = savedRoutes?.bridgeToExam05;
@@ -100,10 +108,11 @@ export class AutoDriveController {
         this.exam07ApproachRoute = savedRoutes?.exam06ToExam07?.map(point => this.recordedPoint(point));
         this.exam08ApproachRoute = savedRoutes?.exam07ToExam08?.map(point => this.recordedPoint(point));
         this.exam09ApproachRoute = savedRoutes?.exam08ToExam09?.map(point => this.recordedPoint(point));
-        const exam09PopupIndex = savedRoutes?.exam08ToExam09?.findIndex(point => point.popupLessonId === 9);
+        this.addSouthExitTrafficStopWaypoint();
+        const exam09PopupIndex = this.exam09ApproachRoute?.findIndex(point => this.recordedPopupLessons.get(point) === 9);
         this.exam09PopupWaypointIndex = exam09PopupIndex !== undefined && exam09PopupIndex >= 0
             ? exam09PopupIndex : undefined;
-        const exam10PopupIndex = savedRoutes?.exam08ToExam09?.findIndex(point => point.popupLessonId === 10);
+        const exam10PopupIndex = this.exam09ApproachRoute?.findIndex(point => this.recordedPopupLessons.get(point) === 10);
         this.exam10PopupWaypointIndex = exam10PopupIndex !== undefined && exam10PopupIndex >= 0
             ? exam10PopupIndex : undefined;
         this.exam10DirectionChangeIndices = this.exam09ApproachRoute && this.exam10PopupWaypointIndex !== undefined
@@ -199,6 +208,8 @@ export class AutoDriveController {
         this.stopIndex = 0;
         this.waypointIndex = 0;
         this.waypointStopKind = 'bridge';
+        this.finishRightSignalOn = false;
+        this.southExitLeftSignalOn = false;
         this.currentSpeed = 0;
         this.exam05LessonShown = false;
         this.exam06ApproachStarted = false;
@@ -241,6 +252,8 @@ export class AutoDriveController {
             || (selectingExam10 && !this.hasExam10PopupWaypoint)) return false;
 
         const stop = this.stops[index];
+        this.finishRightSignalOn = false;
+        this.southExitLeftSignalOn = false;
         this.stopIndex = index;
         this.waypointIndex = 0;
         this.currentSpeed = 0;
@@ -400,6 +413,8 @@ export class AutoDriveController {
     }
 
     stop(): void {
+        this.finishRightSignalOn = false;
+        this.southExitLeftSignalOn = false;
         this.enabled = false;
         this.waitingForLesson = false;
         this.waitingForTrafficLight = false;
@@ -557,8 +572,18 @@ export class AutoDriveController {
             return;
         }
         if (this.exam09ApproachStarted) {
+            const beforeTurnEnd = this.southExitTurnEndIndex !== undefined
+                && this.waypointIndex <= this.southExitTurnEndIndex;
+            if (beforeTurnEnd && this.southExitTrafficLight?.isVehicleInTriggerZone(vehicle.root.position)) {
+                this.southExitLeftSignalOn = true;
+            }
+            if (this.southExitLeftSignalOn) {
+                vehicle.setSignal({ left: beforeTurnEnd, right: false, hazard: false });
+                if (!beforeTurnEnd) this.southExitLeftSignalOn = false;
+            }
             this.followSavedRoute(dt, vehicle, this.exam09ApproachRoute!,
-                undefined, undefined, 'routeEnd');
+                this.southExitStopIndex, undefined, 'routeEnd',
+                this.southExitTrafficLight, this.southExitStopLineZ, 'z', 1);
             return;
         }
 
@@ -671,8 +696,17 @@ export class AutoDriveController {
         trafficLight: TrafficLight | undefined = this.southTrafficLight,
         stopLineWorld: number | undefined = this.trafficStopLineWorldZ,
         trafficAxis: 'x' | 'z' = 'z',
+        trafficTravelSign: 1 | -1 = -1,
     ): void {
         const replayExam10 = waypointStopAtEnd === 'routeEnd' && this.waypointStopKind === 'exam10';
+        if (replayExam10) {
+            if (this.finishTrafficLight?.isVehicleInTriggerZone(vehicle.root.position)) {
+                this.finishRightSignalOn = true;
+            }
+            if (this.finishRightSignalOn) {
+                vehicle.setSignal({ left: false, right: true, hazard: false });
+            }
+        }
         const directionChanges = replayExam10 ? this.exam10DirectionChangeIndices : this.exam08DirectionChangeIndices;
         const replayDirections = waypointStopAtEnd === 'exam08' || replayExam10;
         if (replayDirections && this.exam08ShiftPauseRemaining > 0) {
@@ -705,8 +739,8 @@ export class AutoDriveController {
                 recordedSpeed ?? AUTO_DRIVE_SPEED_MPS)
             : undefined;
         const cruiseSpeed = Math.min(accelerationSpeed ?? recordedSpeed ?? AUTO_DRIVE_SPEED_MPS, vehicle.maxAllowedSpeedMps,
-            replayExam10 ? 3 / 3.6 : Infinity,
-            direction < 0 ? AUTO_DRIVE_REVERSE_SPEED_MPS : Infinity);
+            direction < 0 && !(replayExam10 && recordedSpeed !== undefined)
+                ? AUTO_DRIVE_REVERSE_SPEED_MPS : Infinity);
         const position = vehicle.root.position;
         const finish = route[route.length - 1];
         if (!finish) return;
@@ -725,7 +759,7 @@ export class AutoDriveController {
         const waitForGreen = lessonStopIndex === undefined
             && trafficStopIndex !== undefined
             && stopLineWorld !== undefined
-            && frontCoordinate > stopLineWorld
+            && (frontCoordinate - stopLineWorld) * trafficTravelSign < 0
             && (!light || light.phase !== 'green'
                 || (!this.trafficGreenCommitted
                     && light.remainingSeconds <= TRAFFIC_GREEN_COMMIT_SEC));
@@ -738,8 +772,8 @@ export class AutoDriveController {
         const exam10PopupIndex = waypointStopAtEnd === 'routeEnd'
             && this.waypointStopKind === 'exam09' ? this.exam10PopupWaypointIndex : undefined;
         const popupIndex = exam08PopupIndex ?? exam09PopupIndex ?? exam10PopupIndex;
-        const routeLimitIndex = popupIndex ?? lessonStopIndex
-            ?? (waitForGreen ? trafficStopIndex! : route.length - 1);
+        const routeLimitIndex = Math.min(popupIndex ?? Infinity, lessonStopIndex ?? Infinity,
+            waitForGreen ? trafficStopIndex! : route.length - 1);
         const directionChangeIndex = replayDirections
             ? directionChanges[this.exam08DirectionChangeCursor] : undefined;
         const lastIndex = directionChangeIndex === undefined
@@ -793,7 +827,7 @@ export class AutoDriveController {
             }
             this.currentSpeed = 0;
             vehicle.updateAutomatic(dt, 0, 0);
-            if (popupIndex !== undefined) {
+            if (popupIndex !== undefined && lastIndex === popupIndex) {
                 position.x = target.x;
                 position.z = target.z;
                 vehicle.root.rotation.y = this.recordedHeadings.get(target) ?? vehicle.root.rotation.y;
@@ -804,7 +838,7 @@ export class AutoDriveController {
                 this.onWaypointStop(this.waypointStopKind);
                 return;
             }
-            if (lessonStopIndex !== undefined) {
+            if (lessonStopIndex !== undefined && lastIndex === lessonStopIndex) {
                 position.x = target.x;
                 position.z = target.z;
                 this.waypointIndex = lastIndex + 1;
@@ -1060,6 +1094,7 @@ export class AutoDriveController {
     private recordedPoint(point: AutoDriveWaypoint): THREE.Vector3 {
         const position = new THREE.Vector3(point.x, 0, point.z);
         this.recordedHeadings.set(position, point.heading);
+        if (point.popupLessonId !== undefined) this.recordedPopupLessons.set(position, point.popupLessonId);
         if (point.speedMps !== undefined && Number.isFinite(point.speedMps) && point.speedMps >= 0) {
             this.recordedSpeeds.set(position, point.speedMps);
         }
@@ -1132,6 +1167,55 @@ export class AutoDriveController {
                 this.trafficStopWaypointIndex = index;
             }
             this.trafficStopLineWorldZ = line.z;
+            return;
+        }
+    }
+
+    private addSouthExitTrafficStopWaypoint(): void {
+        const light = this.southExitTrafficLight;
+        const route = this.exam09ApproachRoute;
+        if (!light || !route) return;
+        light.root.updateWorldMatrix(true, false);
+        // Use the light's dashed yellow line, 5 m before the pole, as at the other lights.
+        const line = light.root.localToWorld(new THREE.Vector3(light.stopLineX, 0, light.stopLineZ));
+        const stopZ = line.z - FRONT_PROBE_OFFSET_M - TRAFFIC_STOP_FRONT_GAP_M;
+        for (let index = 1; index < route.length; index++) {
+            const from = route[index - 1];
+            const to = route[index];
+            if (from.z > stopZ || to.z < stopZ || to.z - from.z < .001) continue;
+            const fraction = (stopZ - from.z) / (to.z - from.z);
+            const point = from.clone().lerp(to, fraction);
+            if (Math.abs(point.x - line.x) > light.stopLineLength / 2 + .75) continue;
+            if (point.distanceTo(from) < .05) {
+                this.southExitStopIndex = index - 1;
+            } else if (point.distanceTo(to) < .05) {
+                this.southExitStopIndex = index;
+            } else {
+                const fromHeading = this.recordedHeadings.get(from);
+                const toHeading = this.recordedHeadings.get(to);
+                const heading = fromHeading !== undefined && toHeading !== undefined
+                    ? fromHeading + (THREE.MathUtils.euclideanModulo(
+                        toHeading - fromHeading + Math.PI, Math.PI * 2,
+                    ) - Math.PI) * fraction
+                    : toHeading ?? fromHeading ?? Math.atan2(from.x - to.x, from.z - to.z);
+                this.recordedHeadings.set(point, heading);
+                const fromSpeed = this.recordedSpeeds.get(from);
+                const toSpeed = this.recordedSpeeds.get(to);
+                if (fromSpeed !== undefined && toSpeed !== undefined) {
+                    this.recordedSpeeds.set(point, THREE.MathUtils.lerp(fromSpeed, toSpeed, fraction));
+                }
+                route.splice(index, 0, point);
+                this.southExitStopIndex = index;
+            }
+            this.southExitStopLineZ = line.z;
+            for (let turnIndex = this.southExitStopIndex + 1; turnIndex < route.length; turnIndex++) {
+                const heading = this.recordedHeadings.get(route[turnIndex]);
+                if (heading !== undefined && -Math.sin(heading) > .98
+                    && Math.abs(Math.cos(heading)) < .15 && route[turnIndex].x > line.x + 3) {
+                    this.southExitTurnEndIndex = turnIndex;
+                    break;
+                }
+            }
             return;
         }
     }

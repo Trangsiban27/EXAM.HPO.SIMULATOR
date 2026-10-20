@@ -7,7 +7,24 @@ import { notify, type NotifyKind, type NotifyOptions } from './Notify';
 import { pedestrianHud } from './PedestrianHud';
 import type { Exam02Pedestrian } from '../game/exercises/Exam02Pedestrian';
 import type { ExamScoringMode } from '../game/exam/examScoringMode';
-import { AUTO_DRIVE_LESSONS, type AutoDriveLesson } from '../game/autoDrive/autoDriveLessons';
+import {
+    AUTO_DRIVE_LESSONS,
+    EXAM_06_LESSON,
+    EXAM_07_LESSON,
+    EXAM_08_LESSON,
+    EXAM_09_LESSON,
+    EXAM_10_LESSON,
+    type AutoDriveLesson,
+} from '../game/autoDrive/autoDriveLessons';
+
+const LOCKED_AUTO_DRIVE_LESSONS = [
+    EXAM_06_LESSON, EXAM_07_LESSON, EXAM_08_LESSON, EXAM_09_LESSON, EXAM_10_LESSON,
+] as const;
+
+function lessonPickerLabel(lesson: AutoDriveLesson): string {
+    const title = lesson.name.replace(/^Bài sát hạch số \d+:\s*/, '');
+    return `Bài ${lesson.id}: ${title}`;
+}
 import './auto-drive.css';
 
 type Bindings = { onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void; onAutoDriveToggle: () => void; onLessonSelect: (lessonId: number) => void; onWaypointRecordingStart: () => boolean; onWaypointRecordingFinish: () => string };
@@ -32,7 +49,7 @@ export class Hud {
                 ${options.develop ? '<section class="pill develop-pill">DEVELOP</section>' : ''}
                 <section class="pill"><span class="mint icon">♢</span><strong id="score">100</strong><i></i><span class="mint">◴</span><b class="mint mono" id="time">00:00</b></section>
                 <section class="pill exercise"><span class="blue">◎</span><b id="exercise">Xuất phát</b><small id="penalty">0 lỗi</small><span id="startLamp" class="start-lamp" title="Đèn lệnh xuất phát">GO</span></section>
-                <section class="pill lesson-picker"><label for="lessonSelect">Bài học</label><select id="lessonSelect" aria-label="Chọn bài học tự chạy"><option value="">Chọn bài</option>${AUTO_DRIVE_LESSONS.map(lesson => `<option value="${lesson.id}">Bài ${lesson.id}</option>`).join('')}<option value="6" disabled>Bài 6</option><option value="7" disabled>Bài 7</option><option value="8" disabled>Bài 8</option><option value="9" disabled>Bài 9</option><option value="10" disabled>Bài 10</option></select></section>
+                <section class="pill lesson-picker"><label for="lessonSelect">Bài học</label><select id="lessonSelect" aria-label="Chọn bài học tự chạy"><option value="">Chọn bài</option>${AUTO_DRIVE_LESSONS.map(lesson => `<option value="${lesson.id}">${lessonPickerLabel(lesson)}</option>`).join('')}${LOCKED_AUTO_DRIVE_LESSONS.map(lesson => `<option value="${lesson.id}" disabled>${lessonPickerLabel(lesson)}</option>`).join('')}</select></section>
                 <section class="pill"><strong id="speed">0</strong><small class="blue">KM/H</small><i></i><span class="amber">ϟ</span><b class="amber" id="rpm">0</b><small class="amber">RPM</small><i></i><button id="engine" data-key="Enter" class="engine" aria-label="Bật hoặc tắt động cơ">ENGINE</button></section>
             </header>
             <details class="settings"><summary>⚙ &nbsp; CÀI ĐẶT & GÓC NHÌN</summary><div class="settings-body">
