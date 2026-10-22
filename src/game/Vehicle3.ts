@@ -66,10 +66,13 @@ export class Vehicle3 extends Vehicle {
         model.position.set(0, rideLift, 0);
         this.root.updateWorldMatrix(true, true);
 
-        // Iterate for shadows/casts on every mesh in the bodywork.
+        // Standard shadow maps treat these blended glass materials as opaque.
+        // Do not cast solid glass silhouettes onto the dashboard/interior.
+        // Keep the original geometry, tint, opacity and all other materials.
         model.traverse(object => {
             if (object instanceof THREE.Mesh) {
-                object.castShadow = true;
+                const materials = Array.isArray(object.material) ? object.material : [object.material];
+                object.castShadow = !materials.every(material => material.transparent && material.opacity < 1);
                 object.receiveShadow = true;
             }
         });

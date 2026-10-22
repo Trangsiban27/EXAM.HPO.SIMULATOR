@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { Vehicle } from './Vehicle';
 import { CabinInterior } from '../ui/CabinInterior';
 
+export const AUXILIARY_VIEW_FPS = 30;
+const AUXILIARY_VIEW_INTERVAL_MS = 1000 / AUXILIARY_VIEW_FPS;
+
 interface CabinViewConfig {
     camera: THREE.PerspectiveCamera;
     eye: THREE.Vector3;
@@ -21,21 +24,24 @@ export class CabinView {
     private overlay = document.createElement('div');
     private frames: HTMLElement[] = [];
     private interiorClip = '';
-    private readonly mirrorTarget = new THREE.WebGLRenderTarget(512, 320);
+    private readonly viewTargets = this.views.map(() => new THREE.WebGLRenderTarget(512, 320));
+    private readonly lastViewUpdate = this.views.map(() => -Infinity);
     private readonly mirrorScene = new THREE.Scene();
     private readonly mirrorCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 2);
+    private readonly screenGeometry = new THREE.PlaneGeometry(2, 2);
+    private readonly mirrorGeometry = this.screenGeometry.clone();
+    private readonly viewScreen: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
     private readonly host: HTMLElement;
 
     constructor(host: HTMLElement) {
         this.host = host;
-        const geometry = new THREE.PlaneGeometry(2, 2);
-        const uv = geometry.getAttribute('uv');
+        const uv = this.mirrorGeometry.getAttribute('uv');
         for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
-        const screen = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-            map: this.mirrorTarget.texture, depthTest: false, depthWrite: false, toneMapped: false
+        this.viewScreen = new THREE.Mesh(this.screenGeometry, new THREE.MeshBasicMaterial({
+            map: this.viewTargets[0].texture, depthTest: false, depthWrite: false, toneMapped: false
         }));
-        screen.position.z = -1;
-        this.mirrorScene.add(screen);
+        this.viewScreen.position.z = -1;
+        this.mirrorScene.add(this.viewScreen);
         this.overlay.className = 'cabin-overlay';
         this.overlay.hidden = true;
         this.overlay.innerHTML = `<div class="cabin-roof"></div><div class="cabin-pillar"></div><div class="cabin-dashboard"></div><div class="mirror-frame mirror-left"><b>GƯƠNG TRÁI</b></div><div class="mirror-frame mirror-right"><b>GƯƠNG PHẢI</b></div><div class="mirror-frame shoulder-view"><b>CANH VAI · GHẾ LÁI</b></div><div class="mirror-frame passenger-view"><b>CỬA SỔ PHẢI · GHẾ PHỤ</b></div>`;
@@ -77,27 +83,43 @@ export class CabinView {
         const autoClear = renderer.autoClear;
         renderer.autoClear = false;
         renderer.setScissorTest(true);
+        const now = performance.now();
         for (let i = 0; i < this.views.length; i++) {
             const view = this.views[i], rect = rectangles[i];
-            if (this.frames[i].hidden || rect.width <= 0 || rect.height <= 0) continue;
-            view.camera.position.copy(frame.localToWorld(view.eye.clone()));
-            view.camera.up.set(0, 1, 0).applyQuaternion(frame.getWorldQuaternion(new THREE.Quaternion()));
-            view.camera.lookAt(frame.localToWorld(view.aim.clone()));
-            view.camera.aspect = rect.width / rect.height;
-            view.camera.updateProjectionMatrix();
-            if (view.mirror) {
+            if (this.frames[i].hidden || rect.width <= 0 || rect.height <= 0) {
+                this.lastViewUpdate[i] = -Infinity;
+                continue;
+            }
+            const target = this.viewTargets[i];
+            // Preserve the existing mirror resolution and the shoulder view's pixel density.
+            const targetWidth = view.mirror ? 512 : Math.max(1, Math.round(rect.width * renderer.getPixelRatio()));
+            const targetHeight = view.mirror ? 320 : Math.max(1, Math.round(rect.height * renderer.getPixelRatio()));
+            const resized = target.width !== targetWidth || target.height !== targetHeight;
+            if (resized) target.setSize(targetWidth, targetHeight);
+            const elapsed = now - this.lastViewUpdate[i];
+            if (resized || elapsed >= AUXILIARY_VIEW_INTERVAL_MS) {
+                view.camera.position.copy(frame.localToWorld(view.eye.clone()));
+                view.camera.up.set(0, 1, 0).applyQuaternion(frame.getWorldQuaternion(new THREE.Quaternion()));
+                view.camera.lookAt(frame.localToWorld(view.aim.clone()));
+                view.camera.aspect = rect.width / rect.height;
+                view.camera.updateProjectionMatrix();
                 renderer.setScissorTest(false);
-                renderer.setRenderTarget(this.mirrorTarget);
+                renderer.setRenderTarget(target);
                 renderer.clear(true, true, true);
                 renderer.render(scene, view.camera);
                 renderer.setRenderTarget(null);
                 renderer.setScissorTest(true);
+                // Retain the cadence when animation frames arrive slightly late; never catch up in a loop.
+                this.lastViewUpdate[i] = resized || elapsed >= 2 * AUXILIARY_VIEW_INTERVAL_MS
+                    ? now : now - (elapsed % AUXILIARY_VIEW_INTERVAL_MS);
             }
             const x = rect.left - bounds.left, y = h - (rect.bottom - bounds.top);
             renderer.setViewport(x, y, rect.width, rect.height);
             renderer.setScissor(x, y, rect.width, rect.height);
             renderer.clear(true, true, true);
-            renderer.render(view.mirror ? this.mirrorScene : scene, view.mirror ? this.mirrorCamera : view.camera);
+            this.viewScreen.geometry = view.mirror ? this.mirrorGeometry : this.screenGeometry;
+            this.viewScreen.material.map = target.texture;
+            renderer.render(this.mirrorScene, this.mirrorCamera);
         }
         renderer.setScissorTest(false);
         renderer.setViewport(0, 0, w, h);

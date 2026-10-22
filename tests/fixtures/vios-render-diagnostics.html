@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="vi">
+<head><meta charset="utf-8"><title>Vios rendering diagnostics</title>
+<style>html,body{margin:0;background:#9ec4e4}canvas{display:block}#label{position:fixed;left:12px;top:12px;color:white;background:#111c;padding:8px;font:14px monospace}</style></head>
+<body><div id="label">Loading…</div><script type="module">
+import * as THREE from 'three';
+import { Vehicle3 } from '/src/game/Vehicle3.ts';
+import { configureSunShadows } from '/src/game/shadowStyle.ts';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(1024,768); renderer.shadowMap.enabled=true;
+document.body.append(renderer.domElement);
+const scene = new THREE.Scene();scene.background=new THREE.Color(0x9ec4e4);
+scene.add(new THREE.HemisphereLight(0xddeeff,0x596347,2));
+const sun=new THREE.DirectionalLight(0xffffff,2.3);sun.position.set(-20,35,18);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-60,right:60,top:60,bottom:-60});
+scene.add(sun);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(160,160),new THREE.MeshStandardMaterial({color:0x697c65}));
+ground.rotation.x=-Math.PI/2;ground.position.y=-.015;ground.receiveShadow=true;scene.add(ground);
+const car=await Vehicle3.create('/models/toyota_vios_g.glb');scene.add(car.root);car.root.updateWorldMatrix(true,true);
+const camera=new THREE.PerspectiveCamera(45,1024/768,.1,200);
+const meshState=[];
+car.root.traverse(object=>{if(object instanceof THREE.Mesh)meshState.push({object,material:object.material,visible:object.visible,castShadow:object.castShadow,receiveShadow:object.receiveShadow});});
+const views={
+ top:{eye:[0,7,.01],look:[0,.6,0],fov:40},
+ side:{eye:[-6,2.1,0],look:[-.158,.7,0],fov:45},
+ front:{eye:[-.158,2,-6],look:[-.158,.65,-.5],fov:45},
+ rear:{eye:[-.158,1.8,6],look:[-.158,.7,.5],fov:45},
+ cabin:{eye:[-.43,1.45,-.1],look:[-.43,1.4,-20],fov:60},
+ diagonal:{eye:[-4.8,4.5,-5],look:[-.158,.65,0],fov:40},
+};
+const materialInfo=meshState.map(({object,material})=>({name:object.name,
+ materials:(Array.isArray(material)?material:[material]).map(m=>({name:m.name,type:m.type,color:m.color?.getHexString(),
+ opacity:m.opacity,transparent:m.transparent,normalMap:!!m.normalMap,map:!!m.map,depthWrite:m.depthWrite,side:m.side}))}));
+const originalSun={bias:sun.shadow.bias,normalBias:sun.shadow.normalBias};
+const shadowSides=new Map();for(const s of meshState)for(const m of Array.isArray(s.material)?s.material:[s.material])shadowSides.set(m,m.shadowSide);
+let temporary=[];
+window.viosDiagnostics={renderer,scene,car,camera,sun,materialInfo,originalSun,
+ async render(options={}){
+  for(const m of temporary)m.dispose();temporary=[];
+  renderer.shadowMap.enabled=options.variant!=='no-shadow';
+  sun.shadow.bias=options.bias??0;sun.shadow.normalBias=options.normalBias??0;
+  if(options.variant==='fixed')configureSunShadows(sun);
+  if(options.variant?.startsWith('fixed-'))configureSunShadows(sun);
+  for(const state of meshState){const {object}=state;Object.assign(object,{material:state.material,visible:state.visible,castShadow:state.castShadow,receiveShadow:state.receiveShadow});
+   const originals=Array.isArray(state.material)?state.material:[state.material];
+   // Reproduce the pre-fix application's unconditional castShadow=true.
+   if(options.variant!=='fixed'&&!options.variant?.startsWith('fixed-')
+    &&originals.every(m=>/^auto\d*$/.test(m.name)))object.castShadow=true;
+   if(options.variant==='no-receive')object.receiveShadow=false;
+   if(options.variant==='no-cast')object.castShadow=false;
+   if(options.solo)object.visible=object.name===options.solo;
+   if(options.variant==='unlit'||options.variant==='neutral'){
+    const sources=Array.isArray(state.material)?state.material:[state.material];
+    const mapped=sources.map(source=>{
+     const mat=options.variant==='unlit'?new THREE.MeshBasicMaterial({color:0xaaaaaa}):new THREE.MeshStandardMaterial({color:0xaaaaaa,roughness:.8});
+     mat.side=source.side;mat.transparent=source.transparent;mat.opacity=source.opacity;temporary.push(mat);return mat;
+    });object.material=Array.isArray(state.material)?mapped:mapped[0];
+   }
+   for(const mat of Array.isArray(object.material)?object.material:[object.material]){
+    mat.shadowSide=shadowSides.get(mat)??null;
+    if(options.variant==='fixed-front-shadow')mat.shadowSide=THREE.FrontSide;
+    if(options.variant==='fixed-back-shadow')mat.shadowSide=THREE.BackSide;
+    if(options.variant==='fixed-glass-no-receive'&&mat.transparent)object.receiveShadow=false;
+    if(options.variant==='fixed-glass-no-cast'&&mat.transparent)object.castShadow=false;
+    if(options.variant==='fixed-glass-hidden'&&mat.transparent)object.visible=false;
+    mat.needsUpdate=true;
+   }
+  }
+  ground.material.needsUpdate=true;
+  const view=views[options.view??'diagonal'];
+  camera.position.copy(car.visual.localToWorld(new THREE.Vector3(...view.eye)));
+  camera.lookAt(car.visual.localToWorld(new THREE.Vector3(...view.look)));
+  camera.fov=view.fov;camera.near=options.near??.1;camera.far=options.far??200;camera.updateProjectionMatrix();
+  ground.visible=options.ground!==false;sun.shadow.needsUpdate=true;renderer.shadowMap.needsUpdate=true;
+  renderer.render(scene,camera);await new Promise(requestAnimationFrame);renderer.render(scene,camera);
+  document.querySelector('#label').textContent=JSON.stringify(options);
+  return {view:options.view??'diagonal',variant:options.variant??'baseline',bias:sun.shadow.bias,normalBias:sun.shadow.normalBias,near:camera.near,far:camera.far};
+ }};
+await window.viosDiagnostics.render(Object.fromEntries(new URLSearchParams(location.search)));
+window.diagnosticsReady=true;
+</script></body></html>
