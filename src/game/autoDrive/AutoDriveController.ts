@@ -967,12 +967,23 @@ export class AutoDriveController {
             -1, 1,
         );
         if (waypointStopAtEnd === 'exam08' || waypointStopAtEnd === 'routeEnd') {
-            vehicle.transmission.gear = direction;
+            vehicle.transmission.gear = direction > 0 && this.exam09ApproachStarted
+                && this.waypointStopKind === 'exam09'
+                ? this.exam09AccelerationGear(x - Math.sin(heading) * FRONT_PROBE_OFFSET_M)
+                : direction;
         }
         vehicle.updateAutomatic(dt, steering, direction * this.currentSpeed);
         position.x = x;
         position.z = z;
         vehicle.root.rotation.y = heading;
+    }
+
+    /** Shift halfway between markers 1/2; hold second until the front reaches marker 3. */
+    private exam09AccelerationGear(frontX: number): 1 | 2 {
+        if (!this.exam09AccelerationPositions) return 1;
+        const [position1X, position2X, position3X] = this.exam09AccelerationPositions;
+        const shiftUpX = (position1X + position2X) / 2;
+        return frontX <= shiftUpX && frontX > position3X ? 2 : 1;
     }
 
     /** Speed at the front probe: accelerate after marker 1, brake uniformly after marker 2. */

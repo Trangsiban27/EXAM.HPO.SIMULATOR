@@ -355,7 +355,10 @@ export class WelcomeScreen {
                                         </div>
                                         <h3 class="guide-block-title">Lưu ý quan trọng</h3>
                                     </div>
-                                    <ul class="guide-bullet-list">
+                                    <ul class="guide-bullet-list">  <li>
+                                            <span class="bullet-badge badge-yellow">!</span>
+                                            <span>Chú ý các tình huống nguy hiểm xuất hiện ngẫu nhiên trên sân.</span>
+                                        </li>
                                         <li>
                                             <span class="bullet-badge badge-yellow">!</span>
                                             <span>Thực hiện đúng trình tự các bài sát hạch.</span>
@@ -368,15 +371,12 @@ export class WelcomeScreen {
                                             <span class="bullet-badge badge-yellow">!</span>
                                             <span>Khi rẽ hoặc chuyển hướng, phải bật xi nhan.</span>
                                         </li>
-                                        <li>
-                                            <span class="bullet-badge badge-yellow">!</span>
-                                            <span>Chú ý các tình huống nguy hiểm xuất hiện ngẫu nhiên trên sân.</span>
-                                        </li>
+                                      
                                     </ul>
                                 </div>
                             </div>
 
-                            <!-- Right Column: Danh sách 11 bài học -->
+                            <!-- Right Column: Trình tự 11 bài học -->
                             <div class="guide-col-right">
                                 <div class="guide-block-header">
                                     <div class="guide-block-icon icon-teal">
@@ -389,7 +389,7 @@ export class WelcomeScreen {
                                             <line x1="3" y1="18" x2="3.01" y2="18"></line>
                                         </svg>
                                     </div>
-                                    <h3 class="guide-block-title">Danh sách 11 bài học</h3>
+                                    <h3 class="guide-block-title">Trình tự 11 bài học</h3>
                                 </div>
                                 <div class="guide-task-list">
                                     <div class="guide-task-row"><span class="task-num">1</span><span class="task-name">Xuất phát</span></div>
