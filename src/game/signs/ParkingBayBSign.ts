@@ -76,6 +76,6 @@ export class ParkingBayBSign {
 
         addBoard(pBoardMount, 'PARKING_P_BOARD', .78, .8, 2.7, 512, 512, 'P', 'bold 390px Arial, sans-serif');
         addBoard(classBoardMount, `PARKING_CLASS_${vehicleClass}_BOARD`, .88, .36, 2.05, 768, 256,
-            `HẠNG ${vehicleClass}`, 'bold 142px Arial, sans-serif');
+            `HẠNG ${vehicleClass === 'C' ? 'C1' : vehicleClass}`, 'bold 142px Arial, sans-serif');
     }
 }

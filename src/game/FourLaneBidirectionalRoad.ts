@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import {
@@ -153,7 +154,7 @@ export class FourLaneBidirectionalRoad {
         // 1. Mặt đường (asphalt) - mộddt surface liên tục
         const surface = new THREE.Mesh(
             new THREE.BoxGeometry(widthM, 0.08, lengthM),
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: 0.95 }),
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: 0.95 }),
         );
         surface.position.set(0, 0.02, 0);
         surface.name = 'road-surface';
@@ -285,7 +286,7 @@ export class FourLaneBidirectionalRoad {
         surfaceGeometry.rotateX(-Math.PI / 2);
         const surface = new THREE.Mesh(
             surfaceGeometry,
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: 0.95 }),
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: 0.95 }),
         );
         surface.name = 'road-surface';
         surface.position.y = -0.02;
@@ -454,7 +455,7 @@ export class FourLaneBidirectionalRoad {
         surfaceGeometry.rotateX(Math.PI / 2);
         const surface = new THREE.Mesh(
             surfaceGeometry,
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: 0.95 }),
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: 0.95 }),
         );
         surface.name = 'road-surface-curve-negative-z';
         surface.position.y = 0.06;

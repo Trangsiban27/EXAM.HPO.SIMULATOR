@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 
+export interface IntersectionScoringGeometry {
+    stopBar: THREE.Object3D;
+    exitBounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+}
+
 /** Configuration for {@link TrafficLight}. Optional fields fall back to the legacy defaults
  *  (yellow line at local Z = 7, trigger from Z = 0 to 7, no marker). */
 export interface TrafficLightOptions {
@@ -35,6 +40,7 @@ export interface TrafficLightOptions {
     markerId?: string;
     /** Giữ đèn xanh suốt, không chờ trigger và không quay lại đỏ. */
     alwaysGreen?: boolean;
+    scoring?: IntersectionScoringGeometry;
 }
 
 /** Vehicle-triggered signal. Local -Z points toward the intersection. */
@@ -58,7 +64,8 @@ export class TrafficLight {
     private readonly triggerLengthX: number | any;
     private readonly triggerMaxXAtZ?: (localZ: number) => number;
     private readonly realisticHead: boolean;
-    private readonly alwaysGreen: boolean;
+    readonly alwaysGreen: boolean;
+    readonly scoring?: IntersectionScoringGeometry;
     /** Length of the yellow stop line along local X (matches the box() drawn in the constructor). */
     readonly stopLineLength: number;
     /** Optional callback fired the first time a vehicle enters the trigger zone. Receives the marker ID. */
@@ -75,6 +82,12 @@ export class TrafficLight {
         emissive: 0x16ff68,
         side: THREE.DoubleSide
     });
+    private readonly yellow = new THREE.MeshStandardMaterial({
+        color: 0x392c0b,
+        emissive: 0xffbf00,
+        roughness: .5,
+        side: THREE.DoubleSide,
+    });
     private readonly canvas = document.createElement('canvas');
     private readonly texture: THREE.CanvasTexture;
     private display = '';
@@ -82,18 +95,27 @@ export class TrafficLight {
 
     /** Red phase length (s). Vehicle-triggered signal stays red this long then goes green. */
     static readonly RED_DURATION_SEC = 15;
-    /** Green phase length (s). Total cycle = RED + GREEN. */
+    /** Green phase length (s). */
     static readonly GREEN_DURATION_SEC = 10;
-    /** Total cycle length (s) = RED + GREEN. */
-    static get CYCLE_SEC(): number { return TrafficLight.RED_DURATION_SEC + TrafficLight.GREEN_DURATION_SEC; }
+    static readonly YELLOW_DURATION_SEC = 3;
+    /** Total cycle length (s) = RED + GREEN + YELLOW. */
+    static get CYCLE_SEC(): number {
+        return TrafficLight.RED_DURATION_SEC + TrafficLight.GREEN_DURATION_SEC + TrafficLight.YELLOW_DURATION_SEC;
+    }
 
-    get phase(): 'idle' | 'red' | 'green' {
-        return !this.active ? 'idle' : this.elapsed < TrafficLight.RED_DURATION_SEC ? 'red' : 'green';
+    get phase(): 'idle' | 'red' | 'green' | 'yellow' {
+        if (!this.active) return 'idle';
+        if (this.elapsed < TrafficLight.RED_DURATION_SEC) return 'red';
+        if (this.elapsed < TrafficLight.RED_DURATION_SEC + TrafficLight.GREEN_DURATION_SEC) return 'green';
+        return 'yellow';
     }
 
     get remainingSeconds() {
         if (!this.active) return 0;
-        return Math.ceil((this.phase === 'red' ? TrafficLight.RED_DURATION_SEC : TrafficLight.CYCLE_SEC) - this.elapsed);
+        const phaseEnd = this.phase === 'red' ? TrafficLight.RED_DURATION_SEC
+            : this.phase === 'green' ? TrafficLight.RED_DURATION_SEC + TrafficLight.GREEN_DURATION_SEC
+                : TrafficLight.CYCLE_SEC;
+        return Math.ceil(phaseEnd - this.elapsed);
     }
 
     constructor(x: number, z: number, private readonly width = 8, direction: 'vertical' | 'horizontal' | number = 'vertical', options: TrafficLightOptions = {}) {
@@ -127,6 +149,7 @@ export class TrafficLight {
         this.triggerMaxXAtZ = options.triggerMaxXAtZ;
         this.realisticHead = options.realisticHead ?? false;
         this.alwaysGreen = options.alwaysGreen ?? false;
+        this.scoring = options.scoring;
         if (this.realisticHead) {
             this.green.color.setHex(0x124943);
             this.green.emissive.setHex(0x19ffe1);
@@ -162,9 +185,8 @@ export class TrafficLight {
         if (this.realisticHead) {
             box(.12, 3.7, .12, poleX, 1.85, 0, metal, signalVisual);
             box(.48, 1.2, .32, poleX, 3.58, 0, dark, signalVisual);
-            const unlitAmber = new THREE.MeshStandardMaterial({ color: 0x392c0b, roughness: .5 });
             const bezel = new THREE.MeshStandardMaterial({ color: 0x080d0e, roughness: .6 });
-            for (const [y, material] of [[3.94, this.red], [3.58, unlitAmber], [3.22, this.green]] as const) {
+            for (const [y, material] of [[3.94, this.red], [3.58, this.yellow], [3.22, this.green]] as const) {
                 const rim = new THREE.Mesh(new THREE.CircleGeometry(.185, 40), bezel);
                 rim.position.set(poleX, y, .169);
                 signalVisual.add(rim);
@@ -178,7 +200,7 @@ export class TrafficLight {
             box(.16, 3.6, .16, poleX, 1.8, 0, metal, signalVisual);
             box(.8, 1.6, .4, poleX, 3.45, 0, dark, signalVisual);
             for (const face of faces) {
-                for (const [y, material] of [[3.8, this.red], [3.12, this.green]] as const) {
+                for (const [y, material] of [[3.98, this.red], [3.45, this.yellow], [2.92, this.green]] as const) {
                     const lens = new THREE.Mesh(new THREE.CircleGeometry(face.lensRadius, 32), material);
                     lens.position.set(poleX + face.offsetX, y, face.offsetZ);
                     lens.rotation.y = face.rotationY;
@@ -335,6 +357,7 @@ export class TrafficLight {
     private refresh() {
         this.red.emissiveIntensity = this.phase === 'red' ? 2 : 0;
         this.green.emissiveIntensity = this.phase === 'green' ? 2 : 0;
+        this.yellow.emissiveIntensity = this.phase === 'yellow' ? 2 : 0;
         const display = this.phase === 'idle' ? '--' : String(this.remainingSeconds);
         const key = `${this.phase}:${display}`;
         if (key === this.display) return;
@@ -344,6 +367,7 @@ export class TrafficLight {
         ctx.fillRect(0, 0, 256, 128);
         ctx.fillStyle = this.phase === 'red' ? '#ff3542'
             : this.phase === 'green' ? (this.realisticHead ? '#30ffe1' : '#24ff78')
+                : this.phase === 'yellow' ? '#ffbf00'
                 : (this.realisticHead ? '#22575a' : '#85929e');
         if (this.realisticHead) {
             ctx.shadowColor = ctx.fillStyle;

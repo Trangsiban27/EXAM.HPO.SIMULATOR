@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import { ExerciseSign } from './signs/ExerciseSign';
@@ -5,7 +6,7 @@ import type { TrackObjects } from './TrackObjects';
 import { StarShape } from './StarShape';
 import { StarFlowerBed } from './StarFlowerBed';
 import { createGrassSurfaceTexture } from './grassSurface';
-import { startPosition } from './startPosition';
+import { startPosition, startWaitingLine } from './startPosition';
 import { StackedPedestrianStopSign } from './signs/StackedPedestrianStopSign';
 import { StackedRailwayStopSign } from './signs/StackedRailwayStopSign';
 import { StopSign } from './signs/StopSign';
@@ -41,6 +42,7 @@ import {
 /** Positions and dimensions of the examination ground. */
 export function buildExamGround(objects: TrackObjects) {
     const showRoadLaneNumbers = false;
+    objects.showRoadLaneNumbers = showRoadLaneNumbers;
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 500),
         new THREE.MeshStandardMaterial({ color: 0x63735a, roughness: 1 }));
 
@@ -137,6 +139,11 @@ export function buildExamGround(objects: TrackObjects) {
         [1, -finishRoadLaneWidthM / 2],
         [2, finishRoadLaneWidthM / 2],
     ] as const) {
+        const existing = finishRoad.getObjectByName(`lane-number-${lane}`);
+        if (existing) {
+            existing.position.set(localX, .09, finishRoadLaneNumberLocalZ);
+            continue;
+        }
         const canvas = document.createElement('canvas');
         canvas.width = canvas.height = 128;
         const context = canvas.getContext('2d');
@@ -448,13 +455,47 @@ export function buildExamGround(objects: TrackObjects) {
         separatorX - 2,
         crossingRoadZ + crossingRoadWidthM / 2 + 0.7,
     ).root);
-    // Vạch ở cuối đường đầu (x = 7.2 + 20/2 = 17.2); chữ ở đầu đường kế tiếp.
+    // Vạch chờ ngay trước đầu xe ở vị trí đặt xe mặc định.
+    const waitingLine = new THREE.Mesh(
+        new THREE.BoxGeometry(startWaitingLine.thicknessM, .03, startWaitingLine.widthM),
+        new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: .7 }),
+    );
+    waitingLine.name = 'EX01_WAIT_LINE';
+    waitingLine.position.set(startWaitingLine.x, .075, startWaitingLine.z);
+    objects.root.add(waitingLine);
+    const waitingText = objects.addRoadText('VẠCH CHỜ', startWaitingLine.x - 1.3,
+        startWaitingLine.z, 'horizontal', startWaitingLine.widthM);
+    waitingText.name = 'EX01_WAIT_TEXT';
+    (waitingText.material as THREE.MeshBasicMaterial).color.setHex(0xffd700);
+    objects.root.add(waitingText);
+
+    // Xe đi theo +X: chữ xuất phát nằm trước vạch trắng.
     objects.addStartZone(startPosition.lineX, crossingRoadZ, 'horizontal', crossingRoadWidthM, {
-        textX: crossingRoadStartX + 1,
+        textX: startPosition.lineX - 0.8,
         textZ: crossingRoadZ,
     });
-    for (const laneZ of [crossingRoadZ - crossingRoadWidthM / 4, crossingRoadZ + crossingRoadWidthM / 4]) {
-        objects.addStraightRoadArrow(separatorX - 6.2, laneZ, 3.7, approachLengthM, Math.PI / 2, true);
+    // Hạng xe ở vị trí chữ cũ, C1 bên trái và B bên phải theo hướng xe chạy.
+    for (const [vehicleClass, laneZ] of [
+        ['C1', crossingRoadZ - crossingRoadWidthM / 4],
+        ['B', crossingRoadZ + crossingRoadWidthM / 4],
+    ] as const) {
+        const label = objects.addRoadText(vehicleClass, crossingRoadStartX + 1,
+            laneZ, 'horizontal', crossingRoadWidthM);
+        label.name = `EX01_START_CLASS_${vehicleClass}`;
+        (label.material as THREE.MeshBasicMaterial).color.setHex(0xffd700);
+        objects.root.add(label);
+    }
+    // Chỉnh X/Z tâm từng cặp (mét): X dọc đường, Z dịch ngang cả hai mũi tên.
+    const crossingRoadArrowPairs = [
+        { x: separatorX - 1.8, z: crossingRoadZ }, // Cặp 1: gần vạch người đi bộ.
+        { x: separatorX - 11, z: crossingRoadZ }, // Cặp 2: gần chữ C1/B.
+    ];
+    for (const [pairIndex, pair] of crossingRoadArrowPairs.entries()) {
+        for (const [laneIndex, laneOffsetZ] of [-crossingRoadWidthM / 4, crossingRoadWidthM / 4].entries()) {
+            const arrow = objects.addStraightRoadArrow(pair.x, pair.z + laneOffsetZ,
+                3.7, approachLengthM, Math.PI / 2, true);
+            arrow.name = `EX01_APPROACH_ARROW_PAIR_${pairIndex + 1}_LANE_${laneIndex + 1}`;
+        }
     }
     objects.addLine(separatorX, crossingRoadZ, .18, crossingRoadWidthM - .4, 0xffffff);
     objects.addPedestrianCrossing(
@@ -544,6 +585,7 @@ export function buildExamGround(objects: TrackObjects) {
     });
     // Chuồng vuông góc 1
     const course1 = objects.addWheelTrackCourse({
+        vehicleClass: 'B',
         x: 105.4,
         z: 1.3,
         direction: 'horizontal',
@@ -559,6 +601,7 @@ export function buildExamGround(objects: TrackObjects) {
 
     // Chuồng vuông góc 2
     const course2 = objects.addWheelTrackCourse({
+        vehicleClass: 'C',
         x: 105.4,
         z: -11.5,
         direction: 'horizontal',
@@ -573,6 +616,7 @@ export function buildExamGround(objects: TrackObjects) {
 
     // Chuồng vuông góc 3
     const course3 = objects.addWheelTrackCourse({
+        vehicleClass: 'D',
         x: 105.4,
         z: -19,
         direction: 'horizontal',
@@ -586,6 +630,7 @@ export function buildExamGround(objects: TrackObjects) {
 
     // Chuồng vuông góc 4
     const course4 = objects.addWheelTrackCourse({
+        vehicleClass: 'E',
         x: 105.4,
         z: -33.5,
         direction: 'horizontal',
@@ -633,7 +678,7 @@ export function buildExamGround(objects: TrackObjects) {
         context.font = 'bold 200px Arial, sans-serif';
         context.textAlign = 'center';
         context.textBaseline = 'middle';
-        context.fillText(vehicleClass, 128, 136);
+        context.fillText(vehicleClass === 'C' ? 'C1' : vehicleClass, 128, 136);
         const texture = new THREE.CanvasTexture(canvas);
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.anisotropy = 4;
@@ -755,6 +800,11 @@ export function buildExamGround(objects: TrackObjects) {
     objects.addWheelTrackExitUpperCorner(wheelTrackExitRoad, course1, 2);
     // Crosswalk phủ trọn đoạn 3 làn của đường tại Z=-36.5 (3 × 3.7 m).
     const exam05CrosswalkZ = -36.5;
+    // Các vạch qua đường bao quanh cùng ngã tư, dùng cho cả hướng đi thẳng và rẽ.
+    const intersectionExitBounds = {
+        minX: 12.5, maxX: 28.5,
+        minZ: EXAM_05_FINISH_CROSSWALK_Z, maxZ: exam05CrosswalkZ,
+    };
     const exam05CrosswalkDepthM = 3;
     const exam05StopBarWidthM = .60;
     const stopBarCurbOverlapM = .01;
@@ -866,7 +916,7 @@ export function buildExamGround(objects: TrackObjects) {
     objects.addRoadCornerR7_5(eastCornerX, eastCornerZ);
     // Làn phía nam đường Đông đi về -X: vạch qua đường, stop bar, đèn và
     // vùng cảm biến cùng nằm trên một hướng tiếp cận ngã tư.
-    const eastCrosswalkX = 28.5;
+    const eastCrosswalkX = intersectionExitBounds.maxX;
     const eastCrosswalkDepthM = 3;
     objects.addPedestrianCrossing(eastCrosswalkX, eastJunctionRoadZ, 'horizontal', 8, eastCrosswalkDepthM);
     const eastIncomingLaneZ = eastJunctionRoadZ - eastJunctionLaneWidthM / 2;
@@ -931,6 +981,7 @@ export function buildExamGround(objects: TrackObjects) {
         triggerLengthX: eastLaneMarkingLengthM,
         showTriggerZone: false,
         markerId: 'EAST',
+        scoring: { stopBar: eastStopBar, exitBounds: intersectionExitBounds },
     });
     trimYellowDividerAtStopBar(
         eastJunctionRoad, 'road-center-line', eastStopBarX, -1, .08,
@@ -993,7 +1044,7 @@ export function buildExamGround(objects: TrackObjects) {
     const westYellowToLightM = exam05YellowToLightM;
     const westTriggerToYellowM = exam05TriggerToYellowM;
     const westTriggerLengthM = exam05TriggerLengthM;
-    const westCrosswalkX = 12.5;
+    const westCrosswalkX = intersectionExitBounds.minX;
     const westRoadCenterZ = westJunctionRoad.root.position.z;
     const westStopBarX = westCrosswalkX - westStopBarToCrosswalkM;
     // Cho đầu stop bar phủ nhẹ lên vạch vàng giữa hai chiều để không hở mối nối.
@@ -1145,6 +1196,7 @@ export function buildExamGround(objects: TrackObjects) {
         triggerLengthX: southTriggerRightX - southTriggerLeftX,
         triggerMaxXAtZ: localZ => apronCurbRoadEdgeXAt(southLightZ + localZ) - southLightX,
         markerId: 'SOUTH',
+        scoring: { stopBar, exitBounds: intersectionExitBounds },
     });
     // Mũi tên đi thẳng nằm giữa vạch vàng đứt và mép gần của vùng cảm biến đỏ.
     // Canh theo hai mép đường tại chính vị trí này để nằm giữa làn khi curb uốn cong.
@@ -1181,6 +1233,9 @@ export function buildExamGround(objects: TrackObjects) {
         southRoadX, southRoadZ, southRoadWidthM, southRoadLengthM,
         'vertical', 'none', 'yellow-solid', 2,
     );
+    objects.exam05To06LaneRule = {
+        road: southRoad, widthM: southRoadWidthM, lengthM: southRoadLengthM,
+    };
     // Chỉnh trực tiếp X/Z để di chuyển riêng bồn hoa ngôi sao (đơn vị mét).
     const starFlowerBedX = 40;
     const starFlowerBedZ = -26;
@@ -1258,6 +1313,7 @@ export function buildExamGround(objects: TrackObjects) {
         triggerLengthX: southSideStopLineLengthM,
         showTriggerZone: false,
         markerId: 'SOUTH_EXIT',
+        scoring: { stopBar: southStopBar, exitBounds: intersectionExitBounds },
     });
     const southDivider = southRoad.getObjectByName('road-center-line');
     if (!(southDivider instanceof THREE.Mesh)) throw new Error('South road center line is missing');
@@ -1676,6 +1732,7 @@ export function buildExamGround(objects: TrackObjects) {
         const arrows: THREE.Mesh[] = [];
         road.traverse(child => {
             if (child instanceof THREE.Mesh
+                && child.userData.isRoadArrow === true
                 && child.geometry instanceof THREE.PlaneGeometry
                 && child.material instanceof THREE.MeshBasicMaterial
                 && child.material.map instanceof THREE.CanvasTexture) {
@@ -1745,7 +1802,7 @@ export function buildExamGround(objects: TrackObjects) {
     road11AFillet.name = 'road-11a-entry-r5-fillet';
     const filletAsphalt = new THREE.Mesh(
         new THREE.ShapeGeometry(road11AFilletShape(road11AFilletOutline)),
-        new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide }),
+        new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95, side: THREE.DoubleSide }),
     );
     filletAsphalt.geometry.rotateX(-Math.PI / 2);
     filletAsphalt.position.y = .061;
@@ -2007,6 +2064,7 @@ export function buildExamGround(objects: TrackObjects) {
     if (showRoadLaneNumbers) {
         const addRailwayLaneNumber = (parent: THREE.Group, lane: number,
             x: number, z: number, rotationY = 0) => {
+            if (parent.getObjectByName(`lane-number-${lane}`)) return;
             const canvas = document.createElement('canvas');
             canvas.width = canvas.height = 128;
             const ctx = canvas.getContext('2d')!;
@@ -3077,6 +3135,10 @@ export function buildExamGround(objects: TrackObjects) {
     const addPerpendicularConnectorDashedLines = (
         connector: RoadStraight955, vehicleClass: 'B' | 'C', offsetsM: readonly number[],
     ): void => {
+        const widthDimension = connector.root.getObjectByName('WidthDimension');
+        if (widthDimension instanceof THREE.Line) {
+            objects.parkingTimerGates.push({ line: widthDimension, vehicleClass });
+        }
         const gapM = .20;
         const lineWidthM = .10;
         // Nét đầu và nét cuối chạm đúng tâm bó vỉa ở hai mép connector.
@@ -3123,7 +3185,7 @@ export function buildExamGround(objects: TrackObjects) {
             context.font = 'bold 200px Arial, sans-serif';
             context.textAlign = 'center';
             context.textBaseline = 'middle';
-            context.fillText(vehicleClass, 128, 136);
+            context.fillText(vehicleClass === 'C' ? 'C1' : vehicleClass, 128, 136);
             texture = new THREE.CanvasTexture(canvas);
             texture.colorSpace = THREE.SRGBColorSpace;
             texture.anisotropy = 4;

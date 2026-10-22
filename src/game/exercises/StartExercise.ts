@@ -13,11 +13,11 @@ import {
  * Nomenclature follows spec/exam/exam_01_start.md §7:
  *
  *   PRE_START                     → xe đang chạy đến vạch, động cơ có thể đã nổ.
- *     ↓ vào wait zone
- *   WAITING_FOR_START_COMMAND     → đã dừng trước vạch, đợi countdown mềm 5s.
- *     ↓ countdown xong
- *   WAITING_FOR_GO                → chờ tín hiệu xanh (tương đương WAITING_COMMAND cũ).
- *     ↓ đèn xanh + loa
+ *     ↓ voice hướng dẫn đọc xong
+ *   COUNTDOWN_5S                  → hai voice đầu đã xong, chờ xi nhan trái bật đủ 5s.
+ *     ↓ bắt đầu phát batdauthi.mp3
+ *   START_ANNOUNCEMENT            → chờ voice hiệu lệnh đọc xong.
+ *     ↓ voice đọc xong, đèn xanh
  *   COMMAND_RECEIVED              → bật startLamp, bắt đầu timer 20s/30s.
  *     ↓ xe đi qua START_LINE
  *   START_LINE_CROSSED            → đã vượt vạch, kiểm tra xi nhan trái.
@@ -31,6 +31,7 @@ import {
 export type StartState =
     | 'PRE_START'
     | 'COUNTDOWN_5S'
+    | 'START_ANNOUNCEMENT'
     | 'WAITING_FOR_START_COMMAND'
     | 'WAITING_FOR_GO'
     | 'COMMAND_RECEIVED'
@@ -40,7 +41,7 @@ export type StartState =
     | 'EXAM_01_COMPLETED'
     | 'DISQUALIFIED';
 
-export type StartSignalPhase = 'idle' | 'red' | 'green';
+export type StartSignalPhase = 'idle' | 'red' | 'green' | 'yellow';
 
 export interface Exam01Input {
     position: THREE.Vector3;
@@ -68,9 +69,6 @@ export interface Exam01Result {
 
 const roadWidth = 8;
 const markingHalf = 1.3;
-const movingKmh = .8;
-/** Soft 5-second countdown before announcing the official exam start. */
-const startCountdownSec = 5;
 
 export interface StartExerciseOptions {
     vehicleClass?: ExamVehicleClass;
@@ -98,7 +96,6 @@ export class StartExercise {
     private readonly signalOffX: number;
     private readonly rules = resolveStartRules(EXAM_VEHICLE_CLASS);
     private commandAt = 0;
-    private countdownAt = 0;
     private penalty20sApplied = false;
     private crossedChecked = false;
     private timingPenaltyApplied = false;
@@ -106,9 +103,6 @@ export class StartExercise {
     private rpmLatched = false;
     private speedingSec = 0;
     private engineWasRunning = false;
-    private stopDwell = 0;
-    private waitToastAt = -Infinity;
-    private countdownToastEmitted = false;
     private prevFrontX = 0;
     private signalOffChecked = false;
 
@@ -136,6 +130,7 @@ export class StartExercise {
         switch (this.state) {
             case 'PRE_START': return 'Chuẩn bị';
             case 'COUNTDOWN_5S': return 'Xuất phát · Chuẩn bị xuất phát';
+            case 'START_ANNOUNCEMENT': return 'Xuất phát · Đang phát hiệu lệnh';
             case 'WAITING_FOR_START_COMMAND': return 'Xuất phát · Chờ hiệu lệnh';
             case 'WAITING_FOR_GO': return 'Xuất phát · Chờ tín hiệu xanh';
             case 'COMMAND_RECEIVED': return 'Xuất phát · Được phép xuất phát';
@@ -151,7 +146,6 @@ export class StartExercise {
         this.state = 'PRE_START';
         this.startLampOn = false;
         this.commandAt = 0;
-        this.countdownAt = 0;
         this.penalty20sApplied = false;
         this.crossedChecked = false;
         this.timingPenaltyApplied = false;
@@ -159,11 +153,25 @@ export class StartExercise {
         this.rpmLatched = false;
         this.speedingSec = 0;
         this.engineWasRunning = false;
-        this.stopDwell = 0;
-        this.waitToastAt = -Infinity;
-        this.countdownToastEmitted = false;
         this.signalOffChecked = false;
         this.prevFrontX = this.lineX - startPosition.distance;
+    }
+
+    instructionsEnded(): void {
+        if (this.state === 'PRE_START') this.state = 'COUNTDOWN_5S';
+    }
+
+    beginStartAnnouncement(): void {
+        if (this.state === 'COUNTDOWN_5S') this.state = 'START_ANNOUNCEMENT';
+    }
+
+    /** Only the ended event of batdauthi.mp3 authorizes scoring and departure. */
+    receiveStartCommand(): boolean {
+        if (this.state !== 'START_ANNOUNCEMENT') return false;
+        this.state = 'COMMAND_RECEIVED';
+        this.commandAt = performance.now();
+        this.startLampOn = true;
+        return true;
     }
 
     update(input: Exam01Input): Exam01Result {
@@ -185,49 +193,11 @@ export class StartExercise {
             };
         }
 
-        if (this.state === 'PRE_START') {
-            if (crossedLine) return this.markEarlyCrossing(input, add, penalties);
-            return this.updateApproach(input);
-        }
-
-        // Soft 5-second countdown: exam not officially started until it elapses.
-        // BUGFIX (verified earlier): use input.position (root), not frontPosition.
-        // frontPosition is ahead of the chassis centre; the chassis sits inside the
-        // wait zone before the front bumper reaches it, so the zone check must use
-        // the chassis centre to ever fire.
-        if (this.state === 'COUNTDOWN_5S') {
-            if (crossedLine) return this.markEarlyCrossing(input, add, penalties);
-            const atLine = this.waitZone.containsPoint(input.position)
-                && input.position.x < this.lineX - .15;
-            const stopped = Math.abs(input.speedKmh) < .6;
-            if (!input.engineRunning || !atLine || !stopped) {
-                this.state = 'PRE_START';
-                this.stopDwell = 0;
-                this.countdownAt = 0;
-                this.countdownToastEmitted = false;
-                return { penalties, completed: false, disqualified: false };
-            }
-            if (this.countdownAt === 0) this.countdownAt = now;
-            const elapsedSec = (now - this.countdownAt) / 1000;
-            const remaining = Math.max(0, Math.ceil(startCountdownSec - elapsedSec));
-            if (elapsedSec >= startCountdownSec) {
-                this.state = 'COMMAND_RECEIVED';
-                this.commandAt = now;
-                this.startLampOn = true;
-                return { toast: 'Bắt đầu thi', penalties: [], completed: false, disqualified: false };
-            }
-            // Per spec/exam/exam_01_start.md §3: emit exactly ONE "Chuẩn bị xuất phát"
-            // toast when the soft 5-second countdown begins (no per-second remainder toasts).
-            if (!this.countdownToastEmitted) {
-                this.countdownToastEmitted = true;
-                return {
-                    toast: 'Chuẩn bị xuất phát',
-                    penalties: [],
-                    completed: false,
-                    disqualified: false,
-                };
-            }
-            return { penalties, completed: false, disqualified: false };
+        if (this.state === 'PRE_START' || this.state === 'COUNTDOWN_5S'
+            || this.state === 'START_ANNOUNCEMENT') {
+            if (crossedLine) return this.markEarlyCrossing();
+            return this.state === 'PRE_START' ? this.updateApproach(input)
+                : { penalties, completed: false, disqualified: false };
         }
 
         this.checkEngineAndSpeed(input, add);
@@ -304,20 +274,6 @@ export class StartExercise {
                 penalties: [], completed: false, disqualified: false
             };
         }
-        // BUGFIX (verified earlier): use input.position (root), not frontPosition.
-        const atLine = this.waitZone.containsPoint(input.position)
-            && input.position.x < this.lineX - .15;
-        const stopped = Math.abs(input.speedKmh) < .6;
-        if (input.engineRunning && atLine && stopped) {
-            this.stopDwell += input.dt;
-            if (this.stopDwell >= .4) {
-                this.state = 'COUNTDOWN_5S';
-                this.countdownAt = 0;
-                return { penalties: [], completed: false, disqualified: false };
-            }
-        } else {
-            this.stopDwell = 0;
-        }
         return { penalties: [], completed: false, disqualified: false };
     }
 
@@ -332,21 +288,16 @@ export class StartExercise {
         }
     }
 
-    private markEarlyCrossing(
-        input: Exam01Input,
-        add: (points: number, reason: string) => void,
-        penalties: PenaltyEvent[]
-    ): Exam01Result {
-        // A driver may leave before the countdown ends. Still score the crossing
-        // and advance the exam so later exercises do not remain locked behind PRE_START.
-        this.checkEngineAndSpeed(input, add);
-        this.markCrossed(input, add);
-        this.state = 'START_LINE_CROSSED';
+    private markEarlyCrossing(): Exam01Result {
+        this.state = 'DISQUALIFIED';
+        this.startLampOn = false;
+        const reason = 'Xuất phát khi chưa có hiệu lệnh';
         return {
-            toast: 'Đã qua vạch xuất phát',
-            penalties,
+            toast: `Đình chỉ sát hạch — ${reason}`,
+            penalties: [],
             completed: false,
-            disqualified: false,
+            disqualified: true,
+            disqualifyReason: reason,
         };
     }
 

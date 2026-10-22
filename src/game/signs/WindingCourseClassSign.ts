@@ -67,7 +67,8 @@ export class WindingCourseClassSign {
         context.textAlign = 'center';
         context.textBaseline = 'middle';
         context.font = 'bold 116px Arial';
-        context.fillText(`HẠNG ${options.boardClassLabel ?? vehicleClass}`, 256, 136, 454);
+        const classLabel = options.boardClassLabel ?? vehicleClass;
+        context.fillText(`HẠNG ${classLabel === 'C' ? 'C1' : classLabel}`, 256, 136, 454);
         const texture = new THREE.CanvasTexture(canvas);
         texture.colorSpace = THREE.SRGBColorSpace;
 

@@ -41,6 +41,8 @@ export class Hud {
     private clutchDragging = false;
     private autoLessonContinue?: () => void;
     private signalState = { left: false, right: false, hazard: false };
+    public onChangeClass?: () => void;
+    public onShowGuide?: () => void;
     private elements = new Map<string, HTMLElement>();
     constructor(private host: HTMLDivElement, private options: { develop?: boolean } = {}) {
         this.audio = new EngineAudio(host);
@@ -53,10 +55,26 @@ export class Hud {
                 <section class="pill lesson-picker"><label for="lessonSelect">Bài học</label><select id="lessonSelect" aria-label="Chọn bài học tự chạy"><option value="">Chọn bài</option>${AUTO_DRIVE_LESSONS.map(lesson => `<option value="${lesson.id}">${lessonPickerLabel(lesson)}</option>`).join('')}${LOCKED_AUTO_DRIVE_LESSONS.map(lesson => `<option value="${lesson.id}" disabled>${lessonPickerLabel(lesson)}</option>`).join('')}</select></section>
                 <section class="pill"><strong id="speed">0</strong><small class="blue">KM/H</small><i></i><span class="amber">ϟ</span><b class="amber" id="rpm">0</b><small class="amber">RPM</small><i></i><button id="engine" data-key="Enter" class="engine" aria-label="Bật hoặc tắt động cơ">ENGINE</button></section>
             </header>
-            <details class="settings"><summary>⚙ &nbsp; CÀI ĐẶT & GÓC NHÌN</summary><div class="settings-body">
-                <button id="cameraBtn">Đổi camera</button><button id="restartBtn">Thi lại</button><button id="autoDriveBtn" aria-pressed="false">Bật tự chạy</button>
-                <p>Enter: bật/tắt máy<br>Shift: đạp côn · F: nhả nhanh · N/R/1–5: số<br>W/↑: ga · S/↓: phanh<br>A/D: lái · Space: thắng · C: camera${options.develop ? '<br>Develop: chuột phải kéo nhìn · WASD di chuyển · Q/E lên xuống · Shift nhanh · P probe toạ độ · K lưu camera · Shift+K xoá camera đã lưu' : ''}</p>
-            </div></details>
+            <div class="hud-top-right">
+                <div class="hud-standards" title="Tiêu chuẩn và quy định sát hạch">
+                    <div class="hud-standards-item">
+                        <span class="hud-standards-label">Tiêu chuẩn sân:</span>
+                        <strong class="hud-standards-code">QCVN 15:2026/BCA</strong>
+                    </div>
+                    <div class="hud-standards-item">
+                        <span class="hud-standards-label">Quy định về bài thi sa hình:</span>
+                        <strong class="hud-standards-code">TT 12/2025/TT-BCA và TT 108/2026/TT-BCA</strong>
+                    </div>
+                </div>
+                <details class="settings"><summary>⚙ &nbsp; CÀI ĐẶT & GÓC NHÌN</summary><div class="settings-body">
+                    <button id="cameraBtn">Đổi camera</button><button id="restartBtn">Thi lại</button><button id="autoDriveBtn" aria-pressed="false">Bật tự chạy</button><button id="changeClassBtn" style="border-color: #f5b921; color: #f5b921;">🚗 Đổi hạng xe</button>
+                    <button id="settingsGuideBtn" class="settings-guide-btn" type="button" aria-haspopup="dialog">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                        <span>Hướng dẫn sử dụng</span>
+                    </button>
+                    <p>Enter: bật/tắt máy<br>Shift: đạp côn · F: nhả nhanh · N/R/1–5: số<br>W/↑: ga · S/↓: phanh<br>A/D: lái · Space: thắng · C: camera${options.develop ? '<br>Develop: chuột phải kéo nhìn · WASD di chuyển · Q/E lên xuống · Shift nhanh · P probe toạ độ · K lưu camera · Shift+K xoá camera đã lưu' : ''}</p>
+                </div></details>
+            </div>
             <div class="cockpit">
                 <div class="clutch-column"><button id="quickCamera" class="camera-toggle" aria-label="Đổi camera">▣ <span id="camera">1</span></button>
                     <div class="pedal clutch"><b>CÔN</b><span class="clutch-scale"><input class="analog-clutch" type="range" min="0" max="1" step="0.01" value="0" aria-label="Mức đạp côn" aria-describedby="clutchHelp" data-analog="clutch"></span><small id="clutchHelp">Giữ <kbd>Shift</kbd> để đạp</small></div>
@@ -223,6 +241,13 @@ export class Hud {
         this.el('waypointDone').addEventListener('click', () => this.el('waypointPrompt').setAttribute('hidden', ''));
         this.el('cameraBtn').addEventListener('click', b.onCamera);
         this.el('quickCamera').addEventListener('click', b.onCamera);
+        this.el('settingsGuideBtn').addEventListener('click', () => this.onShowGuide?.());
+        const changeClassBtn = this.host.querySelector<HTMLButtonElement>('#changeClassBtn');
+        if (changeClassBtn) {
+            changeClassBtn.addEventListener('click', () => {
+                if (this.onChangeClass) this.onChangeClass();
+            });
+        }
         this.host.querySelectorAll<HTMLButtonElement>('[data-key]').forEach(btn => {
             const code = btn.dataset.key!;
             const release = () => { b.onVirtual(code, false); btn.classList.remove('pressed'); };
@@ -580,5 +605,10 @@ export class Hud {
         this.lastExercise = '';
         this.status = '';
         notify.clear();
+    }
+    setVisible(visible: boolean) {
+        this.host.style.opacity = visible ? '1' : '0';
+        this.host.style.pointerEvents = visible ? '' : 'none';
+        this.host.style.transition = 'opacity 0.35s ease';
     }
 }

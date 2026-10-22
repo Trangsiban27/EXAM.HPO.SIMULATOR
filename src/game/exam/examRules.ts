@@ -420,7 +420,6 @@ export interface Exam04Rules {
     id: 'EXAM_04_WHEEL_TRACK_AND_RIGHT_ANGLE';
     time: {
         limitSec: number;
-        overtimeIntervalSec: number;
         overtimePenalty: number;
     };
     wheelTrack: {
@@ -465,7 +464,6 @@ export const EXAM_04_RULES: Exam04Rules = {
     id: 'EXAM_04_WHEEL_TRACK_AND_RIGHT_ANGLE',
     time: {
         limitSec: 120,
-        overtimeIntervalSec: 120,
         overtimePenalty: 5,
     },
     wheelTrack: {
@@ -521,7 +519,6 @@ export function resolveExam04Rules(vehicleClass: ExamVehicleClass) {
     const r = EXAM_04_RULES;
     return {
         limitSec: r.time.limitSec,
-        overtimeIntervalSec: r.time.overtimeIntervalSec,
         overtimePenalty: r.time.overtimePenalty,
         wheelTrack: { ...r.wheelTrack },
         boundary: { ...r.boundary },

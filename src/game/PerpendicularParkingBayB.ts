@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 
@@ -176,7 +177,7 @@ export class PerpendicularParkingBayB {
             this.debugGroup,
         );
 
-        this.buildSurface(options.surfaceColor ?? '#2a2a2a');
+        this.buildSurface(options.surfaceColor ?? ROAD_SURFACE_COLOR);
         this.buildGrass(options.grassColor ?? '#4f7c45');
         this.buildExamBoundary();
         this.buildPhysicalEdges();

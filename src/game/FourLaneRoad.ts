@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import {
@@ -218,7 +219,7 @@ export class FourLaneRoad {
             // 1. Mặt đường (asphalt).
             const surface = new THREE.Mesh(
                 new THREE.BoxGeometry(widthM, 0.08, lengthM),
-                new THREE.MeshStandardMaterial({ color: highlight ? '#f2b84b' : '#2a2a2a', roughness: 0.95 }),
+                new THREE.MeshStandardMaterial({ color: highlight ? '#f2b84b' : ROAD_SURFACE_COLOR, roughness: 0.95 }),
             );
             surface.position.set(0, 0.02, 0);
             surface.name = 'road-surface';
@@ -275,7 +276,7 @@ export class FourLaneRoad {
             }
         }
 
-        if (withLaneNumbers) {
+        if (withLaneNumbers && laneCount >= 2) {
             for (let i = 0; i < laneCount; i++) {
                 this.addLaneNumber(laneCentersX[i], laneNumberOffsetM, laneCount - i, root);
             }

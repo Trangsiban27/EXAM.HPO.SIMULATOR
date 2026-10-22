@@ -46,35 +46,40 @@ export class CabinView {
     }
 
     render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera,
-        vehicle: Vehicle, active: boolean, steeringWheelAngle: number) {
-        this.overlay.hidden = !active;
-        if (active) this.interior.update(vehicle, steeringWheelAngle);
+        vehicle: Vehicle, cabinActive: boolean, steeringWheelAngle: number) {
+        this.overlay.hidden = false;
+        this.interior.root.hidden = !cabinActive;
+        this.frames[1].hidden = !cabinActive;
+        this.frames[3].hidden = !cabinActive;
+        if (cabinActive) this.interior.update(vehicle, steeringWheelAngle);
         const w = this.host.clientWidth, h = this.host.clientHeight;
         renderer.setViewport(0, 0, w, h);
-        if (!active) { renderer.render(scene, camera); return; }
         const visible = vehicle.root.visible;
-        vehicle.root.visible = false;
+        if (cabinActive) vehicle.root.visible = false;
         renderer.render(scene, camera);
         vehicle.root.visible = visible;
         vehicle.root.updateWorldMatrix(true, true);
         const frame = vehicle.root.children.find(child => child.type === 'Group') ?? vehicle.root;
         const bounds = this.host.getBoundingClientRect();
         const rectangles = this.frames.map(element => element.getBoundingClientRect());
-        const overlayBounds = this.overlay.getBoundingClientRect();
-        let clip = `M0 0H${overlayBounds.width}V${overlayBounds.height}H0Z`;
-        for (const rect of rectangles) {
-            const x = rect.left - overlayBounds.left, y = rect.top - overlayBounds.top;
-            clip += `M${x} ${y}h${rect.width}v${rect.height}h${-rect.width}Z`;
-        }
-        if (clip !== this.interiorClip) {
-            this.interiorClip = clip;
-            this.interior.root.style.clipPath = `path(evenodd, "${clip}")`;
+        if (cabinActive) {
+            const overlayBounds = this.overlay.getBoundingClientRect();
+            let clip = `M0 0H${overlayBounds.width}V${overlayBounds.height}H0Z`;
+            for (const rect of rectangles) {
+                const x = rect.left - overlayBounds.left, y = rect.top - overlayBounds.top;
+                clip += `M${x} ${y}h${rect.width}v${rect.height}h${-rect.width}Z`;
+            }
+            if (clip !== this.interiorClip) {
+                this.interiorClip = clip;
+                this.interior.root.style.clipPath = `path(evenodd, "${clip}")`;
+            }
         }
         const autoClear = renderer.autoClear;
         renderer.autoClear = false;
         renderer.setScissorTest(true);
         for (let i = 0; i < this.views.length; i++) {
             const view = this.views[i], rect = rectangles[i];
+            if (this.frames[i].hidden || rect.width <= 0 || rect.height <= 0) continue;
             view.camera.position.copy(frame.localToWorld(view.eye.clone()));
             view.camera.up.set(0, 1, 0).applyQuaternion(frame.getWorldQuaternion(new THREE.Quaternion()));
             view.camera.lookAt(frame.localToWorld(view.aim.clone()));

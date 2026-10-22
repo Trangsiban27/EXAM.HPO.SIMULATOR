@@ -1,11 +1,7 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import { offsetPath, roundCorners, splitByPattern, type Point } from './roundedPath';
-import {
-    createRoadArrowTexture,
-    STRAIGHT_ROAD_ARROW_LENGTH_M,
-    STRAIGHT_ROAD_ARROW_WIDTH_M,
-} from './straightRoadArrow';
 
 /**
  * Bài sát hạch số 4 — Qua vệt bánh xe và đường vòng vuông góc.
@@ -54,7 +50,7 @@ export interface WheelTrackCourseOptions {
 const CURB_GAP_M = 0.2;
 const CURB_WIDTH_M = 0.2;
 const CURB_SEGMENT_M = 0.8;
-const LIMIT_LINE_WIDTH_M = 0.1;
+const LIMIT_LINE_WIDTH_M = 0.04; // Cùng bề rộng 4 cm với vạch giới hạn chữ S.
 const LIMIT_SENSOR_WIDTH_M = 0.25;
 const WHEEL_TRACK_TO_LIMIT_LINE_M = 2;
 
@@ -111,6 +107,8 @@ export class WheelTrackCourse {
 
     /** Sensor cho vạch vàng đầu bài (local Box3). */
     startYellowSensorLocal!: THREE.Box3;
+    /** Vạch đen bắt đầu tính 120 giây của phần đường vuông góc. */
+    timerStartSensorLocal!: THREE.Box3;
 
     /** Sensor cho vạch vàng cuối bài (local Box3). */
     endYellowSensorLocal!: THREE.Box3;
@@ -185,8 +183,8 @@ export class WheelTrackCourse {
         this.buildCurb(leftCurb, -CURB_VISUAL_WIDTH_M);
         this.buildLimitLine(rightLimit);
         this.buildLimitLine(leftLimit);
+        this.buildBlackEntryLine(limitStartZ);
 
-        this.buildArrows(limitStartZ, crossZ, exitX, limitEndZ);
         this.buildWheelTracks(trackStartZ);
         this.buildYellowLines(
             trackStartZ + Math.min(this.startLineToWheelTrackM, entryLength),
@@ -217,7 +215,7 @@ export class WheelTrackCourse {
         geometry.rotateX(-Math.PI / 2);
         const surface = new THREE.Mesh(
             geometry,
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95 }),
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95 }),
         );
         surface.position.y = -.02;
         surface.receiveShadow = true;
@@ -251,20 +249,27 @@ export class WheelTrackCourse {
         }
     }
 
-    private buildArrows(limitStartZ: number, crossZ: number, exitX: number, exitZ: number): void {
-        const halfBv = this.Bv / 2;
-        const entryLegLength = this.entrySv - this.Bv;
-        const legLength = this.Sv - this.Bv;
-
-        this.addRoadArrow(0, limitStartZ - entryLegLength / 2, this.Bv, entryLegLength, 'straight');
-
-        const acrossArrow = new THREE.Group();
-        acrossArrow.position.set(exitX / 2, 0, crossZ);
-        acrossArrow.rotation.y = Math.PI / 2;
-        this.addRoadArrowTo(0, 0, this.Bv, this.Lv - this.Bv, 'straight', acrossArrow);
-        this.root.add(acrossArrow);
-
-        this.addRoadArrow(exitX, (crossZ - halfBv + exitZ) / 2, this.Bv, legLength, 'straight');
+    /** Vạch đen liền, mảnh tại đầu hai vạch giới hạn vàng của đường vuông góc. */
+    private buildBlackEntryLine(z: number): void {
+        const blackLineWidthM = .1;
+        const widthM = this.Bv - LIMIT_LINE_WIDTH_M;
+        const line = new THREE.Mesh(
+            new THREE.BoxGeometry(widthM, .01, blackLineWidthM),
+            new THREE.MeshBasicMaterial({
+                color: 0x080808,
+                transparent: true,
+                opacity: .55,
+                depthWrite: false,
+            }),
+        );
+        // Mặt trên cùng cao độ .075 m và mép trước thẳng hàng với đầu vạch vàng.
+        line.position.set(0, .07, z - blackLineWidthM / 2);
+        line.name = 'EX04_RIGHT_ANGLE_ENTRY_BLACK_LINE';
+        this.root.add(line);
+        this.timerStartSensorLocal = new THREE.Box3(
+            new THREE.Vector3(-widthM / 2, -1, z - blackLineWidthM),
+            new THREE.Vector3(widthM / 2, 1, z),
+        );
     }
 
     private buildWheelTracks(trackStartZ: number): void {
@@ -296,7 +301,19 @@ export class WheelTrackCourse {
             emissive: 0x553300,
         });
 
-        const startMesh = new THREE.Mesh(new THREE.BoxGeometry(this.Bv, thickness, d), yellowMat);
+        const dashCount = 3;
+        const dashGapM = this.Bv * .12;
+        const dashLengthM = (this.Bv - (dashCount - 1) * dashGapM) / dashCount;
+        const startMesh = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(dashLengthM, thickness, LIMIT_LINE_WIDTH_M), yellowMat, dashCount,
+        );
+        for (let i = 0; i < dashCount; i++) {
+            const dashX = -halfBv + dashLengthM / 2 + i * (dashLengthM + dashGapM);
+            startMesh.setMatrixAt(i, new THREE.Matrix4().makeTranslation(dashX, 0, 0));
+        }
+        startMesh.instanceMatrix.needsUpdate = true;
+        startMesh.computeBoundingBox();
+        startMesh.computeBoundingSphere();
         startMesh.position.set(0, y, startZ);
         startMesh.name = 'EX04_START_YELLOW_LINE';
         this.root.add(startMesh);
@@ -306,7 +323,7 @@ export class WheelTrackCourse {
             new THREE.Vector3(halfBv, 1, startZ + d / 2),
         );
 
-        const endMesh = new THREE.Mesh(new THREE.BoxGeometry(this.Bv, thickness, d), yellowMat);
+        const endMesh = startMesh.clone();
         endMesh.position.set(exitX, y, exitZ);
         endMesh.name = 'EX04_END_YELLOW_LINE';
         this.root.add(endMesh);
@@ -328,40 +345,6 @@ export class WheelTrackCourse {
         );
         m.position.set(x, .075, z);
         this.root.add(m);
-    }
-
-    /**
-     * Mũi tên chỉ hướng trên mặt đường — dùng texture procedurally.
-     */
-    private addRoadArrow(x: number, z: number, w: number, d: number,
-        type: 'straight' | 'left' | 'right'): void {
-        const texture = createRoadArrowTexture(type);
-        const arrow = new THREE.Mesh(
-            new THREE.PlaneGeometry(
-                Math.min(w * .5, STRAIGHT_ROAD_ARROW_WIDTH_M),
-                Math.min(d * .35, STRAIGHT_ROAD_ARROW_LENGTH_M)
-            ),
-            new THREE.MeshBasicMaterial({ map: texture, transparent: true })
-        );
-        arrow.rotation.x = -Math.PI / 2;
-        arrow.position.set(x, 0.081, z);
-        this.root.add(arrow);
-    }
-
-    /** Đặt arrow vào group có sẵn (dùng cho acrossArrow). */
-    private addRoadArrowTo(x: number, z: number, w: number, d: number,
-        type: 'straight' | 'left' | 'right', parent: THREE.Group): void {
-        const texture = createRoadArrowTexture(type);
-        const arrow = new THREE.Mesh(
-            new THREE.PlaneGeometry(
-                Math.min(w * .5, STRAIGHT_ROAD_ARROW_WIDTH_M),
-                Math.min(d * .35, STRAIGHT_ROAD_ARROW_LENGTH_M)
-            ),
-            new THREE.MeshBasicMaterial({ map: texture, transparent: true })
-        );
-        arrow.rotation.x = -Math.PI / 2;
-        arrow.position.set(x, 0.081, z);
-        parent.add(arrow);
     }
 
 }

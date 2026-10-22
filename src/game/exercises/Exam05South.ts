@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { PenaltyEvent } from '../types';
-import { TrafficLight } from '../TrafficLight';
+import type { TrafficLight } from '../TrafficLight';
+
+type Exam05Signal = Pick<TrafficLight, 'root' | 'stopLineX' | 'stopLineZ' | 'phase'>;
 import {
     EXAM_VEHICLE_CLASS,
     resolveExam05Rules,
@@ -29,8 +31,7 @@ import {
  *
  * Các lỗi khác (xi nhan, vạch đường, vỉa hè, tai nạn) chưa wire.
  *
- * TODO: TrafficLight hiện không có phase 'yellow' (chỉ red/green). Khi có,
- * cập nhật logic E05-01 để phân biệt red vs yellow semantics theo spec §2.1.
+ * Vượt đèn đỏ chỉ được tính ở pha đỏ; pha vàng không áp dụng khoản phạt này.
  */
 
 export type Exam05State =
@@ -65,7 +66,7 @@ export interface Exam05Result {
 
 export interface Exam05SouthOptions {
     /** TrafficLight South — lấy từ Track.getTrafficLight('SOUTH'). */
-    light: TrafficLight;
+    light: Exam05Signal;
     /** Chiều rộng làn đường (m). Mặc định 8. */
     roadWidth?: number;
     /** Tâm lane theo trục X (world). Lane dọc (NS) ở world X = 21 theo buildExamGround. */
@@ -78,13 +79,15 @@ export interface Exam05SouthOptions {
 
 /** Subset của Exam05SouthOptions cần thiết cho attach() — cho phép attach lại sau khi wire. */
 export interface Exam05SouthAttachOptions {
-    light: TrafficLight;
+    light: Exam05Signal;
     roadWidth?: number;
     roadZ?: number;
     /** Mép stopbar trắng gần xe đi tới, lấy từ mesh 'exam-05-stop-bar'. */
     stopBar?: { minX: number; maxX: number; nearZ: number };
     /** Tâm vạch qua đường dùng làm vạch kết thúc ngã tư. */
     finishLine?: { x: number; z: number; widthM: number; depthM: number };
+    /** Mốc ra ngã tư dùng chung cho các hướng đi thẳng hoặc rẽ. */
+    completionCheck?: () => boolean;
 }
 
 const DEFAULTS = {
@@ -109,7 +112,7 @@ export class Exam05South {
     /** Tọa độ world Z tâm vạch dừng (đã suy ra từ light). */
     readonly stopLineWorldZ: number;
 
-    private light?: TrafficLight;
+    private light?: Exam05Signal;
     private readonly roadWidth: number;
     private readonly stopSpeedKmh: number;
     private readonly minStopDwellSec: number;
@@ -134,6 +137,7 @@ export class Exam05South {
     /** Footprint của vạch qua đường dùng làm mốc kết thúc bài. */
     readonly completionZone: THREE.Box3 = new THREE.Box3();
     private hasCompletionZone = false;
+    private completionCheck?: () => boolean;
 
     constructor(options?: Exam05SouthOptions) {
         this.roadWidth = options?.roadWidth ?? DEFAULTS.roadWidth;
@@ -163,6 +167,7 @@ export class Exam05South {
             return;
         }
         this.light = options.light;
+        this.completionCheck = options.completionCheck;
         const roadZ = options.roadZ;
         const halfWidth = (options.roadWidth ?? DEFAULTS.roadWidth) / 2;
         const built = Exam05South.buildSensorsFromLight(
@@ -208,7 +213,7 @@ export class Exam05South {
      * Nếu sau này tái sử dụng cho light xoay (NORTH/WEST/EAST), cần xét lại
      * hướng dựa trên `light.root.matrixWorld` thay vì giả định -Z.
      */
-    static buildSensorsFromLight(light: TrafficLight, roadWidth: number, roadZ: number): {
+    static buildSensorsFromLight(light: Exam05Signal, roadWidth: number, roadZ: number): {
         stopLine: THREE.Box3;
         overLine: THREE.Box3;
         overLineDeep: THREE.Box3;
@@ -358,10 +363,10 @@ export class Exam05South {
         }
 
         // Đầu xe đi qua tâm vạch qua đường tại Z=-51: kết thúc bài.
-        if (this.hasCompletionZone && this.finishLineZ !== undefined
+        if (this.completionCheck?.() || (this.hasCompletionZone && this.finishLineZ !== undefined
             && input.frontPosition.x >= this.completionZone.min.x
             && input.frontPosition.x <= this.completionZone.max.x
-            && input.frontPosition.z <= this.finishLineZ) {
+            && input.frontPosition.z <= this.finishLineZ)) {
             this.completed = true;
             this.state = 'COMPLETED';
             return {
@@ -398,9 +403,8 @@ export class Exam05South {
             // Dùng overLineDeep (chỉ trigger khi front cách vạch ≥ 1m về phía -Z) thay vì
             // overLine (trigger ngay khi qua vạch, dành riêng cho E05-01 đèn đỏ).
             const overLineDeepHit = this.overLineDeep.containsPoint(input.frontPosition);
-            if (overLineDeepHit && !onTheLine) {
+            if (overLineDeepHit && !onTheLine && !stopped) {
                 if (!this.stopEvaluated) {
-                    this.stopEvaluated = true;
                     this._stopClassification = 'NO_REQUIRED_STOP';
                     // Không trừ thêm điểm NO_REQUIRED_STOP ở lần này (chưa có rule);
                     // nếu xe vượt khi đỏ → đã bị E05-01 ở trên.
@@ -417,8 +421,10 @@ export class Exam05South {
 
             // Xe dừng hẳn tại vạch → chấm vị trí dừng (E05-02 / E05-03).
             const A = this.signedDistanceToStopLine(input.frontPosition);
-            // Buffer 0.15m hai phía để chuyển state mượt khi xe dừng đúng rìa 1m.
-            const frontNearStopLine = A > -1.15 && A < 1.15;
+            // Xét cả vùng tiếp cận để bắt lỗi dừng quá sớm hoặc quá vạch.
+            const frontNearStopLine = Math.abs(A) < 15
+                && input.frontPosition.x >= this.stopLine.min.x
+                && input.frontPosition.x <= this.stopLine.max.x;
             if (frontNearStopLine && stopped) {
                 if (this.stoppedSince === 0) this.stoppedSince = now;
                 const dwell = (now - this.stoppedSince) / 1000;
@@ -448,8 +454,10 @@ export class Exam05South {
             // Xe dừng tại vạch nhưng chưa chấm được (chưa đủ dwell) → tiếp tục chờ.
             if (!this.stopEvaluated) {
                 const A = this.signedDistanceToStopLine(input.frontPosition);
-                // Buffer 0.15m hai phía để chuyển state mượt khi xe dừng đúng rìa 1m.
-            const frontNearStopLine = A > -1.15 && A < 1.15;
+                // Tiếp tục xét vị trí dừng nếu xe đã qua vạch khi đang di chuyển.
+                const frontNearStopLine = Math.abs(A) < 15
+                    && input.frontPosition.x >= this.stopLine.min.x
+                    && input.frontPosition.x <= this.stopLine.max.x;
                 if (frontNearStopLine && stopped) {
                     if (this.stoppedSince === 0) this.stoppedSince = now;
                     const dwell = (now - this.stoppedSince) / 1000;
@@ -471,8 +479,7 @@ export class Exam05South {
                 }
             }
 
-            // Đã chấm xong vị trí. Hiện tại chưa wire endLine sensor nên
-            // exercise giữ ở STOP_EVALUATION cho đến khi wire COMPLETED.
+            // Giữ trạng thái đến khi xe qua mốc ra ngã tư ở đầu update().
             return {
                 penalties,
                 completed: false,

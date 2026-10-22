@@ -41,7 +41,7 @@
     overflow-y: auto;
     pointer-events: auto;
 }
-/* Keep the lesson below the shoulder camera when the cabin view is visible. */
+/* Keep the lesson below the shoulder camera whenever the reference views are visible. */
 body:has(.cabin-overlay:not([hidden])) .auto-quiz.auto-lesson {
     --auto-lesson-top: calc(102px + clamp(75px, 10vw, 150px) + clamp(75px, 10vw, 150px));
     align-items: start;

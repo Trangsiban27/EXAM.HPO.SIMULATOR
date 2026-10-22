@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import { EXAM_03_STOP_LINE_LOCAL_Z, EXAM_03_YELLOW_LINE_LOCAL_Z } from './exam/examCourseGeometry';
@@ -47,7 +48,7 @@ export class Bridge {
     }
 
     private build() {
-        const asphalt = new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95 });
+        const asphalt = new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95 });
         const concrete = new THREE.MeshStandardMaterial({ color: 0xa7adb0, roughness: .9 });
         const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .8 });
         const red = new THREE.MeshStandardMaterial({ color: 0xd83b3b, roughness: .8 });

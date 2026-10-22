@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import { createGrassSurfaceTexture } from './grassSurface';
@@ -19,6 +20,7 @@ import { PerpendicularParkingBayB, type PerpendicularParkingBayBOptions } from '
 import { PerpendicularParkingBayC, type PerpendicularParkingBayCOptions } from './PerpendicularParkingBayC';
 import { RoadStraight955, type RoadStraight955Options } from './RoadStraight955';
 import type { ExamVehicleClass } from './exam/examRules';
+import type { ParkingTimerGate } from './exercises/Exam07ParkingTimer';
 import { getWindingCourseSpec, validateWindingCourseSpec } from './WindingCourseSpec';
 import {
     createRoadArrowTexture,
@@ -42,6 +44,7 @@ export type RoadSegment = {
 };
 export type AutoDriveWaypointStop = { id: string; root: THREE.Group; widthM: number; lengthM: number; laneOffsetM: number };
 export type WindingCourseEntry = {
+    vehicleClass: ExamVehicleClass;
     course: SCurveTrack;
     entryRoadIndex: number;
     exitRoadIndex: number;
@@ -50,9 +53,41 @@ export type WindingCourseEntry = {
     /** Length of the straight exit road segment that follows the winding course. */
     _exitLength: number;
 };
+export type ParkingClassZone = {
+    root: THREE.Object3D;
+    vehicleClass: ExamVehicleClass;
+    bounds: THREE.Box3;
+};
 export class TrackObjects {
+    readonly parkingClassZones: ParkingClassZone[] = [];
+    readonly parkingTimerGates: ParkingTimerGate[] = [];
+    readonly perpendicularParkingBoundaryGroups: THREE.Group[] = [];
+    exam05To06LaneRule?: { road: THREE.Group; widthM: number; lengthM: number };
     readonly root = new THREE.Group();
+    showRoadLaneNumbers = false;
+
+    private addLaneNumber(parent: THREE.Group, lane: number, x: number, z: number,
+        y = .095, rotationY = 0): void {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 128;
+        const context = canvas.getContext('2d')!;
+        context.fillStyle = '#ffffff';
+        context.font = 'bold 88px Arial, sans-serif';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(String(lane), 64, 64);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const label = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1),
+            new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }));
+        label.name = `lane-number-${lane}`;
+        label.rotation.set(-Math.PI / 2, 0, 0);
+        label.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), rotationY);
+        label.position.set(x, y, z);
+        parent.add(label);
+    }
     readonly penaltyZones: THREE.Box3[] = [];
+    readonly curvedBoundaryChecks: { groupIndex: number; touches: (wheel: THREE.Vector3) => boolean }[] = [];
     /** Các đoạn vạch trong cùng một chuồng S dùng chung thời gian chờ báo lỗi. */
     readonly penaltyZoneGroupIndices: number[] = [];
     private readonly bridges: Bridge[] = [];
@@ -112,7 +147,7 @@ export class TrackObjects {
         const island = new THREE.Group();
         island.name = 'wheel-track-entry-island-caps';
         this.root.add(island);
-        const asphalt = new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide });
+        const asphalt = new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95, side: THREE.DoubleSide });
         const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
             new THREE.MeshStandardMaterial({ color, roughness: .85 }));
         const shape = (points: Point[]) =>
@@ -254,7 +289,7 @@ export class TrackObjects {
         apron.name = 'wheel-track-exit-apron';
         this.root.add(apron);
 
-        const asphaltMaterial = new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide });
+        const asphaltMaterial = new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95, side: THREE.DoubleSide });
         const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
             new THREE.MeshStandardMaterial({ color, roughness: .85 }));
         const shape = (points: Array<[number, number]>) =>
@@ -534,7 +569,7 @@ export class TrackObjects {
         group.name = 'finish-road-section-junction-corners';
         this.root.add(group);
         const asphaltMaterial = new THREE.MeshStandardMaterial({
-            color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide,
+            color: ROAD_SURFACE_COLOR, roughness: .95, side: THREE.DoubleSide,
         });
         const curbMaterials = [0xffffff, 0xd83b3b].map(color =>
             new THREE.MeshStandardMaterial({ color, roughness: .85 }));
@@ -704,7 +739,7 @@ export class TrackObjects {
         asphaltGeometry.rotateX(-Math.PI / 2);
         const asphalt = new THREE.Mesh(
             asphaltGeometry,
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide }),
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95, side: THREE.DoubleSide }),
         );
         asphalt.position.y = .061;
         asphalt.name = 'road-surface-r7-5-corner';
@@ -778,7 +813,7 @@ export class TrackObjects {
         ]));
         asphaltGeometry.rotateX(-Math.PI / 2);
         const asphalt = new THREE.Mesh(asphaltGeometry,
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide }));
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95, side: THREE.DoubleSide }));
         asphalt.name = 'road-junction-corner-asphalt';
         asphalt.position.y = .061;
         asphalt.receiveShadow = true;
@@ -872,7 +907,7 @@ export class TrackObjects {
         ]));
         asphaltGeometry.rotateX(-Math.PI / 2);
         const asphalt = new THREE.Mesh(asphaltGeometry,
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide }));
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95, side: THREE.DoubleSide }));
         asphalt.name = 'road-junction-corner-asphalt';
         asphalt.position.y = .061;
         asphalt.receiveShadow = true;
@@ -978,7 +1013,7 @@ export class TrackObjects {
         ]));
         asphaltGeometry.rotateX(-Math.PI / 2);
         const asphalt = new THREE.Mesh(asphaltGeometry,
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide }));
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95, side: THREE.DoubleSide }));
         asphalt.name = 'road-junction-corner-asphalt';
         asphalt.position.y = .061;
         asphalt.receiveShadow = true;
@@ -1206,6 +1241,12 @@ export class TrackObjects {
         const bridge = new Bridge(x, z, direction, widthM);
         this.bridges.push(bridge);
         this.root.add(bridge.root);
+        if (this.showRoadLaneNumbers) {
+            const y = (bridge.surfaceHeight(x, z) ?? .06) + .035;
+            for (let lane = 1; lane <= 2; lane++) {
+                this.addLaneNumber(bridge.root, lane, widthM / 2 - (lane - .5) * widthM / 2, 0, y);
+            }
+        }
         return bridge;
     }
 
@@ -1255,6 +1296,7 @@ export class TrackObjects {
         arrow.rotation.x = -Math.PI / 2;
         arrow.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), rotationY);
         arrow.position.set(x, 0.09, z); // tách khỏi mặt đường để tránh nhấp nháy khi camera di chuyển
+        arrow.userData.isRoadArrow = true;
         parent.add(arrow);
         return arrow;
     }
@@ -1425,7 +1467,7 @@ export class TrackObjects {
         const road = new THREE.Mesh(
             new THREE.BoxGeometry(w, 0.08, d),
             new THREE.MeshStandardMaterial({
-                color: '#2a2a2a',   // xám mặt đường
+                color: ROAD_SURFACE_COLOR,   // xám mặt đường
                 roughness: 0.95
             })
         );
@@ -1497,6 +1539,11 @@ export class TrackObjects {
                     // Làn trái (local X < 0) đi ngược chiều xe → xoay 180°.
                     arrow.rotateZ(Math.PI);
                 }
+            }
+        }
+        if (this.showRoadLaneNumbers && lanes >= 2) {
+            for (let lane = 1; lane <= lanes; lane++) {
+                this.addLaneNumber(segment, lane, w / 2 - (lane - .5) * w / lanes, -d / 4);
             }
         }
         return segment;
@@ -1700,6 +1747,11 @@ export class TrackObjects {
         const bay = new ParallelParkingBayB(opts);
         this.root.add(bay.root);
         this.parallelParkingBays.push(bay);
+        const parkingSign = bay.side === 'LEFT' ? -1 : 1;
+        this.parkingClassZones.push({ root: bay.root, vehicleClass: bay.vehicleClass,
+            bounds: new THREE.Box3(
+                new THREE.Vector3(parkingSign < 0 ? -bay.depthM : .05, -10, -bay.lengthM / 2),
+                new THREE.Vector3(parkingSign < 0 ? -.05 : bay.depthM, 10, bay.lengthM / 2)) });
 
         // Tính world bounds từ local bbox (bao gồm curb mở rộng).
         const sideSign = bay.side === 'LEFT' ? -1 : 1;
@@ -1741,6 +1793,10 @@ export class TrackObjects {
     addPerpendicularParkingBayB(opts: PerpendicularParkingBayBOptions): PerpendicularParkingBayB {
         const bay = new PerpendicularParkingBayB(opts);
         this.root.add(bay.root);
+        this.perpendicularParkingBoundaryGroups.push(bay.examBoundaryGroup);
+        this.parkingClassZones.push({ root: bay.root, vehicleClass: 'B',
+            bounds: new THREE.Box3(new THREE.Vector3(-bay.parkingWidthM / 2, -10, .05),
+                new THREE.Vector3(bay.parkingWidthM / 2, 10, bay.parkingDepthM)) });
 
         const { controlStartX, controlEndX } = bay.geometry;
         const localBox = new THREE.Box3(
@@ -1771,6 +1827,10 @@ export class TrackObjects {
     addPerpendicularParkingBayC(opts: PerpendicularParkingBayCOptions): PerpendicularParkingBayC {
         const bay = new PerpendicularParkingBayC(opts);
         this.root.add(bay.root);
+        this.perpendicularParkingBoundaryGroups.push(bay.examBoundaryGroup);
+        this.parkingClassZones.push({ root: bay.root, vehicleClass: 'C',
+            bounds: new THREE.Box3(new THREE.Vector3(-bay.parkingWidthM / 2, -10, .05),
+                new THREE.Vector3(bay.parkingWidthM / 2, 10, bay.parkingDepthM)) });
 
         const { controlStartX, controlEndX } = bay.geometry;
         const localBox = new THREE.Box3(
@@ -2159,7 +2219,7 @@ export class TrackObjects {
         const roadGeometry = new THREE.ShapeGeometry(new THREE.Shape(roadPoints));
         roadGeometry.rotateX(-Math.PI / 2);
         const road = new THREE.Mesh(roadGeometry,
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95, side: THREE.DoubleSide }));
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95, side: THREE.DoubleSide }));
         road.position.y = .06;
         road.name = 'road-surface';
         road.receiveShadow = true;
@@ -2260,7 +2320,7 @@ export class TrackObjects {
         };
 
         sector(innerRadius, outerRadius, start, end, .08, .06,
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95 }), 'road-surface');
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95 }), 'road-surface');
 
         // Measure dashes along the arc so their length matches straight-road markings.
         const { material, spans } = this.centerLineSegments(radius * (end - start), centerLine, lanes);
@@ -2292,6 +2352,13 @@ export class TrackObjects {
             arrowGroup.rotation.y = -(angle - start);
             group.add(arrowGroup);
             this.addRoadArrow(0, 0, width / lanes, laneRadius * (end - start), 'right', arrowGroup);
+        }
+        if (this.showRoadLaneNumbers && lanes >= 2) {
+            for (let lane = 1; lane <= lanes; lane++) {
+                const laneRadius = radius - width / 2 + (lane - .5) * width / lanes;
+                this.addLaneNumber(group, lane, laneRadius * Math.cos(angle),
+                    laneRadius * Math.sin(angle), .095, -(angle - start));
+            }
         }
         return group;
     }
@@ -2380,7 +2447,7 @@ export class TrackObjects {
         // Cover center markings within the crossing, leaving both curbs visible.
         const usableWidth = roadWidth - .4;
         const surface = new THREE.Mesh(new THREE.PlaneGeometry(usableWidth, crossingDepth),
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95 }));
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95 }));
         surface.rotation.x = -Math.PI / 2;
         surface.position.y = .083;
         surface.receiveShadow = true;
@@ -2433,12 +2500,14 @@ export class TrackObjects {
      * and rotated into place via a single Matrix4 transform so that entry/exit
      * stay consistent with the visual layout.
      */
-    addWheelTrackCourse({ x = 58, z = -20, direction = 'vertical', entryLength = 0, ...courseOptions }: {
+    addWheelTrackCourse({ x = 58, z = -20, direction = 'vertical', entryLength = 0,
+        vehicleClass = 'B', ...courseOptions }: {
         x?: number;
         z?: number;
         direction?: RoadDirection;
         /** Đoạn tiếp cận từ entry tới đầu vệt bánh xe. */
         entryLength?: number;
+        vehicleClass?: ExamVehicleClass;
     } & WheelTrackCourseOptions = {}) {
         // Build the course at local origin (entry at (0, 0, 0)).
         const course = new WheelTrackCourse(0, 0, entryLength, courseOptions);
@@ -2468,6 +2537,7 @@ export class TrackObjects {
 
         // Transform all sensors to world space and return for Exam04 use.
         const startYellowSensor = course.startYellowSensorLocal.clone().applyMatrix4(transform);
+        const timerStartSensor = course.timerStartSensorLocal.clone().applyMatrix4(transform);
         const endYellowSensor = course.endYellowSensorLocal.clone().applyMatrix4(transform);
         const wheelTrackZone = course.wheelTrackZoneLocal.clone().applyMatrix4(transform);
         const boundarySensors = course.boundarySensorsLocal.map(b => b.clone().applyMatrix4(transform));
@@ -2493,11 +2563,13 @@ export class TrackObjects {
             entryWorld,
             exitWorld,
             roadWidthM: course.roadWidthM,
+            vehicleClass,
             courseRoot: course.root,
             exitForwardAxis,
             startYellowLine: course.startYellowLine,
             endYellowLine: course.endYellowLine,
             startYellowSensor,
+            timerStartSensor,
             endYellowSensor,
             wheelTrackZone,
             boundarySensors,
@@ -2517,10 +2589,10 @@ export class TrackObjects {
         const track = new SCurveTrack(options);
         this.root.add(track.root);
         const coursePenaltyGroupIndex = this.penaltyZones.length;
-        for (const zone of track.penaltyZones) {
-            const index = this.penaltyZones.push(zone.clone().applyMatrix4(track.root.matrix)) - 1;
-            this.penaltyZoneGroupIndices[index] = coursePenaltyGroupIndex;
-        }
+        // Reserve a unique group without using the approximate arc AABBs for scoring.
+        this.penaltyZones.push(new THREE.Box3());
+        this.curvedBoundaryChecks.push({ groupIndex: coursePenaltyGroupIndex,
+            touches: wheel => track.touchesBoundary(wheel) });
         return track;
     }
 
@@ -2597,6 +2669,7 @@ export class TrackObjects {
             ).rotateZ(Math.PI);
         }
         const windingEntry = {
+            vehicleClass,
             course: winding,
             entryRoadIndex,
             exitRoadIndex,

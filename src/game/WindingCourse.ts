@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import type { WindingCourseSpec } from './WindingCourseSpec';
@@ -47,6 +48,25 @@ const DEFAULT_CENTER_TILT_RAD = Math.acos(5.55 / 8.86);
 export class SCurveTrack {
     readonly root = new THREE.Group();
     readonly penaltyZones: THREE.Box3[] = [];
+    private readonly penaltyArcs: { arc: ArcDefinition; radius: number; end: number }[] = [];
+
+    /** Test in course coordinates so rotated bounding boxes cannot produce false hits. */
+    touchesBoundary(worldWheel: THREE.Vector3): boolean {
+        this.root.updateWorldMatrix(true, false);
+        const wheel = this.root.worldToLocal(worldWheel.clone());
+        const tolerance = .13; // Half tyre width plus half the painted line width.
+        return this.penaltyArcs.some(({ arc, radius, end }) => {
+            const angle = Math.atan2(wheel.z - arc.centerZ, wheel.x - arc.centerX);
+            const low = Math.min(arc.from, end);
+            const high = Math.max(arc.from, end);
+            const unwrapped = angle + Math.round(((low + high) / 2 - angle) / (2 * Math.PI)) * 2 * Math.PI;
+            const closest = THREE.MathUtils.clamp(unwrapped, low, high);
+            return Math.hypot(
+                wheel.x - arc.centerX - radius * Math.cos(closest),
+                wheel.z - arc.centerZ - radius * Math.sin(closest),
+            ) <= tolerance;
+        });
+    }
     readonly cadLabel: string = 'S-CURVE';
     readonly width: number;
     readonly envelopeWidth: number;
@@ -139,7 +159,7 @@ export class SCurveTrack {
             { centerX: secondCenterX, centerZ: secondCenterZ, from: -Math.PI / 2 + centerTiltRad, to: Math.PI / 2 },
         ];
 
-        const asphalt = new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: .95 });
+        const asphalt = new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: .95 });
         const curbWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .85 });
         const curbRed = new THREE.MeshStandardMaterial({ color: 0xd83b3b, roughness: .85 });
         const boundaryRed = new THREE.MeshStandardMaterial({ color: 0xf6d34c, roughness: .65 });
@@ -405,6 +425,9 @@ export class SCurveTrack {
         boundary.geometry.dispose();
         boundary.geometry = arcGeometry(
             arc.from, angle, this.outerRadius - .02, this.outerRadius + .02, .008);
+        for (const boundaryArc of this.penaltyArcs) {
+            if (boundaryArc.arc === arc && boundaryArc.radius === this.outerRadius) boundaryArc.end = angle;
+        }
     }
 
     private createArcShape(arc: ArcDefinition, innerRadiusM: number, outerRadiusM: number): THREE.Shape {
@@ -432,6 +455,7 @@ export class SCurveTrack {
         // Chỉ kiểm tra sát hai vạch giới hạn; khoảng giữa là phần đường hợp lệ.
         const wheelAndLineToleranceM = .13; // Nửa bề rộng bánh xe và vạch giới hạn.
         for (const radiusM of [innerRadiusM, outerRadiusM]) {
+            this.penaltyArcs.push({ arc, radius: radiusM, end: arc.to });
             for (let i = 0; i < samples; i++) {
                 const start = arc.from + (arc.to - arc.from) * i / samples;
                 const end = arc.from + (arc.to - arc.from) * (i + 1) / samples;

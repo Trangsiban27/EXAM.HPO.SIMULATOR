@@ -12,7 +12,7 @@ type SavedDevCamera = {
 
 export class CameraManager {
     mode = 0;
-    readonly camera = new THREE.PerspectiveCamera(60, 1, .1, 500);
+    readonly camera = new THREE.PerspectiveCamera(60, 1, .1, 200);
     private readonly followFocus = new THREE.Vector3();
     private readonly followOffset = new THREE.Vector3();
     private previousMode = -1;
@@ -144,8 +144,8 @@ export class CameraManager {
             else this.followFocus.lerp(look, 1 - Math.exp(-5 * dt));
             // Fixed world-space angle: turning the car does not rotate the view.
             // View the left side (-X at spawn), 36 degrees above the ground.
-            const portraitExtra = Math.max(0, (16 / 9) / this.camera.aspect - 1) * 9;
-            this.followOffset.setFromSphericalCoords(36 + portraitExtra, Math.PI * .3, -Math.PI * .5);
+            const portraitExtra = Math.max(0, (16 / 9) / this.camera.aspect - 1) * 7.25;
+            this.followOffset.setFromSphericalCoords(29 + portraitExtra, Math.PI * .3, -Math.PI * .5);
             look.copy(this.followFocus);
             target.copy(look).add(this.followOffset);
         } else if (this.mode === 2) {

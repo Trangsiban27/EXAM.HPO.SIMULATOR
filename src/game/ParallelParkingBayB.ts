@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 
@@ -156,7 +157,7 @@ export interface ParallelParkingBayBOptions {
     curbSegmentLengthM?: number;
     /** Màu curb khi curbPattern là 'solid' (mặc định '#2c2c2e'). */
     curbColor?: string;
-    /** Màu mặt đường asphalt (mặc định '#2a2a2a'). */
+    /** Màu mặt đường asphalt; mặc định lấy từ ROAD_SURFACE_COLOR. */
     surfaceColor?: string;
     /** Phía đặt chuồng so với đường: 'RIGHT' (mặc định, +X vào chuồng) hoặc 'LEFT' (-X vào chuồng). */
     side?: 'LEFT' | 'RIGHT';
@@ -227,7 +228,7 @@ export class ParallelParkingBayB {
         const curbPattern = opts.curbPattern ?? 'red-white';
         const curbSegmentLengthM = opts.curbSegmentLengthM ?? 0.8;
         const curbColor = opts.curbColor ?? '#2c2c2e';
-        const surfaceColor = opts.surfaceColor ?? '#2a2a2a';
+        const surfaceColor = opts.surfaceColor ?? ROAD_SURFACE_COLOR;
         const side = opts.side ?? 'RIGHT';
         const rotationY = opts.rotationY ?? 0;
         const showDebug = opts.showDebug ?? false;

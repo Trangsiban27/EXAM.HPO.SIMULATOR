@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { PenaltyEvent } from '../types';
-import { EXAM_04_RULES, EXAM_VEHICLE_CLASS } from '../exam/examRules';
+import { EXAM_04_RULES, EXAM_VEHICLE_CLASS, type ExamVehicleClass } from '../exam/examRules';
+
+export const EXAM_04_WRONG_LAYOUT_REASON = 'đi không đúng hình của hạng xe';
 
 /**
  * Bài sát hạch số 4 — Qua vệt bánh xe và đường vòng vuông góc
@@ -77,10 +79,13 @@ export interface Exam04Result {
 
 /** Một bộ sensor cho một course bài 04 (đã transform sang world space). */
 export interface Exam04CourseSensors {
+    vehicleClass: ExamVehicleClass;
     /** Index của course (0..3). */
     index: number;
     /** Sensor vạch vàng đầu bài (START_GATE). */
     startYellowSensor: THREE.Box3;
+    /** Vạch đen bắt đầu đồng hồ 120 giây. */
+    timerStartSensor: THREE.Box3;
     /** Sensor vạch vàng cuối bài (END_GATE). */
     endYellowSensor: THREE.Box3;
     /** Vùng wheel-track Box3 (world space). */
@@ -107,7 +112,6 @@ export class Exam04WheelTrack {
 
     // ── Resolved rules (loaded once in constructor) ──────────────────────────
     private readonly limitSec: number;
-    private readonly overtimeIntervalSec: number;
     private readonly overtimePenalty: number;
     private readonly boundaryContactPenalty: number;
     private readonly sustainedContactIntervalSec: number;
@@ -129,7 +133,8 @@ export class Exam04WheelTrack {
     private readonly wheelTrackOverlapSustainedPenalty: number;
 
     // ── Runtime state ────────────────────────────────────────────────────────
-    private startedAt = 0;                    // performance.now() khi swapToCourse
+    private startedAt: number | null = null;
+    private previousFrontPosition: THREE.Vector3 | null = null;
     private wheelTrackCompleted = false;
     /** Bánh trước bên lái phụ (FR) đã vào wheelTrackZone chưa. */
     private frontPassengerPassed = false;
@@ -154,7 +159,7 @@ export class Exam04WheelTrack {
     private stallLatched = false;
     private stallEventCount = 0;
     private speedingSec = 0;
-    private overtimeIntervalCount = 0;        // how many 120s intervals have fired
+    private overtimePenaltyApplied = false;
     private _disqualifyReason = '';
     /** Đã phát toast "Bắt đầu bài 4" cho course hiện tại chưa (one-shot). */
     private startToastEmitted = false;
@@ -174,7 +179,6 @@ export class Exam04WheelTrack {
     constructor() {
         const r = EXAM_04_RULES;
         this.limitSec = r.time.limitSec;
-        this.overtimeIntervalSec = r.time.overtimeIntervalSec;
         this.overtimePenalty = r.time.overtimePenalty;
         this.boundaryContactPenalty = r.boundary.contactPenalty;
         this.sustainedContactIntervalSec = r.boundary.sustainedContactIntervalSec;
@@ -224,7 +228,8 @@ export class Exam04WheelTrack {
     }
 
     reset(): void {
-        this.startedAt = 0;
+        this.startedAt = null;
+        this.previousFrontPosition = null;
         this.wheelTrackCompleted = false;
         this.frontPassengerPassed = false;
         this.rearPassengerPassed = false;
@@ -241,7 +246,7 @@ export class Exam04WheelTrack {
         this.stallLatched = false;
         this.stallEventCount = 0;
         this.speedingSec = 0;
-        this.overtimeIntervalCount = 0;
+        this.overtimePenaltyApplied = false;
         this._disqualifyReason = '';
         this.startToastEmitted = false;
         this.prevEndInside = false;
@@ -265,30 +270,33 @@ export class Exam04WheelTrack {
         // ── Emit "Bắt đầu bài 4" toast (one-shot per course entry) ─────────
         if (this.state === 'WHEEL_TRACK_ACTIVE' && !this.startToastEmitted) {
             this.startToastEmitted = true;
-            toast = 'Bắt đầu bài 4 — Vệt bánh xe & đường vuông góc (02:00)';
+            toast = 'Bắt đầu bài 4 — Vệt bánh xe & đường vuông góc';
         }
 
         // ── Timer 120s ──────────────────────────────────────────────────────
-        if (this.startedAt === 0) this.startedAt = now;
-        const elapsedSec = (now - this.startedAt) / 1000;
+        if (this.startedAt === null && this.touchesTimerStart(input.frontPosition)) {
+            this.startedAt = now;
+            toast = 'Bắt đầu tính giờ bài 4 (02:00)';
+        }
+        this.previousFrontPosition = input.frontPosition.clone();
+        const elapsedSec = this.startedAt === null ? 0 : (now - this.startedAt) / 1000;
         const timeRemainingSec = Math.max(0, this.limitSec - elapsedSec);
 
-        // E04-05: overtime penalty (every 120s)
-        const elapsedIntervals = Math.floor(elapsedSec / this.overtimeIntervalSec);
-        if (elapsedIntervals > this.overtimeIntervalCount) {
-            this.overtimeIntervalCount = elapsedIntervals;
+        // E04-05: phạt quá thời gian một lần duy nhất trong mỗi lượt làm bài.
+        if (this.startedAt !== null && !this.overtimePenaltyApplied && elapsedSec >= this.limitSec) {
+            this.overtimePenaltyApplied = true;
             add(this.overtimePenalty, 'Quá thời gian 02 phút thực hiện bài số 4');
         }
 
         // E04-11: arrival overtime đã được bỏ theo yêu cầu.
 
-        // E04-08: stall (only when clutch is released — clutch < 0.5)
-        if (input.engineRunning && !this.stallLatched && input.clutch < 0.5) {
+        // E04-08: phạt theo sự kiện chết máy thực tế, một lần mỗi lần chết máy.
+        if (input.stalled && !this.stallLatched) {
             this.stallLatched = true;
             this.stallEventCount += 1;
             add(this.stallPenalty, 'Chết máy');
         }
-        if (!input.engineRunning) {
+        if (!input.stalled) {
             this.stallLatched = false;
         }
 
@@ -434,7 +442,7 @@ export class Exam04WheelTrack {
             // E04-01: wrong exam layout — DQ
             if (input.wrongLayout === true) {
                 if (!input.continueAfterDisqualification) this.state = 'DISQUALIFIED';
-                this._disqualifyReason = 'Đi không đúng hình của hạng xe sát hạch';
+                this._disqualifyReason = EXAM_04_WRONG_LAYOUT_REASON;
                 return { toast, penalties, completed: false, disqualified: true, disqualifyReason: this._disqualifyReason };
             }
             if (
@@ -494,8 +502,7 @@ export class Exam04WheelTrack {
             };
         }
 
-        // ── Time ran out? Không DQ nữa — chỉ để timer chạy tiếp. Phạt "quá
-        // giờ" đã được áp dụng qua overtimeInterval (mỗi 10s trừ 5 điểm).
+        // Quá giờ chỉ trừ điểm một lần ở trên; xe tiếp tục làm bài, không DQ vì hết giờ.
         // Nếu wheelTrackCompleted=false thì vẫn còn lặp bình thường cho đến
         // khi qua endYellowLine (sẽ vào nhánh COMPLETED ở trên).
 
@@ -510,6 +517,19 @@ export class Exam04WheelTrack {
     }
 
     // ── Sensor helpers ────────────────────────────────────────────────────────
+
+    private touchesTimerStart(front: THREE.Vector3): boolean {
+        const sensor = this.sensors!.timerStartSensor;
+        if (sensor.containsPoint(front)) return true;
+        const previous = this.previousFrontPosition;
+        if (!previous) return false;
+        const direction = front.clone().sub(previous);
+        const distance = direction.length();
+        if (distance < 1e-6) return false;
+        const hit = new THREE.Ray(previous, direction.divideScalar(distance))
+            .intersectBox(sensor, new THREE.Vector3());
+        return hit !== null && hit.distanceToSquared(previous) <= distance * distance + 1e-6;
+    }
 
     /**
      * Edge-detection: xe vừa bước vào END_GATE (vạch vàng cuối bài).

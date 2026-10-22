@@ -15,8 +15,8 @@ export class Vehicle3 extends Vehicle {
     private wheelAssy!: Vehicle3WheelAssembly;
     /** Exposed so DrivingGame can read wheel world positions for Exam04 sensors. */
     get wheelAssembly(): Vehicle3WheelAssembly { return this.wheelAssy; }
-    private frontTurnLamps: { material: THREE.MeshStandardMaterial; left: boolean }[] = [];
-    private rearTurnLamps: { material: THREE.MeshStandardMaterial; left: boolean }[] = [];
+    private frontTurnLamps: { material: THREE.MeshStandardMaterial; left: boolean; offColor?: number }[] = [];
+    private rearTurnLamps: { material: THREE.MeshStandardMaterial; left: boolean; offColor?: number }[] = [];
     private rearBrakeLamps: THREE.MeshStandardMaterial[] = [];
 
     protected override build() {
@@ -89,79 +89,76 @@ export class Vehicle3 extends Vehicle {
         this.frontPivots = this.wheelAssy.frontPivots;
     }
 
-    private addFrontTurnSignals(model: THREE.Group) {
-        // The GLB merges its lamps into the body, so add small lenses on the
-        // front bumper surface and raycast them onto the actual body geometry.
+    /** A thin lens projected onto the existing lamp glass, without a raised housing. */
+    private addSurfaceLamp(model: THREE.Group, material: THREE.MeshStandardMaterial,
+        name: string, x: number, y: number, width: number, height: number, front: boolean): boolean {
         this.visual.updateWorldMatrix(true, true);
         const raycaster = new THREE.Raycaster();
-        const geometry = new THREE.SphereGeometry(1, 20, 12);
-        for (const { x, left } of [{ x: -0.80, left: true }, { x: 0.48, left: false }]) {
-            const material = new THREE.MeshStandardMaterial({
-                color: 0x744014,
-                emissive: 0x000000,
-                roughness: 0.32,
-                metalness: 0.08,
-            });
-            const origin = this.visual.localToWorld(new THREE.Vector3(x, 0.91, -2.8));
-            const direction = new THREE.Vector3(0, 0, 1).transformDirection(this.visual.matrixWorld);
+        const direction = new THREE.Vector3(0, 0, front ? 1 : -1)
+            .transformDirection(this.visual.matrixWorld);
+        const geometry = new THREE.PlaneGeometry(width, height, 8, 2);
+        const positions = geometry.getAttribute('position');
+        for (let i = 0; i < positions.count; i++) {
+            const origin = this.visual.localToWorld(new THREE.Vector3(
+                x + positions.getX(i), y + positions.getY(i), front ? -2.8 : 2.8));
             raycaster.set(origin, direction);
-            const frontSurface = raycaster.intersectObject(model, true)[0];
-            const z = frontSurface
-                ? this.visual.worldToLocal(frontSurface.point.clone()).z - 0.014
-                : -2.20;
-            const lens = new THREE.Mesh(geometry, material);
-            lens.name = left ? 'FrontTurnSignalLeft' : 'FrontTurnSignalRight';
-            lens.position.set(x, 0.91, z);
-            lens.scale.set(0.12, 0.055, 0.018);
-            this.visual.add(lens);
-            this.frontTurnLamps.push({ material, left });
+            const surface = raycaster.intersectObject(model, true)[0];
+            const normal = surface?.face?.normal.clone().transformDirection(surface.object.matrixWorld);
+            // Reject missing glass or upward bonnet/boot faces instead of floating overlays.
+            if (!surface || !normal || normal.dot(direction) > (front ? -.4 : -.15)) {
+                geometry.dispose(); material.dispose(); return false;
+            }
+            const point = this.visual.worldToLocal(surface.point.clone().addScaledVector(direction, -.0025));
+            positions.setXYZ(i, point.x, point.y, point.z);
+        }
+        if (front) {
+            const indices = geometry.index!;
+            for (let i = 0; i < indices.count; i += 3) {
+                const a = indices.getX(i);
+                indices.setX(i, indices.getX(i + 2));
+                indices.setX(i + 2, a);
+            }
+            indices.needsUpdate = true;
+        }
+        positions.needsUpdate = true;
+        geometry.computeVertexNormals();
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+        const lens = new THREE.Mesh(geometry, material);
+        lens.name = name;
+        lens.receiveShadow = true;
+        this.visual.add(lens);
+        return true;
+    }
+
+    private addFrontTurnSignals(model: THREE.Group) {
+        const offColor = 0xb7bec0;
+        for (const { x, left } of [{ x: -0.76, left: true }, { x: 0.44, left: false }]) {
+            const material = new THREE.MeshStandardMaterial({
+                color: offColor, emissive: 0x000000, roughness: 0.25, metalness: 0.15,
+            });
+            if (this.addSurfaceLamp(model, material, left ? 'FrontTurnSignalLeft' : 'FrontTurnSignalRight',
+                x, .70, .12, .045, true)) this.frontTurnLamps.push({ material, left, offColor });
         }
     }
 
     private addRearLights(model: THREE.Group) {
-        // The GLB's body is offset 0.158 m from the driving frame. These are the
-        // left/right outer portions of its rear lamp clusters in vehicle-local X.
-        // Raycast from behind so the small lenses sit on the actual body surface.
-        this.visual.updateWorldMatrix(true, true);
-        const raycaster = new THREE.Raycaster();
-        const lensGeometry = new THREE.SphereGeometry(1, 20, 12);
-        const addLens = (x: number, y: number, material: THREE.MeshStandardMaterial,
-            name: string, width: number, height: number) => {
-            const origin = this.visual.localToWorld(new THREE.Vector3(x, y, 2.8));
-            const direction = new THREE.Vector3(0, 0, -1).transformDirection(this.visual.matrixWorld);
-            raycaster.set(origin, direction);
-            const rearSurface = raycaster.intersectObject(model, true)[0];
-            const z = rearSurface
-                ? this.visual.worldToLocal(rearSurface.point.clone()).z + 0.014
-                : 2.20;
-            const lens = new THREE.Mesh(lensGeometry, material);
-            lens.name = name;
-            lens.position.set(x, y, z);
-            lens.scale.set(width, height, 0.018);
-            this.visual.add(lens);
-        };
+        // Outer indicator strips and inner brake strips fit within the original
+        // Vios tail-lamp clusters, separated so braking and signalling stay visible.
+        const offColor = 0xb7bec0;
         for (const { x, left } of [{ x: -0.80, left: true }, { x: 0.48, left: false }]) {
             const material = new THREE.MeshStandardMaterial({
-                color: 0x744014,
-                emissive: 0x000000,
-                roughness: 0.32,
-                metalness: 0.08,
+                color: offColor, emissive: 0x000000, roughness: .25, metalness: .15,
             });
-            addLens(x, 0.91, material,
-                left ? 'RearTurnSignalLeft' : 'RearTurnSignalRight', 0.12, 0.055);
-            this.rearTurnLamps.push({ material, left });
+            if (this.addSurfaceLamp(model, material, left ? 'RearTurnSignalLeft' : 'RearTurnSignalRight',
+                x, .83, .12, .045, false)) this.rearTurnLamps.push({ material, left, offColor });
         }
-        // A separate red lens sits toward the centre of each tail-light cluster,
-        // so braking and an amber turn signal can be visible at the same time.
-        for (const { x, left } of [{ x: -0.57, left: true }, { x: 0.25, left: false }]) {
+        for (const { x, left } of [{ x: -0.65, left: true }, { x: 0.33, left: false }]) {
             const material = new THREE.MeshStandardMaterial({
-                color: 0x6a1018,
-                emissive: 0x000000,
-                roughness: 0.3,
+                color: 0x6a1018, emissive: 0x000000, roughness: .3,
             });
-            addLens(x, 0.91, material,
-                left ? 'RearBrakeLightLeft' : 'RearBrakeLightRight', 0.17, 0.07);
-            this.rearBrakeLamps.push(material);
+            if (this.addSurfaceLamp(model, material, left ? 'RearBrakeLightLeft' : 'RearBrakeLightRight',
+                x, .85, .14, .055, false)) this.rearBrakeLamps.push(material);
         }
     }
 
@@ -177,7 +174,7 @@ export class Vehicle3 extends Vehicle {
         const on = performance.now() % 1100 < 550;
         for (const lamp of [...this.frontTurnLamps, ...this.rearTurnLamps]) {
             const active = this.signals.hazard || (lamp.left ? this.signals.left : this.signals.right);
-            lamp.material.color.setHex(active && on ? 0xffc343 : 0x744014);
+            lamp.material.color.setHex(active && on ? 0xffc343 : lamp.offColor ?? 0x744014);
             lamp.material.emissive.setHex(active && on ? 0xffa000 : 0x000000);
             lamp.material.emissiveIntensity = active && on ? 1.8 : 0;
         }

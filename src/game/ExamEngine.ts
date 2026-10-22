@@ -3,20 +3,24 @@ import type {PenaltyEvent} from './types';
 import { StartExercise, type StartSignalPhase } from './exercises/StartExercise';
 import { Exam02Pedestrian } from './exercises/Exam02Pedestrian';
 import { Exam03Hill } from './exercises/Exam03Hill';
-import { Exam04WheelTrack, type Exam04CourseSensors } from './exercises/Exam04WheelTrack';
+import { Exam04WheelTrack, EXAM_04_WRONG_LAYOUT_REASON, type Exam04CourseSensors } from './exercises/Exam04WheelTrack';
+import { EXAM_VEHICLE_CLASS, type ExamVehicleClass } from './exam/examRules';
 import { Exam05South } from './exercises/Exam05South';
+import { TrafficLightScoring } from './exercises/TrafficLightScoring';
+import { Exam06ApproachLane } from './exercises/Exam06ApproachLane';
+import { Exam06SCurveTimer, touchesWindingGate } from './exercises/Exam06SCurveTimer';
 import type { TrafficLight } from './TrafficLight';
-import type { TrackObjects } from './TrackObjects';
+import type { TrackObjects, WindingCourseEntry, ParkingClassZone } from './TrackObjects';
+import { ParkingClassCheck } from './exercises/ParkingClassCheck';
+import { Exam07ParkingTimer, type ParkingTimerGate } from './exercises/Exam07ParkingTimer';
+import { ExamLateProgression } from './exam/ExamLateProgression';
+import { ParkingBoundaryScoring } from './exercises/ParkingBoundaryScoring';
 import { startPosition } from './startPosition';
 import { EXAM_SCORING_MODE, type ExamScoringMode } from './exam/examScoringMode';
 import {
     EXAM_02_STOP_LINE_X,
     EXAM_03_STOP_LINE_X,
     EXAM_03_YELLOW_LINE_X,
-    EXAM_05_FINISH_CROSSWALK_X,
-    EXAM_05_FINISH_CROSSWALK_Z,
-    EXAM_05_FINISH_CROSSWALK_WIDTH_M,
-    EXAM_05_FINISH_CROSSWALK_DEPTH_M,
 } from './exam/examCourseGeometry';
 
 export interface ExamVehicleSnapshot {
@@ -77,17 +81,34 @@ export class ExamEngine{
     /**
      * Exam05South — chấm điểm bài 5 (ngã tư có tín hiệu) cho trafficLight South.
      * Được kích hoạt tự động khi xe chạm trigger zone của South light
-     * (xem wireExam05South() và `light.onMarkerTriggered`).
+     * (xem wireTrafficLights() và `light.onMarkerTriggered`).
      */
     readonly intersectionExercise = new Exam05South();
-    /** Tham chiếu tới South traffic light (set bởi wireExam05South). */
+    /** Tham chiếu tới South traffic light, được gắn trong wireTrafficLights(). */
     private southLight: TrafficLight | null = null;
-    /** Đã gọi wireExam05South chưa — chỉ subscribe markerTriggered một lần. */
-    private exam05Wired = false;
+    /** Chỉ gắn bộ chấm và callback đèn một lần. */
+    private trafficLightsWired = false;
+    private trafficLightScorers: TrafficLightScoring[] = [];
+    private exam05To06LaneRule?: TrackObjects['exam05To06LaneRule'];
+    private readonly exam06ApproachLane = new Exam06ApproachLane();
+    private wrongApproachLaneReported = false;
+    private windingCourses: WindingCourseEntry[] = [];
+    private previousWindingFront: THREE.Vector3 | null = null;
+    private wrongWindingReported = false;
+    private readonly sCurveTimer = new Exam06SCurveTimer();
+    private parkingClassZones: readonly ParkingClassZone[] = [];
+    private readonly parkingClassCheck = new ParkingClassCheck();
+    private parkingTimerGates: readonly ParkingTimerGate[] = [];
+    private readonly parkingTimer = new Exam07ParkingTimer();
+    private parkingBoundaryScoring = new ParkingBoundaryScoring([]);
+    private lateProgression = new ExamLateProgression();
+    private approachingLateLesson = false;
+    private entryLessonId = 1;
     disqualified=false;
     disqualifyReason='';
     private cooldown=new Map<number,number>();
     private finished=false;
+    private scoringStarted = false;
     private pedestrianCompleted = false;
     /**
      * True giữa lúc E04 đã hoàn thành và xe chưa chạm trigger South light.
@@ -112,12 +133,24 @@ export class ExamEngine{
         this.startedAt=performance.now();
         this.cooldown.clear();
         this.finished=false;
+        this.scoringStarted = false;
         this.disqualified=false;
         this.disqualifyReason='';
         this.pedestrianCompleted = false;
         this.lockedCourseIndex = null;
         this.awaitingExam05 = false;
         this.exam04ActiveDisqualification = null;
+        this.exam06ApproachLane.reset();
+        this.wrongApproachLaneReported = false;
+        this.previousWindingFront = null;
+        this.wrongWindingReported = false;
+        this.sCurveTimer.reset();
+        this.parkingClassCheck.reset();
+        this.parkingTimer.reset();
+        this.parkingBoundaryScoring.reset();
+        this.lateProgression.reset();
+        this.approachingLateLesson = false;
+        this.entryLessonId = 1;
         this.startExercise.reset();
         this.pedestrianExercise.reset();
         this.hillExercise.reset();
@@ -125,7 +158,23 @@ export class ExamEngine{
         // Bài 5 — reset cả exercise và South light để light quay lại 'idle'
         // cho lần thi kế tiếp.
         this.intersectionExercise.reset();
+        for (const scorer of this.trafficLightScorers) scorer.reset();
         this.southLight?.reset();
+    }
+
+    /** Selecting a lesson skips all earlier exercise checks and start-command gating. */
+    startFromLesson(lessonId: number): void {
+        if (!Number.isInteger(lessonId) || lessonId < 1 || lessonId > 11) return;
+        this.reset();
+        this.entryLessonId = lessonId;
+        if (lessonId === 1) return;
+        this.activeIndex = lessonId - 1;
+        this.pedestrianCompleted = lessonId > 2;
+        this.scoringStarted = true;
+        this.startedAt = performance.now();
+        this.approachingLateLesson = lessonId >= 6;
+        if (lessonId === 2) this.pedestrianExercise.activate();
+        if (lessonId === 3) this.hillExercise.activate();
     }
 
     /**
@@ -134,7 +183,9 @@ export class ExamEngine{
      */
     wireExam04(
         trackSensors: {
+            vehicleClass: ExamVehicleClass;
             startYellowSensor: THREE.Box3;
+            timerStartSensor: THREE.Box3;
             endYellowSensor: THREE.Box3;
             wheelTrackZone: THREE.Box3;
             boundarySensors: THREE.Box3[];
@@ -147,7 +198,9 @@ export class ExamEngine{
             const s = trackSensors[i];
             this.wheelTrackSensors.push({
                 index: i,
+                vehicleClass: s.vehicleClass,
                 startYellowSensor: s.startYellowSensor,
+                timerStartSensor: s.timerStartSensor,
                 endYellowSensor: s.endYellowSensor,
                 wheelTrackZone: s.wheelTrackZone,
                 boundarySensors: s.boundarySensors,
@@ -157,60 +210,123 @@ export class ExamEngine{
         }
     }
 
-    /**
-     * Wire Exam05South với trafficLight South đã có sẵn trong track.
-     * Gọi sau `wireExam04()` từ DrivingGame.
-     *
-     * - Tìm `track.getTrafficLight('SOUTH')` rồi inject vào intersectionExercise.
-     * - Khi bài 4 đã hoàn thành, trigger SOUTH chuyển sang bài 5.
-     * - Idempotent: gọi nhiều lần chỉ subscribe một lần.
-     *
-     * Tham số `roadZ` là tâm lane world (X-axis của lane dọc, mặc định 21 theo
-     * `buildExamGround.ts`). Sensors Box3 được tính trong Exam05South từ world
-     * transform của light — không hard-code.
-     */
-    wireExam05South(track: TrackObjects, roadZ = 21, roadWidth = 8): void {
-        if (this.exam05Wired) return;
-        const light = track.getTrafficLight('SOUTH');
-        if (!light) {
-            console.warn('[ExamEngine] wireExam05South: track has no trafficLight with markerId="SOUTH"');
-            return;
+    /** Apply the lesson 5 scoring rules to each configured cycling signal. */
+    wireTrafficLights(track: TrackObjects): void {
+        if (this.trafficLightsWired) return;
+        this.exam05To06LaneRule = track.exam05To06LaneRule;
+        this.windingCourses = track.getWindingCourses?.() ?? [];
+        this.parkingClassZones = track.parkingClassZones ?? [];
+        this.parkingTimerGates = track.parkingTimerGates ?? [];
+        this.parkingBoundaryScoring = new ParkingBoundaryScoring(track.perpendicularParkingBoundaryGroups ?? []);
+        this.lateProgression = new ExamLateProgression(track.root, track.getTrafficLight('WEST'));
+        for (const light of track.trafficLights) {
+            if (light.alwaysGreen || !light.scoring) continue;
+            this.trafficLightScorers.push(new TrafficLightScoring(light,
+                light.markerId === 'SOUTH' ? this.intersectionExercise : undefined));
         }
-        const stopBar = track.root.getObjectByName('exam-05-stop-bar');
-        if (!stopBar) throw new Error('Exam 5 stop bar is missing');
-        const stopBarBounds = new THREE.Box3().setFromObject(stopBar);
-        this.southLight = light;
-        this.intersectionExercise.attach({
-            light,
-            roadWidth,
-            roadZ,
-            stopBar: {
-                minX: stopBarBounds.min.x,
-                maxX: stopBarBounds.max.x,
-                nearZ: stopBarBounds.max.z,
-            },
-            finishLine: {
-                x: EXAM_05_FINISH_CROSSWALK_X,
-                z: EXAM_05_FINISH_CROSSWALK_Z,
-                widthM: EXAM_05_FINISH_CROSSWALK_WIDTH_M,
-                depthM: EXAM_05_FINISH_CROSSWALK_DEPTH_M,
-            },
-        });
-
+        const light = track.getTrafficLight('SOUTH');
+        this.southLight = light ?? null;
         // Chỉ vào bài 5 sau khi bài 4 hoàn thành.
-        light.onMarkerTriggered = (id: string) => {
+        if (light) light.onMarkerTriggered = (id: string) => {
             if (id !== 'SOUTH' || this.disqualified) return;
             if (this.activeIndex === 3 && this.awaitingExam05) {
                 this.activeIndex = 4;
                 this.awaitingExam05 = false;
-                this.intersectionExercise.activate();
             }
         };
-        this.exam05Wired = true;
+        this.trafficLightsWired = true;
     }
 
     update(vehicle: ExamVehicleSnapshot, startSignal: StartSignalPhase, dt: number): string | undefined {
         if(this.finished) return;
+        let sCurveToast: string | undefined;
+        let parkingToast: string | undefined;
+        if (this.scoringStarted) {
+            for (const event of this.parkingBoundaryScoring.update(Object.values(vehicle.wheelPositions ?? {}))) {
+                this.applyPenaltyEvent(event);
+                parkingToast = event.reason;
+            }
+            const rear = vehicle.position.clone().multiplyScalar(2).sub(vehicle.frontPosition);
+            if (this.parkingClassCheck.update(this.parkingClassZones,
+                [vehicle.frontPosition, rear, vehicle.position, ...Object.values(vehicle.wheelPositions ?? {})])) {
+                return this.handleDisqualification(6, EXAM_04_WRONG_LAYOUT_REASON,
+                    `Đình chỉ sát hạch — ${EXAM_04_WRONG_LAYOUT_REASON}`);
+            }
+            const previous = this.previousWindingFront;
+            this.previousWindingFront = vehicle.frontPosition.clone();
+            if (!this.wrongWindingReported && this.windingCourses.some(entry => {
+                if (entry.vehicleClass === EXAM_VEHICLE_CLASS) return false;
+                return touchesWindingGate(entry.course, 's-curve-start-yellow-dashed-line', vehicle.frontPosition, previous);
+            })) {
+                this.wrongWindingReported = true;
+                return this.handleDisqualification(this.activeIndex, EXAM_04_WRONG_LAYOUT_REASON,
+                    `Đình chỉ sát hạch — ${EXAM_04_WRONG_LAYOUT_REASON}`);
+            }
+            if (this.activeIndex === 5) {
+                for (const event of this.sCurveTimer.update(vehicle.frontPosition, this.windingCourses)) {
+                    this.applyPenaltyEvent(event);
+                    sCurveToast = event.reason;
+                }
+                if (this.sCurveTimer.isActive) this.approachingLateLesson = false;
+                if (this.sCurveTimer.isCompleted) {
+                    this.activeIndex = 6;
+                    this.approachingLateLesson = true;
+                    sCurveToast ??= 'Hoàn thành bài 6';
+                }
+            }
+            if (this.activeIndex === 6) {
+                for (const event of this.parkingTimer.update(vehicle.frontPosition, this.parkingTimerGates)) {
+                    this.applyPenaltyEvent(event);
+                    parkingToast = event.reason;
+                }
+                if (this.parkingTimer.isActive) this.approachingLateLesson = false;
+                if (this.parkingTimer.isCompleted) {
+                    this.activeIndex = 7;
+                    this.approachingLateLesson = true;
+                    parkingToast ??= 'Hoàn thành bài 7';
+                }
+            }
+        }
+        let intersectionToast: string | undefined;
+        if (this.scoringStarted) {
+            for (const scorer of this.trafficLightScorers) {
+                const result = scorer.update({ ...vehicle, clutch: vehicle.clutch ?? 1, dt });
+                if (!result) continue;
+                for (const event of result.penalties) this.applyPenaltyEvent(event);
+                if (result.disqualified) {
+                    return this.handleDisqualification(this.activeIndex,
+                        result.disqualifyReason ?? 'Đình chỉ sát hạch', result.toast, true);
+                }
+                if (result.toast) intersectionToast = result.toast;
+                if (result.completed && scorer.light.markerId === 'SOUTH' && this.activeIndex === 4) {
+                    this.activeIndex = 5;
+                    this.approachingLateLesson = true;
+                }
+            }
+        }
+
+        const laneRule = this.exam05To06LaneRule;
+        if (this.scoringStarted && this.entryLessonId <= 6 && (this.activeIndex === 4 || this.activeIndex === 5)
+            && laneRule && !this.wrongApproachLaneReported
+            && this.exam06ApproachLane.update(laneRule.road, laneRule.widthM, laneRule.lengthM,
+                vehicle.position, vehicle.frontPosition)) {
+            this.wrongApproachLaneReported = true;
+            const reason = 'đi không đúng làn đường quy định';
+            return this.handleDisqualification(this.activeIndex, reason, `Đình chỉ sát hạch — ${reason}`);
+        }
+
+        if (this.scoringStarted && this.activeIndex >= 5) {
+            const progress = this.lateProgression.update(this.activeIndex + 1, this.approachingLateLesson,
+                vehicle.position, vehicle.frontPosition);
+            if (progress.entered) {
+                this.activeIndex = progress.entered - 1;
+                this.approachingLateLesson = false;
+            }
+            if (progress.finished) {
+                this.finished = true;
+                return 'Hoàn thành bài thi';
+            }
+        }
 
         if (this.activeIndex === 0) {
             const result = this.startExercise.update({ ...vehicle, startSignal, dt });
@@ -226,7 +342,6 @@ export class ExamEngine{
                 this.startedAt = performance.now();
                 this.pedestrianExercise.activate();
             }
-            if (result.toast === 'Bắt đầu thi') this.startedAt = performance.now();
             return result.toast;
         }
 
@@ -297,6 +412,13 @@ export class ExamEngine{
         // ── Bài 04 — Wheel Track + Right Angle ─────────────────────────────────
         if (this.activeIndex === 3) {
             if (this.awaitingExam05) return;
+            const enteredCourse = this.wheelTrackExercise.findEnteredCourse(
+                vehicle.frontPosition, this.wheelTrackSensors);
+            if (enteredCourse >= 0
+                && this.wheelTrackSensors[enteredCourse].vehicleClass !== EXAM_VEHICLE_CLASS) {
+                return this.handleDisqualification(3, EXAM_04_WRONG_LAYOUT_REASON,
+                    `Đình chỉ sát hạch — ${EXAM_04_WRONG_LAYOUT_REASON}`);
+            }
             const ex04State = this.wheelTrackExercise.state;
 
             // State INACTIVE: tìm course mà xe vừa chạm startYellowSensor.
@@ -304,10 +426,7 @@ export class ExamEngine{
             // vào sensor của course khác trong khi đã lock → bỏ qua.
             if (ex04State === 'INACTIVE') {
                 if (this.lockedCourseIndex === null) {
-                    const idx = this.wheelTrackExercise.findEnteredCourse(
-                        vehicle.frontPosition,
-                        this.wheelTrackSensors
-                    );
+                    const idx = enteredCourse;
                     if (idx < 0) return;
                     this.lockedCourseIndex = idx;
                     this.wheelTrackExercise.swapToCourse(this.wheelTrackSensors[idx]);
@@ -358,37 +477,8 @@ export class ExamEngine{
             return result.toast;
         }
 
-        // ── Bài 05 — Qua ngã tư có tín hiệu (chỉ áp dụng cho trafficLight South) ─
-        // Được kích hoạt tự động khi xe chạm trigger zone South (xem wireExam05South).
-        // Lúc đó activeIndex chuyển từ 3 (WheelTrack) sang 4 (Intersection).
-        if (this.activeIndex === 4) {
-            const input = {
-                position: vehicle.position,
-                frontPosition: vehicle.frontPosition,
-                speedKmh: vehicle.speedKmh,
-                rpm: vehicle.rpm,
-                engineRunning: vehicle.engineRunning,
-                stalled: vehicle.stalled,
-                clutch: vehicle.clutch ?? 1,
-                dt,
-            };
-            const result = this.intersectionExercise.update(input);
-            for (const evt of result.penalties) this.applyPenaltyEvent(evt);
-            if (result.disqualified) {
-                const reason = result.disqualifyReason
-                    ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
-                    ?? 'Đình chỉ sát hạch';
-                return this.handleDisqualification(4, reason, result.toast, true);
-            }
-            if (result.completed) {
-                this.finished = true;
-                return result.toast ?? 'Hoàn thành bài 5';
-            }
-            return result.toast;
-        }
-
-        // After all known exercises, the rest of the route is still under construction.
-        return;
+        // Cycling signals keep being scored after the first intersection is completed.
+        return intersectionToast ?? sCurveToast ?? parkingToast;
     }
     private handleDisqualification(index: number, reason: string, toast?: string, force = false): string | undefined {
         if (force || this.scoringMode === 'normal') {
@@ -420,17 +510,18 @@ export class ExamEngine{
         } else if (index === 2) {
             this.activeIndex = 3;
         } else {
-            this.activeIndex = 5;
+            this.activeIndex = Math.max(this.activeIndex, 5);
         }
         return undefined;
     }
     /** A curb touch ends the current normal-mode attempt, once. */
     disqualifyForRedWhiteCurb(): boolean {
-        if (this.scoringMode !== 'normal' || this.finished) return false;
+        if (!this.scoringStarted || this.scoringMode !== 'normal' || this.finished) return false;
         this.handleDisqualification(this.activeIndex, 'Chạm vạch đỏ trắng');
         return true;
     }
     applyLinePenalty(zoneIndex:number,now:number){
+        if (!this.scoringStarted || this.finished) return null;
         const last=this.cooldown.get(zoneIndex)??-Infinity;
         if(now-last<3000)return null;
         this.cooldown.set(zoneIndex,now);
@@ -442,13 +533,21 @@ export class ExamEngine{
         return evt;
     }
     private applyPenaltyEvent(evt: PenaltyEvent) {
+        if (!this.scoringStarted && evt.points > 0) return;
         this.penalties.push(evt);
         this.score = Math.max(0, this.score - evt.points);
     }
     get approaching() {
-        return this.activeIndex === 0 &&
-            (this.startExercise.state === 'PRE_START' ||
-             this.startExercise.state === 'COUNTDOWN_5S');
+        return !this.scoringStarted;
+    }
+
+    /** Called only after the start-command recording finishes successfully. */
+    completeStartAnnouncement(): boolean {
+        if (this.finished || this.scoringStarted) return false;
+        if (this.activeIndex === 0 && !this.startExercise.receiveStartCommand()) return false;
+        this.scoringStarted = true;
+        this.startedAt = performance.now();
+        return true;
     }
     get startLampOn() {
         if (this.activeIndex === 0) return this.startExercise.startLampOn;
@@ -456,6 +555,7 @@ export class ExamEngine{
         return false;
     }
     get elapsedSeconds(){
+        if (!this.scoringStarted) return 0;
         return(performance.now()-this.startedAt)/1000;
     }
     get currentExerciseTitle(){
@@ -467,7 +567,14 @@ export class ExamEngine{
         if (this.activeIndex === 2) return this.hillExercise.title;
         if (this.activeIndex === 3) return this.wheelTrackExercise.title;
         if (this.activeIndex === 4) return this.intersectionExercise.title;
-        return 'Hoàn thành';
+        const lateTitles = ['Qua đường vòng quanh co', 'Ghép xe dọc vào nơi đỗ',
+            'Tạm dừng ở chỗ có đường sắt chạy qua', 'Thay đổi số trên đường bằng',
+            'Ghép xe ngang vào nơi đỗ', 'Kết thúc'];
+        if (this.activeIndex >= 5 && this.activeIndex <= 10) {
+            return this.approachingLateLesson ? `Đang đến bài ${this.activeIndex + 1}`
+                : `Bài ${this.activeIndex + 1}: ${lateTitles[this.activeIndex - 5]}`;
+        }
+        return 'Đang di chuyển trong sân';
     }
     get isFinished(){
         return this.finished;

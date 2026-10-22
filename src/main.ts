@@ -14,6 +14,7 @@ import { Exam05TurnJunctionSigns } from './game/signs/Exam05TurnJunctionSigns';
 import { SpeedLimit20EndAccelerationSign } from './game/signs/SpeedLimit20EndAccelerationSign';
 import { MinimumSpeed20StartDecelerationSign } from './game/signs/MinimumSpeed20StartDecelerationSign';
 import { RailwayCrossingRoad } from './game/RailwayCrossingRoad';
+import { WelcomeScreen, type WelcomeClassOption } from './ui/WelcomeScreen';
 
 const gameHost=document.querySelector<HTMLDivElement>('#game');
 const hudHost=document.querySelector<HTMLDivElement>('#hud');
@@ -22,6 +23,28 @@ if(!gameHost||!hudHost)throw new Error('Missing host');
 
 const develop = new URLSearchParams(window.location.search).get('develop') === 'true';
 const hud = new Hud(hudHost, { develop });
+hud.setVisible(develop);
+
+let gameInstance: DrivingGame | null = null;
+
+const welcomeScreen = new WelcomeScreen(document.body, {
+    onStart: (selectedClass: WelcomeClassOption) => {
+        hud.setVisible(true);
+        if (gameInstance) {
+            gameInstance.setTransmissionMode(selectedClass);
+        }
+    }
+});
+
+if (develop) welcomeScreen.hide();
+
+hud.onChangeClass = () => {
+    hud.setVisible(false);
+    welcomeScreen.show();
+};
+
+hud.onShowGuide = () => welcomeScreen.showGuide();
+
 async function start() {
     try {
         // Preload models before Track builds roadside signs and the railway crossing.
@@ -51,8 +74,15 @@ async function start() {
             })
         );
         const vehicle = results[0];
-        const game=new DrivingGame(gameHost!,hud,vehicle);
+        const game = new DrivingGame(gameHost!, hud, vehicle);
+        gameInstance = game;
+        game.setTransmissionMode(welcomeScreen.getSelectedClass());
         game.start();
+
+        // If user already clicked start while loading, ensure HUD is visible
+        if (!welcomeScreen.isVisible()) {
+            hud.setVisible(true);
+        }
     } catch (error) {
         console.error('Unable to start game', error);
         const detail = error instanceof Error ? error.message : String(error);

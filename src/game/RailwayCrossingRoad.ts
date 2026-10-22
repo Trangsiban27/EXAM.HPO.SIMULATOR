@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -60,7 +61,6 @@ export class RailwayCrossingRoad {
 
     // Colors từ UI
     private static readonly CYAN = 0x00d4ff;
-    private static readonly ROAD_COLOR = '#2a2a2a';
 
     constructor(options: RailwayCrossingRoadOptions = {}) {
         const {
@@ -116,7 +116,7 @@ export class RailwayCrossingRoad {
      */
     private buildRoadSurface() {
         const asphalt = new THREE.MeshStandardMaterial({
-            color: RailwayCrossingRoad.ROAD_COLOR,
+            color: ROAD_SURFACE_COLOR,
             roughness: 0.95,
         });
 

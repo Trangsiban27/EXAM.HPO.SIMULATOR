@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import { offsetPath, roundCorners, splitByPattern, type Point } from './roundedPath';
@@ -117,7 +118,7 @@ export class RoadCornerCurveR8R9 {
         this.innerEdge = inner;
         this.surfaceOutline = outer.concat([...inner].reverse());
         const surface = addFlatShape(this.surfaceOutline, -0.02, 0.08,
-            new THREE.MeshStandardMaterial({ color: '#2a2a2a', roughness: 0.95 }), 'road-surface', root);
+            new THREE.MeshStandardMaterial({ color: ROAD_SURFACE_COLOR, roughness: 0.95 }), 'road-surface', root);
         surface.receiveShadow = true;
 
         const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });

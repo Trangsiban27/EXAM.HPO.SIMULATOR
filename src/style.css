@@ -63,10 +63,11 @@ button:active {
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  padding-right: 250px;
+  padding-right: 560px;
 }
 .pill,
-.settings {
+.settings,
+.hud-standards {
   background: #101113ed;
   border: 1px solid #ffffff25;
   border-radius: 17px;
@@ -172,12 +173,43 @@ button:active {
 .develop-mode .cockpit {
   display: none;
 }
-.settings {
+.hud-top-right {
   position: absolute;
   right: 18px;
   top: 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
   pointer-events: auto;
   z-index: 5;
+}
+.hud-standards {
+  padding: 8px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+.hud-standards-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.hud-standards-label {
+  color: #94a3b8;
+  font-weight: 500;
+}
+.hud-standards-code {
+  color: #f1f5f9;
+  font-weight: 700;
+}
+.settings {
+  position: relative;
   font-size: 12px;
 }
 .settings summary {
@@ -199,6 +231,20 @@ button:active {
 .settings-body button {
   font-size: 12px;
   margin-right: 5px;
+}
+.settings-body .settings-guide-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin: 10px 0 0;
+  border-color: #f5b921;
+  border-radius: 999px;
+  background: #29364b;
+}
+.settings-body .settings-guide-btn:hover {
+  background: #35465f;
 }
 .cockpit {
   position: absolute;
@@ -543,7 +589,17 @@ button:active {
   background: #7dffb0;
   border-color: #b6ffd4;
 }
+@media (max-width: 1400px) {
+  .telemetry {
+    padding-right: 0;
+    max-width: calc(100% - 560px);
+    flex-wrap: wrap;
+  }
+}
 @media (max-width: 1100px) {
+  .hud-standards {
+    display: none;
+  }
   .telemetry {
     padding-right: 0;
     flex-wrap: wrap;
@@ -574,7 +630,7 @@ button:active {
     max-width: 100%;
     padding-top: 42px;
   }
-  .settings {
+  .hud-top-right {
     top: 8px;
     right: 8px;
   }

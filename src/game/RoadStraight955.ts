@@ -1,3 +1,4 @@
+import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 
@@ -282,7 +283,7 @@ export class RoadStraight955 {
                 bevelEnabled: false,
             }),
             new THREE.MeshStandardMaterial({
-                color: this.highlighted ? '#f2b84b' : '#2a2a2a',
+                color: this.highlighted ? '#f2b84b' : ROAD_SURFACE_COLOR,
                 roughness: 0.95,
             }),
         );
