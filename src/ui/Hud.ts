@@ -55,8 +55,7 @@ export class Hud {
                 <section class="pill lesson-picker"><label for="lessonSelect">Bài học</label><select id="lessonSelect" aria-label="Chọn bài học tự chạy"><option value="">Chọn bài</option>${AUTO_DRIVE_LESSONS.map(lesson => `<option value="${lesson.id}">${lessonPickerLabel(lesson)}</option>`).join('')}${LOCKED_AUTO_DRIVE_LESSONS.map(lesson => `<option value="${lesson.id}" disabled>${lessonPickerLabel(lesson)}</option>`).join('')}</select></section>
                 <section class="pill"><strong id="speed">0</strong><small class="blue">KM/H</small><i></i><span class="amber">ϟ</span><b class="amber" id="rpm">0</b><small class="amber">RPM</small><i></i><button id="engine" data-key="Enter" class="engine" aria-label="Bật hoặc tắt động cơ">ENGINE</button></section>
             </header>
-            <div class="hud-top-right">
-                <div class="hud-standards" title="Tiêu chuẩn và quy định sát hạch">
+            <div class="hud-standards" title="Tiêu chuẩn và quy định sát hạch">
                     <div class="hud-standards-item">
                         <span class="hud-standards-label">Tiêu chuẩn sân:</span>
                         <strong class="hud-standards-code">QCVN 15:2026/BCA</strong>
@@ -65,7 +64,8 @@ export class Hud {
                         <span class="hud-standards-label">Quy định về bài thi sa hình:</span>
                         <strong class="hud-standards-code">TT 12/2025/TT-BCA và TT 108/2026/TT-BCA</strong>
                     </div>
-                </div>
+            </div>
+            <div class="hud-top-right">
                 <details class="settings"><summary>⚙ &nbsp; CÀI ĐẶT & GÓC NHÌN</summary><div class="settings-body">
                     <button id="cameraBtn">Đổi camera</button><button id="restartBtn">Thi lại</button><button id="autoDriveBtn" aria-pressed="false">Bật tự chạy</button><button id="changeClassBtn" style="border-color: #f5b921; color: #f5b921;">🚗 Đổi hạng xe</button>
                     <button id="settingsGuideBtn" class="settings-guide-btn" type="button" aria-haspopup="dialog">
