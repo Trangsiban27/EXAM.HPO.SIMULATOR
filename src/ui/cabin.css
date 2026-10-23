@@ -7,33 +7,44 @@
 .cabin-overlay[hidden] {
   display: none;
 }
-.cabin-interior{position:absolute;inset:0;pointer-events:none}
-.cabin-interior>svg{display:block;width:100%;height:100%}
-.interior-readout{position:absolute;left:43.7%;top:70%;width:14.8%;display:flex;justify-content:space-between;align-items:center;font:bold clamp(7px,1vw,15px) monospace;color:#e4f5ff}
-.interior-rpm{color:#ff826f;font-size:.75em}.interior-gear{color:#64ddff;background:#102532;border-radius:3px;padding:2px 5px}
-.cabin-roof {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 13%;
-  background: #111315;
-  clip-path: polygon(0 0, 100% 0, 100% 80%, 72% 100%, 20% 90%, 0 100%);
-}
-.cabin-pillar {
+.cabin-interior {
   position: absolute;
   inset: 0;
-  background: #191d20;
-  clip-path: polygon(12% 8%, 17% 8%, 29% 76%, 25% 85%);
+  pointer-events: none;
+  overflow: hidden;
 }
-.cabin-dashboard {
+.cabin-interior[hidden] { display: none; }
+.cabin-interior > svg { display: block; position: absolute; }
+.cabin-window-trim {
   position: absolute;
-  bottom: 0;
+  inset: 0;
   width: 100%;
-  height: 24%;
-  background: linear-gradient(#33383c, #15191e 25%, #20252c);
-  border-top: 8px solid #11171b;
-  border-radius: 45% 30% 0 0;
+  height: 100%;
+}
+.cabin-wheel-control { pointer-events: all; touch-action: none; cursor: grab; outline: none; }
+.cabin-wheel-control:active { cursor: grabbing; }
+.cabin-wheel-control:focus-visible { stroke: #57c9dc; stroke-width: 3px; }
+/* Keep the other HUD controls in place while the cabin wheel handles steering. */
+.cabin-mode .wheel-control { visibility: hidden; pointer-events: none; }
+.cabin-driver-panel {
+  /* In first person the wheel is in front of the driver; the door/pillar
+     and passenger fascia establish the driver's position inside the car. */
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 36%;
+  min-width: min(240px, 88%);
+  height: auto;
+  max-height: 36%;
+  /* Keep the wheel circular and the readouts attached to their SVG gauges. */
+  aspect-ratio: 660 / 440;
+}
+.interior-rpm { fill: #ffad85; }
+.interior-gear { fill: #89d9f0; }
+.interior-speed { fill: #edf5f8; }
+@media (max-aspect-ratio: 3/4) {
+  /* Keep the instrument readouts above the existing touch controls in portrait. */
+  .cabin-driver-panel { bottom: clamp(56px, 8vh, 88px); }
 }
 .mirror-frame {
   position: absolute;
@@ -81,8 +92,5 @@
   .shoulder-view,
   .passenger-view {
     top: 222px;
-  }
-  .cabin-dashboard {
-    height: 20%;
   }
 }

@@ -16,6 +16,8 @@ export class Vehicle {
     get maxAllowedSpeedMps(): number { return this.speedLimitMps; }
     seatBeltFastened = false;
     private signalState = { left: false, right: false, hazard: false };
+    private signalTickAudio?: HTMLAudioElement;
+    private signalTickWasOn = false;
     get signals(): Readonly<{ left: boolean; right: boolean; hazard: boolean }> { return this.signalState; }
     protected signalMaterials: { turn: THREE.MeshStandardMaterial[]; hazard: THREE.MeshStandardMaterial[] } = { turn: [], hazard: [] };
     private readonly maxForward = 24 / 3.6; // Convert km/h to m/s.
@@ -234,6 +236,11 @@ export class Vehicle {
         this.speedLimitMps = Infinity;
         this.seatBeltFastened = false;
         this.signalState = { left: false, right: false, hazard: false };
+        this.signalTickWasOn = false;
+        if (this.signalTickAudio) {
+            this.signalTickAudio.pause();
+            this.signalTickAudio.currentTime = 0;
+        }
         for (const m of this.signalMaterials.turn) m.color.setHex(0x6a4a08);
         for (const m of this.signalMaterials.hazard) m.color.setHex(0x6a1010);
     }
@@ -244,6 +251,15 @@ export class Vehicle {
     }
     setSignal(next: { left: boolean; right: boolean; hazard: boolean }) {
         this.signalState = { ...next };
+        if (next.left || next.right || next.hazard) {
+            try { this.prepareSignalTickAudio(); } catch { /* Signalling still works without audio. */ }
+        } else {
+            this.signalTickWasOn = false;
+            if (this.signalTickAudio) {
+                this.signalTickAudio.pause();
+                this.signalTickAudio.currentTime = 0;
+            }
+        }
     }
     setSpeedLimitKmh(limitKmh?: number): void {
         const limitMps = limitKmh === undefined ? Infinity : limitKmh / 3.6;
@@ -258,10 +274,11 @@ export class Vehicle {
         this.transmission.car.physics.speed = limited;
         return limited;
     }
-    // Standard automotive cadence: ~1.1 Hz blink (~550 ms on, ~550 ms off).
+    // Tick → Tock: 350 ms on, 350 ms off (700 ms per cycle).
     protected updateSignalBlink() {
-        const cycle = performance.now() % 1100;
-        const on = cycle < 550;
+        const cycle = performance.now() % 700;
+        const on = cycle < 350;
+        this.updateSignalTick(this.signals.left || this.signals.right || this.signals.hazard, on);
         const onColor = on ? 0xffd24a : 0x6a4a08;
         const onHazard = on ? 0xff5050 : 0x6a1010;
         // signalMaterials.turn[0]=front-left, [1]=rear-left, [2]=front-right, [3]=rear-right
@@ -282,6 +299,33 @@ export class Vehicle {
         // Hazard blinks all 4 hazard lenses simultaneously.
         const hazardColor = this.signals.hazard ? onHazard : 0x6a1010;
         for (const m of this.signalMaterials.hazard) m.color.setHex(hazardColor);
+    }
+    protected updateSignalTick(active: boolean, _blinkOn: boolean) {
+        // The recording contains its own cadence; play it whole instead of
+        // restarting it at each visual flash.
+        const tickNow = active;
+        if (tickNow && !this.signalTickWasOn) {
+            try {
+                const audio = this.prepareSignalTickAudio();
+                if (audio) {
+                    audio.currentTime = 0;
+                    void audio.play().catch(() => {});
+                }
+            } catch {
+                // Keep signalling functional if browser audio is unavailable.
+            }
+        }
+        this.signalTickWasOn = tickNow;
+    }
+    private prepareSignalTickAudio(): HTMLAudioElement | undefined {
+        if (typeof Audio === 'undefined') return undefined;
+        if (!this.signalTickAudio) {
+            this.signalTickAudio = new Audio('/sound/xinhan.mp3');
+            this.signalTickAudio.preload = 'auto';
+            this.signalTickAudio.loop = true;
+            this.signalTickAudio.volume = 0.45;
+        }
+        return this.signalTickAudio;
     }
     /** Direct movement used by the guided auto-drive mode; skips engine, gear and clutch simulation. */
     updateAutomatic(dt: number, steeringInput: number, speed: number) {

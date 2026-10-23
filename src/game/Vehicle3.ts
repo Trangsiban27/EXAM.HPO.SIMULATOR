@@ -174,7 +174,8 @@ export class Vehicle3 extends Vehicle {
     }
 
     protected override updateSignalBlink() {
-        const on = performance.now() % 1100 < 550;
+        const on = performance.now() % 700 < 350;
+        this.updateSignalTick(this.signals.left || this.signals.right || this.signals.hazard, on);
         for (const lamp of [...this.frontTurnLamps, ...this.rearTurnLamps]) {
             const active = this.signals.hazard || (lamp.left ? this.signals.left : this.signals.right);
             lamp.material.color.setHex(active && on ? 0xffc343 : lamp.offColor ?? 0x744014);

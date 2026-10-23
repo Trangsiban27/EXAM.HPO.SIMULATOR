@@ -3,6 +3,11 @@ import {Vehicle} from './Vehicle';
 import {notify} from '../ui/Notify';
 
 const DEV_CAMERA_STORAGE_KEY = 'hpo-dev-camera';
+const DIAGONAL_CAMERA_DISTANCE_M = 20;
+const DIAGONAL_CAMERA_ELEVATION_DEG = 28;
+const CABIN_FOV_DEG = 58;
+const CABIN_EYE = new THREE.Vector3(-.48, 1.32, .08);
+const CABIN_LOOK = new THREE.Vector3(-.48, 1.12, -25);
 
 type SavedDevCamera = {
     position: [number, number, number];
@@ -133,7 +138,7 @@ export class CameraManager {
         const root = vehicle.root;
         let target = new THREE.Vector3(), look = root.position.clone();
         const modeChanged = this.previousMode !== this.mode;
-        const fov = this.mode === 0 ? 34 : 60;
+        const fov = this.mode === 0 ? 34 : this.mode === 2 ? CABIN_FOV_DEG : 60;
         if (this.camera.fov !== fov) {
             this.camera.fov = fov;
             this.camera.updateProjectionMatrix();
@@ -143,20 +148,24 @@ export class CameraManager {
             if (modeChanged) this.followFocus.copy(look);
             else this.followFocus.lerp(look, 1 - Math.exp(-5 * dt));
             // Fixed world-space angle: turning the car does not rotate the view.
-            // View the left side (-X at spawn), 36 degrees above the ground.
-            const portraitExtra = Math.max(0, (16 / 9) / this.camera.aspect - 1) * 7.25;
-            this.followOffset.setFromSphericalCoords(29 + portraitExtra, Math.PI * .3, -Math.PI * .5);
+            // View the left side (-X at spawn), with a shallow downward angle.
+            const portraitExtra = Math.max(0, (16 / 9) / this.camera.aspect - 1) * 5;
+            this.followOffset.setFromSphericalCoords(
+                DIAGONAL_CAMERA_DISTANCE_M + portraitExtra,
+                THREE.MathUtils.degToRad(90 - DIAGONAL_CAMERA_ELEVATION_DEG),
+                -Math.PI * .5,
+            );
             look.copy(this.followFocus);
             target.copy(look).add(this.followOffset);
         } else if (this.mode === 2) {
             root.updateWorldMatrix(true, true);
             const visual = root.children.find(child => child.type === 'Group');
             const frame = visual ?? root;
-            target.copy(frame.localToWorld(new THREE.Vector3(-.43, 1.45, -.1)));
-            look.copy(frame.localToWorld(new THREE.Vector3(-.43, 1.4, -20)));
+            target.copy(frame.localToWorld(CABIN_EYE.clone()));
+            look.copy(frame.localToWorld(CABIN_LOOK.clone()));
         } else {
             target.copy(root.position)
-                .add(new THREE.Vector3(0, 18, 2));
+                .add(new THREE.Vector3(0, 16, 3));
             look.copy(root.position);
         }
         if (this.mode === 0 || this.mode === 2 || modeChanged) this.camera.position.copy(target);

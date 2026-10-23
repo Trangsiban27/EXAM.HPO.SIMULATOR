@@ -56,25 +56,104 @@ export class Hud {
                 <section class="pill"><strong id="speed">0</strong><small class="blue">KM/H</small><i></i><span class="amber">ϟ</span><b class="amber" id="rpm">0</b><small class="amber">RPM</small><i></i><button id="engine" data-key="Enter" class="engine" aria-label="Bật hoặc tắt động cơ">ENGINE</button></section>
             </header>
             <div class="hud-standards" title="Tiêu chuẩn và quy định sát hạch">
-                    <div class="hud-standards-item">
-                        <span class="hud-standards-label">Tiêu chuẩn sân:</span>
-                        <strong class="hud-standards-code">QCVN 15:2026/BCA</strong>
-                    </div>
-                    <div class="hud-standards-item">
-                        <span class="hud-standards-label">Quy định về bài thi sa hình:</span>
-                        <strong class="hud-standards-code">TT 12/2025/TT-BCA và TT 108/2026/TT-BCA</strong>
-                    </div>
+                <div class="hud-standards-item">
+                    <span class="hud-standards-label">Tiêu chuẩn sân:</span>
+                    <strong class="hud-standards-code">QCVN 15:2026/BCA</strong>
+                </div>
+                <div class="hud-standards-item">
+                    <span class="hud-standards-label">Quy định về bài thi sa hình:</span>
+                    <strong class="hud-standards-code">TT 12/2025/TT-BCA và TT 108/2026/TT-BCA</strong>
+                </div>
             </div>
-            <div class="hud-top-right">
-                <details class="settings"><summary>⚙ &nbsp; CÀI ĐẶT & GÓC NHÌN</summary><div class="settings-body">
-                    <button id="cameraBtn">Đổi camera</button><button id="restartBtn">Thi lại</button><button id="autoDriveBtn" aria-pressed="false">Bật tự chạy</button><button id="changeClassBtn" style="border-color: #f5b921; color: #f5b921;">🚗 Đổi hạng xe</button>
-                    <button id="settingsGuideBtn" class="settings-guide-btn" type="button" aria-haspopup="dialog">
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
-                        <span>Hướng dẫn sử dụng</span>
-                    </button>
-                    <p>Enter: bật/tắt máy<br>Shift: đạp côn · F: nhả nhanh · N/R/1–5: số<br>W/↑: ga · S/↓: phanh<br>A/D: lái · Space: thắng · C: camera${options.develop ? '<br>Develop: chuột phải kéo nhìn · WASD di chuyển · Q/E lên xuống · Shift nhanh · P probe toạ độ · K lưu camera · Shift+K xoá camera đã lưu' : ''}</p>
-                </div></details>
-            </div>
+            <details class="settings">
+                <summary>
+                    <span class="settings-summary-left">
+                        <svg class="settings-gear-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                        <span>CÀI ĐẶT &amp; GÓC NHÌN</span>
+                    </span>
+                    <svg class="settings-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </summary>
+                <div class="settings-body">
+                    <div class="settings-section-label">ĐIỀU KHIỂN &amp; TÙY CHỌN</div>
+                    <div class="settings-grid">
+                        <button id="cameraBtn" class="settings-btn" type="button">Đổi camera</button>
+                        <button id="restartBtn" class="settings-btn" type="button">Thi lại</button>
+                        <button id="autoDriveBtn" class="settings-btn" type="button" aria-pressed="false">Bật tự chạy</button>
+                        <button id="changeClassBtn" class="settings-btn" type="button">🚗 Đổi hạng xe</button>
+                    </div>
+
+                    <div class="settings-section-label">HƯỚNG DẪN &amp; SA HÌNH</div>
+                    <div class="settings-actions">
+                        <button id="settingsOverviewBtn" class="settings-card-btn settings-video-card" type="button" aria-label="Xem video tổng quan sân">
+                            <div class="settings-card-icon">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                </svg>
+                            </div>
+                            <div class="settings-card-text">
+                                <span class="settings-card-title">Tổng quan sân</span>
+                                <span class="settings-card-sub">Video sa hình toàn cảnh</span>
+                            </div>
+                            <span class="settings-card-arrow" aria-hidden="true">→</span>
+                        </button>
+                        <button id="settingsGuideBtn" class="settings-card-btn settings-guide-card" type="button" aria-haspopup="dialog" aria-label="Xem hướng dẫn sử dụng">
+                            <div class="settings-card-icon">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                                </svg>
+                            </div>
+                            <div class="settings-card-text">
+                                <span class="settings-card-title">Hướng dẫn sử dụng</span>
+                                <span class="settings-card-sub">Chi tiết thao tác thi &amp; chấm điểm</span>
+                            </div>
+                            <span class="settings-card-arrow" aria-hidden="true">→</span>
+                        </button>
+                    </div>
+
+                    <div class="settings-section-label">PHÍM TẮT ĐIỀU KHIỂN</div>
+                    <div class="settings-shortcuts">
+                        <div class="shortcut-row">
+                            <span class="shortcut-label">Bật / Tắt máy</span>
+                            <div class="shortcut-badge"><kbd>Enter</kbd></div>
+                        </div>
+                        <div class="shortcut-row">
+                            <span class="shortcut-label">Ga / Phanh</span>
+                            <div class="shortcut-badge"><kbd>W</kbd><kbd>S</kbd> / <kbd>↑</kbd><kbd>↓</kbd></div>
+                        </div>
+                        <div class="shortcut-row">
+                            <span class="shortcut-label">Đánh lái</span>
+                            <div class="shortcut-badge"><kbd>A</kbd><kbd>D</kbd></div>
+                        </div>
+                        <div class="shortcut-row">
+                            <span class="shortcut-label">Côn / Nhả nhanh</span>
+                            <div class="shortcut-badge"><kbd>Shift</kbd> / <kbd>F</kbd></div>
+                        </div>
+                        <div class="shortcut-row">
+                            <span class="shortcut-label">Cần số</span>
+                            <div class="shortcut-badge"><kbd>1–5</kbd> / <kbd>N</kbd> / <kbd>R</kbd></div>
+                        </div>
+                        <div class="shortcut-row">
+                            <span class="shortcut-label">Thắng tay</span>
+                            <div class="shortcut-badge"><kbd>Space</kbd></div>
+                        </div>
+                        <div class="shortcut-row">
+                            <span class="shortcut-label">Góc nhìn</span>
+                            <div class="shortcut-badge"><kbd>C</kbd></div>
+                        </div>
+                        ${options.develop ? `
+                        <div class="settings-dev-box">
+                            <div class="settings-dev-title">Chế độ Develop</div>
+                            <p class="settings-dev-desc">Chuột phải kéo nhìn · WASD di chuyển · Q/E lên xuống · Shift nhanh · P probe toạ độ · K lưu camera · Shift+K xoá camera</p>
+                        </div>` : ''}
+                    </div>
+                </div>
+            </details>
             <div class="cockpit">
                 <div class="clutch-column"><button id="quickCamera" class="camera-toggle" aria-label="Đổi camera">▣ <span id="camera">1</span></button>
                     <div class="pedal clutch"><b>CÔN</b><span class="clutch-scale"><input class="analog-clutch" type="range" min="0" max="1" step="0.01" value="0" aria-label="Mức đạp côn" aria-describedby="clutchHelp" data-analog="clutch"></span><small id="clutchHelp">Giữ <kbd>Shift</kbd> để đạp</small></div>
@@ -138,40 +217,43 @@ export class Hud {
     private el(id: string) { return this.elements.get(id)!; }
     bind(b: Bindings) {
         this.restart = b.onRestart;
-        const wheel = this.el('wheel');
-        let pointer: number | null = null;
-        let lastAngle = 0;
-        let turn = 0;
-        const angle = (e: PointerEvent) => {
-            const rect = wheel.getBoundingClientRect();
-            return Math.atan2(e.clientY - rect.top - rect.height / 2, e.clientX - rect.left - rect.width / 2);
-        };
-        const steer = () => { b.onAnalog('steeringActive', 1); b.onAnalog('steering', .5 + turn / (Math.PI * 6)); };
-        const releaseWheel = () => { pointer = null; b.onAnalog('steeringActive', 0); };
-        wheel.addEventListener('pointerdown', e => {
-            if (pointer !== null) return;
-            e.preventDefault(); pointer = e.pointerId; lastAngle = angle(e);
-            turn = Number(wheel.getAttribute('aria-valuenow')) * Math.PI / 180;
-            steer();
-            wheel.setPointerCapture(e.pointerId);
-        });
-        wheel.addEventListener('pointermove', e => {
-            if (pointer !== e.pointerId) return;
-            const next = angle(e);
-            const delta = Math.atan2(Math.sin(next - lastAngle), Math.cos(next - lastAngle));
-            turn = Math.max(-3 * Math.PI, Math.min(3 * Math.PI, turn + delta)); lastAngle = next; steer();
-        });
-        wheel.addEventListener('pointerup', e => { if (pointer === e.pointerId) releaseWheel(); });
-        wheel.addEventListener('pointercancel', releaseWheel);
-        wheel.addEventListener('lostpointercapture', releaseWheel);
-        wheel.addEventListener('keydown', e => {
-            if (!['ArrowLeft', 'ArrowRight', 'Home'].includes(e.code)) return;
-            e.preventDefault(); turn = e.code === 'Home' ? 0 : Math.max(-3 * Math.PI, Math.min(3 * Math.PI, turn + (e.code === 'ArrowLeft' ? -.2 : .2)));
-            steer();
-        });
-        wheel.addEventListener('keyup', releaseWheel);
-        wheel.addEventListener('blur', releaseWheel);
-        window.addEventListener('blur', releaseWheel);
+        const wheels = [this.el('wheel'), document.getElementById('cabinWheelControl')]
+            .filter((wheel): wheel is HTMLElement => wheel !== null);
+        for (const wheel of wheels) {
+            let pointer: number | null = null;
+            let lastAngle = 0;
+            let turn = 0;
+            const angle = (e: PointerEvent) => {
+                const rect = wheel.getBoundingClientRect();
+                return Math.atan2(e.clientY - rect.top - rect.height / 2, e.clientX - rect.left - rect.width / 2);
+            };
+            const steer = () => { b.onAnalog('steeringActive', 1); b.onAnalog('steering', .5 + turn / (Math.PI * 6)); };
+            const releaseWheel = () => { pointer = null; b.onAnalog('steeringActive', 0); };
+            wheel.addEventListener('pointerdown', e => {
+                if (pointer !== null) return;
+                e.preventDefault(); pointer = e.pointerId; lastAngle = angle(e);
+                turn = Number(wheel.getAttribute('aria-valuenow')) * Math.PI / 180;
+                steer();
+                wheel.setPointerCapture(e.pointerId);
+            });
+            wheel.addEventListener('pointermove', e => {
+                if (pointer !== e.pointerId) return;
+                const next = angle(e);
+                const delta = Math.atan2(Math.sin(next - lastAngle), Math.cos(next - lastAngle));
+                turn = Math.max(-3 * Math.PI, Math.min(3 * Math.PI, turn + delta)); lastAngle = next; steer();
+            });
+            wheel.addEventListener('pointerup', e => { if (pointer === e.pointerId) releaseWheel(); });
+            wheel.addEventListener('pointercancel', releaseWheel);
+            wheel.addEventListener('lostpointercapture', releaseWheel);
+            wheel.addEventListener('keydown', e => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home'].includes(e.code)) return;
+                e.preventDefault(); turn = e.code === 'Home' ? 0 : Math.max(-3 * Math.PI, Math.min(3 * Math.PI, turn + (e.code === 'ArrowLeft' ? -.2 : .2)));
+                steer();
+            });
+            wheel.addEventListener('keyup', releaseWheel);
+            wheel.addEventListener('blur', releaseWheel);
+            window.addEventListener('blur', releaseWheel);
+        }
         this.host.querySelectorAll<HTMLInputElement>('[data-analog]').forEach(el => {
             el.addEventListener('input', () => b.onAnalog(el.dataset.analog!, Number(el.value)));
             if (el.dataset.analog === 'clutch') {
@@ -242,12 +324,20 @@ export class Hud {
         this.el('cameraBtn').addEventListener('click', b.onCamera);
         this.el('quickCamera').addEventListener('click', b.onCamera);
         this.el('settingsGuideBtn').addEventListener('click', () => this.onShowGuide?.());
+        const openOverview = () => this.showOverviewVideo();
+        this.host.querySelector<HTMLButtonElement>('#settingsOverviewBtn')?.addEventListener('click', openOverview);
         const changeClassBtn = this.host.querySelector<HTMLButtonElement>('#changeClassBtn');
         if (changeClassBtn) {
             changeClassBtn.addEventListener('click', () => {
                 if (this.onChangeClass) this.onChangeClass();
             });
         }
+        document.addEventListener('pointerdown', (e) => {
+            const settings = this.host.querySelector<HTMLDetailsElement>('.settings');
+            if (settings && settings.open && !settings.contains(e.target as Node)) {
+                settings.removeAttribute('open');
+            }
+        });
         this.host.querySelectorAll<HTMLButtonElement>('[data-key]').forEach(btn => {
             const code = btn.dataset.key!;
             const release = () => { b.onVirtual(code, false); btn.classList.remove('pressed'); };
@@ -523,6 +613,7 @@ export class Hud {
     }
 
     update(t: GameTelemetry, finished: boolean, scoringMode: ExamScoringMode = 'normal') {
+        this.host.classList.toggle('cabin-mode', !this.options.develop && t.cameraMode === 2);
         this.audio.update(t.rpm);
         this.el('gasFill').style.height = (t.gasPedal * 100) + '%';
         this.el('brakeFill').style.height = (t.brakePedal * 100) + '%';
@@ -557,6 +648,7 @@ export class Hud {
         this.el('steering').textContent = `${Math.round(t.steering)}°`;
         this.el('wheelFace').style.transform = `rotate(${t.steeringWheelAngle}deg)`;
         this.el('wheel').setAttribute('aria-valuenow', String(Math.round(t.steeringWheelAngle)));
+        document.getElementById('cabinWheelControl')?.setAttribute('aria-valuenow', String(Math.round(t.steeringWheelAngle)));
         this.el('camera').textContent = this.options.develop ? 'Dev' : t.cameraMode === 2 ? 'Cabin' : String(t.cameraMode + 1);
         this.el('cameraBtn').textContent = this.options.develop ? 'Camera tự do' : 'Đổi camera · ' + ['Chéo', 'Trên cao', 'Cabin'][t.cameraMode];
         const signals = t.signals ?? { left: false, right: false, hazard: false };
@@ -610,5 +702,67 @@ export class Hud {
         this.host.style.opacity = visible ? '1' : '0';
         this.host.style.pointerEvents = visible ? '' : 'none';
         this.host.style.transition = 'opacity 0.35s ease';
+    }
+
+    private videoModal?: HTMLDivElement;
+    private videoPlayer?: HTMLVideoElement;
+
+    private initVideoModal(): void {
+        const modal = document.createElement('div');
+        modal.id = 'overviewVideoModal';
+        modal.className = 'video-modal-backdrop';
+        modal.style.display = 'none';
+        modal.innerHTML = `
+            <div class="video-modal-box" role="dialog" aria-modal="true" aria-label="Tổng quan sân sát hạch">
+                <div class="video-modal-header">
+                    <div class="video-modal-title">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                            <polygon points="10 8 16 12 10 16 10 8" fill="currentColor"></polygon>
+                        </svg>
+                        <span>VIDEO TỔNG QUAN SA HÌNH SÁT HẠCH HPO</span>
+                    </div>
+                    <button id="overviewVideoCloseBtn" class="video-modal-close-btn" type="button" aria-label="Đóng video">✕</button>
+                </div>
+                <div class="video-wrapper">
+                    <video id="overviewVideoPlayer" src="/video/welcome.mp4" controls preload="metadata" playsinline></video>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        this.videoModal = modal;
+        this.videoPlayer = modal.querySelector<HTMLVideoElement>('#overviewVideoPlayer')!;
+
+        const closeBtn = modal.querySelector<HTMLButtonElement>('#overviewVideoCloseBtn');
+        const closeVideo = () => this.hideOverviewVideo();
+
+        closeBtn?.addEventListener('click', closeVideo);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeVideo();
+        });
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Escape' && this.videoModal?.style.display !== 'none') {
+                closeVideo();
+            }
+        });
+    }
+
+    public showOverviewVideo(): void {
+        if (!this.videoModal) {
+            this.initVideoModal();
+        }
+        if (this.videoModal && this.videoPlayer) {
+            this.videoModal.style.display = 'flex';
+            this.videoPlayer.currentTime = 0;
+            void this.videoPlayer.play().catch(() => {});
+        }
+    }
+
+    public hideOverviewVideo(): void {
+        if (this.videoModal && this.videoPlayer) {
+            this.videoPlayer.pause();
+            this.videoModal.style.display = 'none';
+        }
     }
 }

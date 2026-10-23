@@ -92,7 +92,8 @@ export class Vehicle2 extends Vehicle {
         this.signalMaterials={turn:turns,hazard:[]};
     }
     protected override updateSignalBlink() {
-        const on=performance.now()%1100<550;
+        const on=performance.now()%700<350;
+        this.updateSignalTick(this.signals.left || this.signals.right || this.signals.hazard, on);
         this.signalMaterials.turn.forEach((material,index)=>{
             const active=this.signals.hazard||(index<2?this.signals.left:this.signals.right);
             material.color.setHex(active&&on?0xffd24a:0x6a4a08);

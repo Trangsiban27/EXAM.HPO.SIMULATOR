@@ -44,9 +44,8 @@ export class CabinView {
         this.mirrorScene.add(this.viewScreen);
         this.overlay.className = 'cabin-overlay';
         this.overlay.hidden = true;
-        this.overlay.innerHTML = `<div class="cabin-roof"></div><div class="cabin-pillar"></div><div class="cabin-dashboard"></div><div class="mirror-frame mirror-left"><b>GƯƠNG TRÁI</b></div><div class="mirror-frame mirror-right"><b>GƯƠNG PHẢI</b></div><div class="mirror-frame shoulder-view"><b>CANH VAI · GHẾ LÁI</b></div><div class="mirror-frame passenger-view"><b>CỬA SỔ PHẢI · GHẾ PHỤ</b></div>`;
+        this.overlay.innerHTML = `<div class="mirror-frame mirror-left"><b>GƯƠNG TRÁI</b></div><div class="mirror-frame mirror-right"><b>GƯƠNG PHẢI</b></div><div class="mirror-frame shoulder-view"><b>CANH VAI · GHẾ LÁI</b></div><div class="mirror-frame passenger-view"><b>CỬA SỔ PHẢI · GHẾ PHỤ</b></div>`;
         host.appendChild(this.overlay);
-        this.overlay.querySelectorAll('.cabin-roof,.cabin-pillar,.cabin-dashboard').forEach(el => el.remove());
         this.overlay.prepend(this.interior.root);
         this.frames = Array.from(this.overlay.querySelectorAll<HTMLElement>('.mirror-frame'));
     }
@@ -61,9 +60,14 @@ export class CabinView {
         const w = this.host.clientWidth, h = this.host.clientHeight;
         renderer.setViewport(0, 0, w, h);
         const visible = vehicle.root.visible;
-        if (cabinActive) vehicle.root.visible = false;
-        renderer.render(scene, camera);
-        vehicle.root.visible = visible;
+        // The SVG supplies the cabin interior. Hide the exterior only for the
+        // driver's main view, then restore it so all four auxiliary views see it.
+        try {
+            if (cabinActive) vehicle.root.visible = false;
+            renderer.render(scene, camera);
+        } finally {
+            vehicle.root.visible = visible;
+        }
         vehicle.root.updateWorldMatrix(true, true);
         const frame = vehicle.root.children.find(child => child.type === 'Group') ?? vehicle.root;
         const bounds = this.host.getBoundingClientRect();
