@@ -18,9 +18,10 @@ export const EXAM_04_WRONG_LAYOUT_REASON = 'đi không đúng hình của hạng
  *   INACTIVE
  *     ↓ swapToCourse() (xe chạm startYellowSensor)
  *   WHEEL_TRACK_ACTIVE
- *     ├── bánh FR + RR đều trong wheelTrackZone → WHEEL_TRACK_COMPLETED
+ *     ├── theo dõi FR/RR qua vùng giữa hai vạch, đánh giá sau khi cả hai đi hết đoạn
+ *     ├── cả FR và RR đều bỏ qua vùng vệt → DQ
  *     ├── boundary contact → -5/event + -5/5s sustained
- *     ├── stall / RPM / speed → penalties
+ *     ├── stall / RPM / speed → shared checks in ExamEngine
  *     └── quá 120s → -5 (overtime)
  *         ↓
  *   RIGHT_ANGLE_ACTIVE   (wheel track done, đang làm đường vuông góc)
@@ -90,6 +91,8 @@ export interface Exam04CourseSensors {
     endYellowSensor: THREE.Box3;
     /** Vùng wheel-track Box3 (world space). */
     wheelTrackZone: THREE.Box3;
+    /** White paint contact zones expanded by tyre width. */
+    wheelTrackBoundarySensors?: THREE.Box3[];
     /** Mảng boundary sensor Box3[] (world space). */
     boundarySensors: THREE.Box3[];
     /** Vị trí world-space của điểm entry course. */
@@ -138,9 +141,10 @@ export class Exam04WheelTrack {
     private wheelTrackCompleted = false;
     /** Bánh trước bên lái phụ (FR) đã vào wheelTrackZone chưa. */
     private frontPassengerPassed = false;
+    private previousPassengerWheels: { FR: THREE.Vector3; RR: THREE.Vector3 } | null = null;
     /** Bánh sau bên lái phụ (RR) đã vào wheelTrackZone chưa. */
     private rearPassengerPassed = false;
-    /** Đã phạt "thiếu bánh" cho wheel-track lần này chưa (1-shot per course). */
+    /** Both right wheels have cleared the track; result evaluated once per course. */
     private wheelTrackPenaltyLatched = false;
     /** E04-WT-Overlap: đang có ít nhất 1 bánh cán lên vệt (latch đầu tiên). */
     private wheelTrackOverlapActive = false;
@@ -155,6 +159,7 @@ export class Exam04WheelTrack {
     private endYellowLineCrossed = false;
     /** Sensor state cho edge detection của END_GATE (sensor vạch vàng cuối). */
     private prevEndInside = false;
+    private endGatePending = false;
     private rpmViolationLatched = false;
     private stallLatched = false;
     private stallEventCount = 0;
@@ -232,6 +237,7 @@ export class Exam04WheelTrack {
         this.previousFrontPosition = null;
         this.wheelTrackCompleted = false;
         this.frontPassengerPassed = false;
+        this.previousPassengerWheels = null;
         this.rearPassengerPassed = false;
         this.wheelTrackPenaltyLatched = false;
         this.wheelTrackOverlapActive = false;
@@ -250,6 +256,7 @@ export class Exam04WheelTrack {
         this._disqualifyReason = '';
         this.startToastEmitted = false;
         this.prevEndInside = false;
+        this.endGatePending = false;
         this.wheelYBaseline = -1;
         this.wheelYBaselineSamples = 0;
     }
@@ -261,6 +268,7 @@ export class Exam04WheelTrack {
 
         const now = performance.now();
         const s = this.sensors!;
+        if (this.hasCrossedEndYellow(input)) this.endGatePending = true;
         const penalties: PenaltyEvent[] = [];
         let toast: string | undefined;
         const add = (points: number, reason: string) => {
@@ -290,88 +298,49 @@ export class Exam04WheelTrack {
 
         // E04-11: arrival overtime đã được bỏ theo yêu cầu.
 
-        // E04-08: phạt theo sự kiện chết máy thực tế, một lần mỗi lần chết máy.
-        if (input.stalled && !this.stallLatched) {
-            this.stallLatched = true;
-            this.stallEventCount += 1;
-            add(this.stallPenalty, 'Chết máy');
-        }
-        if (!input.stalled) {
-            this.stallLatched = false;
-        }
-
-        // E04-09: RPM > 4000
-        if (input.rpm > this.maxRPM && !this.rpmViolationLatched) {
-            this.rpmViolationLatched = true;
-            add(this.rpmExceededPenalty, `Vòng tua máy vượt ${this.maxRPM} vòng/phút`);
-        } else if (input.rpm <= this.maxRPM * .95) {
-            this.rpmViolationLatched = false;
-        }
-
-        // E04-10: speeding (sustained > maxSpeedKmh)
-        if (input.speedKmh > this.maxSpeedKmh) {
-            this.speedingSec += input.dt;
-            if (this.speedingSec >= this.speedingIntervalSec) {
-                this.speedingSec = 0;
-                add(this.speedingPenalty, `Vượt tốc độ quy định (${this.maxSpeedKmh} km/h)`);
-            }
-        } else {
-            this.speedingSec = 0;
-        }
-
-        // ── Wheel-track logic ────────────────────────────────────────────────
-        // Check FR and RR (passenger side) against wheelTrackZone
-        const frInside = s.wheelTrackZone.containsPoint(input.wheelPositions.FR);
-        const rrInside = s.wheelTrackZone.containsPoint(input.wheelPositions.RR);
-
-        if (this.state === 'WHEEL_TRACK_ACTIVE' || this.state === 'WHEEL_TRACK_COMPLETED') {
-            if (!this.wheelTrackCompleted) {
-                // Track từng bánh qua zone (1-shot per wheel).
-                if (frInside && !this.frontPassengerPassed) this.frontPassengerPassed = true;
-                if (rrInside && !this.rearPassengerPassed) this.rearPassengerPassed = true;
-
-                // Soft mode: chỉ cần 1 trong 2 bánh (FR hoặc RR) qua zone là đạt.
-                // Bánh còn lại chưa qua → trừ missingWheelPenalty (E04-02b).
-                if (this.frontPassengerPassed || this.rearPassengerPassed) {
-                    this.wheelTrackCompleted = true;
-                    this.state = 'RIGHT_ANGLE_ACTIVE';
-
-                    // Phạt 1-shot cho mỗi bánh còn lại chưa qua.
-                    if (!this.wheelTrackPenaltyLatched) {
-                        this.wheelTrackPenaltyLatched = true;
-                        const missingReasons: string[] = [];
-                        if (!this.frontPassengerPassed) {
-                            penalties.push({
-                                at: now,
-                                points: this.wheelTrackMissingPenalty,
-                                reason: 'Bánh trước bên lái phụ chưa qua vệt bánh xe',
-                            });
-                            missingReasons.push('trước');
-                        }
-                        if (!this.rearPassengerPassed) {
-                            penalties.push({
-                                at: now,
-                                points: this.wheelTrackMissingPenalty,
-                                reason: 'Bánh sau bên lái phụ chưa qua vệt bánh xe',
-                            });
-                            missingReasons.push('sau');
-                        }
-                        if (missingReasons.length > 0) {
-                            toast = `Hoàn thành vệt bánh xe (thiếu bánh ${missingReasons.join(' + ')} — bị trừ điểm)`;
-                        }
-                    }
+        // Check each right wheel independently, using swept horizontal positions
+        // so wheel-centre height and a skipped render frame cannot hide a crossing.
+        const zone = s.wheelTrackZone;
+        const project = (point: THREE.Vector3) => new THREE.Vector3(point.x, zone.min.y, point.z);
+        const crossedZone = (point: THREE.Vector3, previous?: THREE.Vector3): boolean => {
+            const end = project(point);
+            if (zone.containsPoint(end)) return true;
+            if (!previous) return false;
+            const start = project(previous), delta = end.clone().sub(start);
+            const length = delta.length();
+            if (length < 1e-8) return false;
+            const hit = new THREE.Ray(start, delta.divideScalar(length)).intersectBox(zone, new THREE.Vector3());
+            return hit !== null && hit.distanceTo(start) <= length + 1e-6;
+        };
+        if (!this.wheelTrackPenaltyLatched) {
+            this.frontPassengerPassed ||= crossedZone(input.wheelPositions.FR, this.previousPassengerWheels?.FR);
+            this.rearPassengerPassed ||= crossedZone(input.wheelPositions.RR, this.previousPassengerWheels?.RR);
+            this.previousPassengerWheels = { FR: input.wheelPositions.FR.clone(), RR: input.wheelPositions.RR.clone() };
+            const forward = s.exitForwardAxis.clone().setY(0).normalize();
+            const farEdge = zone.getCenter(new THREE.Vector3()).dot(forward)
+                + zone.getSize(new THREE.Vector3()).multiplyScalar(.5).dot(
+                    new THREE.Vector3(Math.abs(forward.x), 0, Math.abs(forward.z)));
+            const bothPast = input.wheelPositions.FR.dot(forward) > farEdge
+                && input.wheelPositions.RR.dot(forward) > farEdge;
+            if (bothPast || this.endGatePending) {
+                this.wheelTrackPenaltyLatched = true;
+                this.wheelTrackCompleted = this.frontPassengerPassed && this.rearPassengerPassed;
+                this.state = 'RIGHT_ANGLE_ACTIVE';
+                if (!this.frontPassengerPassed && !this.rearPassengerPassed) {
+                    this._disqualifyReason = 'Bánh xe trước và bánh xe sau bên lái phụ không qua vùng giới hạn của hình vệt bánh xe';
+                    if (!input.continueAfterDisqualification) this.state = 'DISQUALIFIED';
+                    return { penalties, completed: false, disqualified: true, disqualifyReason: this._disqualifyReason };
                 }
+                if (!this.frontPassengerPassed) add(this.wheelTrackMissingPenalty, 'Bánh trước bên lái phụ chưa qua vệt bánh xe');
+                if (!this.rearPassengerPassed) add(this.wheelTrackMissingPenalty, 'Bánh sau bên lái phụ chưa qua vệt bánh xe');
             }
         }
 
-        // ── E04-WT-Overlap: bánh xe đè (cán) lên vệt bánh xe ────────────────
-        // Áp dụng cho cả 4 bánh (FL, FR, RL, RR). Cán lần đầu → -5 (latch);
-        // cứ mỗi 5s cán tiếp → -5. Thoát ra khỏi vệt → reset.
-        const overlappingWheel =
-            s.wheelTrackZone.containsPoint(input.wheelPositions.FL) ||
-            s.wheelTrackZone.containsPoint(input.wheelPositions.FR) ||
-            s.wheelTrackZone.containsPoint(input.wheelPositions.RL) ||
-            s.wheelTrackZone.containsPoint(input.wheelPositions.RR);
+        // The corridor is valid driving space. Only contact with its white
+        // boundary paint is penalised, once on contact and again every 5 s.
+        const overlappingWheel = (s.wheelTrackBoundarySensors ?? []).some(boundary =>
+            Object.values(input.wheelPositions).some(point => boundary.containsPoint(
+                new THREE.Vector3(point.x, boundary.min.y, point.z))));
         if (overlappingWheel) {
             if (!this.wheelTrackOverlapActive) {
                 this.wheelTrackOverlapActive = true;
@@ -483,11 +452,8 @@ export class Exam04WheelTrack {
         }
 
         // ── Check end gate ───────────────────────────────────────────────────
-        if (!this.endYellowLineCrossed && this.hasCrossedEndYellow(input)) {
+        if (!this.endYellowLineCrossed && this.endGatePending) {
             this.endYellowLineCrossed = true;
-            // Không DQ khi chưa đưa bánh qua vệt (theo yêu cầu mới —
-            // chỉ trừ điểm "thiếu bánh" trong wheelTrackCheck). Vẫn cho
-            // hoàn thành course, exam sẽ flash "Hoàn thành · X điểm".
             this.state = 'COMPLETED';
             const completedReason = this.wheelTrackCompleted
                 ? (toast ?? 'Hoàn thành bài 4 — Vệt bánh xe & đường vuông góc')

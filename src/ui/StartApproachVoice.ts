@@ -6,7 +6,36 @@ const voiceClips = [
     '/voice/bai1/choxevaovitrixuatphat.mp3',
 ] as const;
 const startVoice = '/voice/bai1/batdauthi.mp3';
+const recurringPenaltyVoices = [
+    ['Vòng tua máy vượt', 'vongtuadongcoquamucchophep_tru5diem.mp3'],
+    ['Chết máy', 'xebichetmay_tru5diem.mp3'],
+    ['Vượt tốc độ quy định', 'xechayquatocdoquydinh.mp3'],
+] as const;
+const lesson2PenaltyVoices = [
+    ['Không dừng xe ở vạch dừng quy định', 'khongdungxeovachdungquydinh_tru5diem.mp3'],
+    ['Dừng xe quá vạch dừng quy định', 'dungxequavachdungquydinh_tru5diem.mp3'],
+    ['Dừng xe chưa đến vạch dừng quy định', 'dungxechuadenvachdungquydinh_tru5diem.mp3'],
+] as const;
+const lesson3PenaltyVoices = [
+    ['Không dừng xe ở vạch dừng quy định', 'khongdungxeovachdungquydinhtrendoc_biloai.mp3'],
+    ['Dừng xe chưa đến vạch dừng quy định', 'dungxechuadenvachdungquydinh_tru5diem.mp3'],
+    ['Dừng xe quá vạch dừng quy định', 'dungxequavachdungquydinh_biloai.mp3'],
+    ['Tụt dốc quá', 'xebitutdoc_biloai.mp3'],
+    ['Quá 30 giây từ khi dừng mà chưa khởi hành qua vạch', 'qua30giaykhongkhoihanhxequadoc_biloai.mp3'],
+] as const;
+const lesson4PenaltyVoices = [
+    ['Bánh xe trước và bánh xe sau bên lái phụ không qua vùng giới hạn của hình vệt bánh xe', 'disaihinhsathach_biloai.mp3'],
+    ['đi không đúng hình của hạng xe', 'disaihinhsathach_biloai.mp3'],
+    ['Bánh xe đè lên vệt bánh xe kéo dài quá 5 giây', 'banhxedevachgioihanqua5giay_tru5diem.mp3'],
+    ['Bánh xe đè vạch kéo dài quá 5 giây', 'banhxedevachgioihanqua5giay_tru5diem.mp3'],
+    ['Bánh trước bên lái phụ chưa qua vệt bánh xe', 'banhxedevach_tru5diem copy.mp3'],
+    ['Bánh sau bên lái phụ chưa qua vệt bánh xe', 'banhxedevach_tru5diem copy.mp3'],
+    ['Bánh xe đè lên vệt bánh xe', 'banhxedevach_tru5diem copy.mp3'],
+    ['Bánh xe đè vạch giới hạn', 'banhxedevach_tru5diem copy.mp3'],
+    ['Quá thời gian 02 phút thực hiện bài số 4', 'quathoigianthuchienbaithi-tru5diem.mp3'],
+] as const;
 const penaltyVoices = [
+    ['Chạm vạch đỏ trắng', 'laixelenviahe_biloai.mp3'],
     ['Xuất phát khi chưa có hiệu lệnh', 'xuatphatxekhichuacohieulenh_biloai.mp3'],
     ['Không bật xi nhan trái khi xuất phát', 'khongbatxinhan_tru5diem.mp3'],
     ['Không tắt xi nhan trái tại mốc 5 m', 'khongtatxinhansau5met_tru5diem.mp3'],
@@ -36,6 +65,7 @@ export class StartApproachVoice {
     private leftSignalSince?: number;
     private startAnnounced = false;
     private announcedPenalties = new Set<string>();
+    private announcedEvents = new WeakSet<PenaltyEvent>();
     private finishedHandled = false;
 
     constructor(private readonly callbacks: StartVoiceCallbacks) {}
@@ -68,6 +98,7 @@ export class StartApproachVoice {
         this.previousDistanceM = undefined;
         this.triggered = false;
         this.announcedPenalties.clear();
+        this.announcedEvents = new WeakSet<PenaltyEvent>();
         this.finishedHandled = false;
         this.instructionsFinished = false;
         this.leftSignalSince = undefined;
@@ -93,6 +124,35 @@ export class StartApproachVoice {
             if (!reasons.some(value => value.includes(reason)) || this.announcedPenalties.has(file)) continue;
             this.announcedPenalties.add(file);
             this.enqueue({ src: `/voice/bai1/${file}` });
+        }
+        for (const event of penalties) {
+            if (this.announcedEvents.has(event)) continue;
+            const lesson4Match = event.lessonId === 4
+                ? lesson4PenaltyVoices.find(([reason]) => event.reason.includes(reason)) : undefined;
+            if (lesson4Match) {
+                this.announcedEvents.add(event);
+                this.enqueue({ src: `/voice/bai4/${lesson4Match[1]}` });
+                continue;
+            }
+            const lesson3Match = event.lessonId === 3
+                ? lesson3PenaltyVoices.find(([reason]) => event.reason.includes(reason)) : undefined;
+            if (lesson3Match) {
+                this.announcedEvents.add(event);
+                this.enqueue({ src: `/voice/bai3/${lesson3Match[1]}` });
+                continue;
+            }
+            if (event.points <= 0) continue;
+            const lesson2Match = event.lessonId === 2
+                ? lesson2PenaltyVoices.find(([reason]) => event.reason === reason) : undefined;
+            if (lesson2Match) {
+                this.announcedEvents.add(event);
+                this.enqueue({ src: `/voice/bai2/${lesson2Match[1]}` });
+                continue;
+            }
+            const match = recurringPenaltyVoices.find(([reason]) => event.reason.includes(reason));
+            if (!match) continue;
+            this.announcedEvents.add(event);
+            this.enqueue({ src: `/voice/bai1/${match[1]}` });
         }
     }
 

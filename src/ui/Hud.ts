@@ -1,3 +1,4 @@
+import { loadGraphicsQuality, saveGraphicsQuality, type GraphicsQuality } from '../game/graphicsQuality';
 import type { GameTelemetry } from '../game/types';
 import './manual-controls.css';
 import './cabin.css';
@@ -28,7 +29,7 @@ function lessonPickerLabel(lesson: AutoDriveLesson): string {
 }
 import './auto-drive.css';
 
-type Bindings = { onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void; onAutoDriveToggle: () => void; onLessonSelect: (lessonId: number) => void; onWaypointRecordingStart: () => boolean; onWaypointRecordingFinish: () => string };
+type Bindings = { onGraphicsQuality: (quality: GraphicsQuality) => void; onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void; onAutoDriveToggle: () => void; onLessonSelect: (lessonId: number) => void; onWaypointRecordingStart: () => boolean; onWaypointRecordingFinish: () => string };
 type AutoLessonView = 'steps' | 'requirements' | 'penalties';
 
 export class Hud {
@@ -87,6 +88,12 @@ export class Hud {
                         <button id="changeClassBtn" class="settings-btn" type="button">🚗 Đổi hạng xe</button>
                     </div>
 
+                    <fieldset class="graphics-quality">
+                        <legend class="settings-section-label">CHẤT LƯỢNG ĐỒ HỌA</legend>
+                        <div class="graphics-quality-options">
+                            ${([['low', 'Thấp'], ['medium', 'Trung bình'], ['high', 'Cao']] as const).map(([value, label]) => `<label><input type="radio" name="graphicsQuality" value="${value}" ${loadGraphicsQuality() === value ? 'checked' : ''}><span>${label}</span></label>`).join('')}
+                        </div>
+                    </fieldset>
                     <div class="settings-section-label">HƯỚNG DẪN &amp; SA HÌNH</div>
                     <div class="settings-actions">
                         <button id="settingsOverviewBtn" class="settings-card-btn settings-video-card" type="button" aria-label="Xem video tổng quan sân">
@@ -321,6 +328,14 @@ export class Hud {
             );
         });
         this.el('waypointDone').addEventListener('click', () => this.el('waypointPrompt').setAttribute('hidden', ''));
+        this.host.querySelectorAll<HTMLInputElement>('input[name="graphicsQuality"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                if (!radio.checked) return;
+                const quality = radio.value as GraphicsQuality;
+                saveGraphicsQuality(quality);
+                b.onGraphicsQuality(quality);
+            });
+        });
         this.el('cameraBtn').addEventListener('click', b.onCamera);
         this.el('quickCamera').addEventListener('click', b.onCamera);
         this.el('settingsGuideBtn').addEventListener('click', () => this.onShowGuide?.());

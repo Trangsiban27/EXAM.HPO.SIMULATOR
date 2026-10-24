@@ -297,37 +297,6 @@ export class Exam03Hill {
         // === DQ: Gây tai nạn (E03-06) ===
         // Tai nạn được xử lý bởi game engine, exercise chỉ nhận flag riêng nếu cần.
 
-        // === E03-07: Chết máy (chỉ trừ khi xe đang vào số, clutch < 0.5) ===
-        if (input.engineRunning && !this.engineWasRunning) {
-            this.stallLatched = false;
-        }
-        this.engineWasRunning = input.engineRunning;
-        if (!input.engineRunning && !this.stallLatched && input.clutch < 0.5) {
-            this.stallLatched = true;
-            this.stallEventCount += 1;
-            add(this.stallPenalty, 'Chết máy');
-        }
-
-        // === E03-08: RPM > 4000 (latch theo lần vi phạm) ===
-        if (input.rpm > this.maxRPM && !this.rpmViolationLatched) {
-            this.rpmViolationLatched = true;
-            add(this.rpmExceededPenalty, `Vòng tua máy vượt ${this.maxRPM} vòng/phút`);
-        } else if (input.rpm <= this.maxRPM * .95) {
-            this.rpmViolationLatched = false;
-        }
-
-        // === E03-09: Quá tốc độ (cứ 3s liên tục → -1 điểm) ===
-        const maxSpeed = EXAM_03_HILL_RULES.maxSpeedKmh[EXAM_VEHICLE_CLASS];
-        if (input.speedKmh > maxSpeed) {
-            this.speedingSec += input.dt;
-            if (this.speedingSec >= this.speedingIntervalSec) {
-                this.speedingSec = 0;
-                add(this.speedingPenaltyPerInterval, `Vượt tốc độ quy định (${maxSpeed} km/h)`);
-            }
-        } else {
-            this.speedingSec = 0;
-        }
-
         // === E03-10: Thời gian đến bài vượt quá (allowedTimeSec = null = REQUIRED_INPUT) ===
         if (this.state === 'APPROACHING_STOP_LINE' || this.state === 'STOP_EVALUATION') {
             this.arrivalOvertimeSec += input.dt;
@@ -335,8 +304,9 @@ export class Exam03Hill {
 
         // === APPROACHING_STOP_LINE state ===
         if (this.state === 'APPROACHING_STOP_LINE') {
-            // Xe vượt vạch trắng (thanh cản trước) mà chưa dừng → NO_REQUIRED_STOP (DQ)
-            if (this.hasCrossedStopLine(input.frontPosition) && !this.stopEvaluated) {
+            // Observe until the exit: a stop beyond the line is STOP_OVER_LINE;
+            // reaching the exit without a recorded stop is NO_REQUIRED_STOP.
+            if (this.hasPassedExit(input.position) && !this.stopEvaluated) {
                 this.stopEvaluated = true;
                 this._stopClassification = 'NO_REQUIRED_STOP';
                 this.state = 'DISQUALIFIED';

@@ -4,7 +4,7 @@ import { StartExercise, type StartSignalPhase } from './exercises/StartExercise'
 import { Exam02Pedestrian } from './exercises/Exam02Pedestrian';
 import { Exam03Hill } from './exercises/Exam03Hill';
 import { Exam04WheelTrack, EXAM_04_WRONG_LAYOUT_REASON, type Exam04CourseSensors } from './exercises/Exam04WheelTrack';
-import { EXAM_VEHICLE_CLASS, type ExamVehicleClass } from './exam/examRules';
+import { EXAM_01_START_RULES, EXAM_VEHICLE_CLASS, type ExamVehicleClass } from './exam/examRules';
 import { Exam05South } from './exercises/Exam05South';
 import { TrafficLightScoring } from './exercises/TrafficLightScoring';
 import { Exam06ApproachLane } from './exercises/Exam06ApproachLane';
@@ -108,7 +108,11 @@ export class ExamEngine{
     disqualifyReason='';
     private cooldown=new Map<number,number>();
     private finished=false;
+    private finishedAt?: number;
     private scoringStarted = false;
+    private speedingSeconds = 0;
+    private rpmExceededLatched = false;
+    private stallLatched = false;
     private pedestrianCompleted = false;
     /**
      * True giữa lúc E04 đã hoàn thành và xe chưa chạm trigger South light.
@@ -133,7 +137,11 @@ export class ExamEngine{
         this.startedAt=performance.now();
         this.cooldown.clear();
         this.finished=false;
+        this.finishedAt = undefined;
         this.scoringStarted = false;
+        this.stallLatched = false;
+        this.speedingSeconds = 0;
+        this.rpmExceededLatched = false;
         this.disqualified=false;
         this.disqualifyReason='';
         this.pedestrianCompleted = false;
@@ -188,6 +196,7 @@ export class ExamEngine{
             timerStartSensor: THREE.Box3;
             endYellowSensor: THREE.Box3;
             wheelTrackZone: THREE.Box3;
+            wheelTrackBoundarySensors?: THREE.Box3[];
             boundarySensors: THREE.Box3[];
             entryWorld: THREE.Vector3;
             exitForwardAxis: THREE.Vector3;
@@ -203,6 +212,7 @@ export class ExamEngine{
                 timerStartSensor: s.timerStartSensor,
                 endYellowSensor: s.endYellowSensor,
                 wheelTrackZone: s.wheelTrackZone,
+                wheelTrackBoundarySensors: s.wheelTrackBoundarySensors,
                 boundarySensors: s.boundarySensors,
                 entryWorld: s.entryWorld,
                 exitForwardAxis: s.exitForwardAxis,
@@ -324,9 +334,12 @@ export class ExamEngine{
             }
             if (progress.finished) {
                 this.finished = true;
+                this.finishedAt = performance.now();
                 return 'Hoàn thành bài thi';
             }
         }
+
+        this.checkContinuousDrivingErrors(vehicle, dt);
 
         if (this.activeIndex === 0) {
             const result = this.startExercise.update({ ...vehicle, startSignal, dt });
@@ -339,7 +352,6 @@ export class ExamEngine{
             }
             if (result.completed) {
                 this.activeIndex = 1;
-                this.startedAt = performance.now();
                 this.pedestrianExercise.activate();
             }
             return result.toast;
@@ -359,7 +371,7 @@ export class ExamEngine{
                 dt,
             };
             const result = this.pedestrianExercise.update(input);
-            for (const evt of result.penalties) this.applyPenaltyEvent(evt);
+            for (const evt of result.penalties) this.applyPenaltyEvent({ ...evt, lessonId: 2 });
             if (result.disqualified) {
                 const reason = result.disqualifyReason
                     ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
@@ -369,7 +381,6 @@ export class ExamEngine{
             if (result.completed) {
                 this.pedestrianCompleted = true;
                 this.activeIndex = 2;
-                this.startedAt = performance.now();
                 this.hillExercise.activate();
             }
             return result.toast;
@@ -392,7 +403,7 @@ export class ExamEngine{
                 dt,
             };
             const result = this.hillExercise.update(input);
-            for (const evt of result.penalties) this.applyPenaltyEvent(evt);
+            for (const evt of result.penalties) this.applyPenaltyEvent({ ...evt, lessonId: 3 });
             if (result.disqualified) {
                 const reason = result.disqualifyReason
                     ?? result.toast?.replace(/^Đình chỉ — /, '')
@@ -453,7 +464,7 @@ export class ExamEngine{
                 continueAfterDisqualification: this.scoringMode === 'errors-only',
             };
             const result = this.wheelTrackExercise.update(input);
-            for (const evt of result.penalties) this.applyPenaltyEvent(evt);
+            for (const evt of result.penalties) this.applyPenaltyEvent({ ...evt, lessonId: 4 });
             if (result.disqualified) {
                 const reason = result.disqualifyReason
                     ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
@@ -482,15 +493,17 @@ export class ExamEngine{
     }
     private handleDisqualification(index: number, reason: string, toast?: string, force = false): string | undefined {
         if (force || this.scoringMode === 'normal') {
+            if (index === 2 || index === 3) this.applyPenaltyEvent({ at: performance.now(), points: 0, reason, lessonId: index + 1 });
             this.disqualified = true;
             this.finished = true;
+            this.finishedAt = performance.now();
             this.disqualifyReason = reason;
             return toast;
         }
 
         if (index === 3) {
             if (this.exam04ActiveDisqualification !== reason) {
-                this.applyPenaltyEvent({ at: performance.now(), points: 0, reason: `Bài 4: ${reason}` });
+                this.applyPenaltyEvent({ at: performance.now(), points: 0, reason: `Bài 4: ${reason}`, lessonId: 4 });
                 this.exam04ActiveDisqualification = reason;
             }
             return undefined;
@@ -498,8 +511,7 @@ export class ExamEngine{
 
         // Lỗi đình chỉ không có số điểm trừ riêng: ghi nhận một lỗi để HUD
         // hiện thông báo, rồi chuyển bài để các cảm biến tiếp tục chấm điểm.
-        this.applyPenaltyEvent({ at: performance.now(), points: 0, reason: `Bài ${index + 1}: ${reason}` });
-        this.startedAt = performance.now();
+        this.applyPenaltyEvent({ at: performance.now(), points: 0, reason: `Bài ${index + 1}: ${reason}`, lessonId: index + 1 });
         if (index === 0) {
             this.activeIndex = 1;
             this.pedestrianExercise.activate();
@@ -532,6 +544,43 @@ export class ExamEngine{
         this.score=Math.max(0,this.score-5);
         return evt;
     }
+    /** Shared across lessons; only speed and RPM checks pause in lesson 9. */
+    private checkContinuousDrivingErrors(vehicle: ExamVehicleSnapshot, dt: number): void {
+        if (this.scoringStarted) {
+            if (vehicle.stalled && !this.stallLatched) {
+                this.stallLatched = true;
+                this.applyPenaltyEvent({ at: performance.now(),
+                    points: EXAM_01_START_RULES.engine.stallPenalty[EXAM_VEHICLE_CLASS], reason: 'Chết máy' });
+            }
+            if (!vehicle.stalled) this.stallLatched = false;
+        }
+        if (!this.scoringStarted || this.activeIndex === 8) {
+            this.speedingSeconds = 0;
+            this.rpmExceededLatched = false;
+            return;
+        }
+        const rules = EXAM_01_START_RULES;
+        if (vehicle.rpm > rules.engine.maxRPM && !this.rpmExceededLatched) {
+            this.rpmExceededLatched = true;
+            this.applyPenaltyEvent({ at: performance.now(), points: rules.engine.rpmExceededPenalty[EXAM_VEHICLE_CLASS],
+                reason: `Vòng tua máy vượt ${rules.engine.maxRPM} vòng/phút` });
+        } else if (vehicle.rpm <= rules.engine.maxRPM * .95) {
+            this.rpmExceededLatched = false;
+        }
+        const maxSpeed = rules.maxSpeedKmh[EXAM_VEHICLE_CLASS];
+        if (vehicle.speedKmh > maxSpeed) {
+            this.speedingSeconds += dt;
+            const interval = rules.speeding.intervalSec[EXAM_VEHICLE_CLASS];
+            while (this.speedingSeconds >= interval) {
+                this.speedingSeconds -= interval;
+                this.applyPenaltyEvent({ at: performance.now(), points: rules.speeding.penaltyPerInterval[EXAM_VEHICLE_CLASS],
+                    reason: `Vượt tốc độ quy định (${maxSpeed} km/h)` });
+            }
+        } else {
+            this.speedingSeconds = 0;
+        }
+    }
+
     private applyPenaltyEvent(evt: PenaltyEvent) {
         if (!this.scoringStarted && evt.points > 0) return;
         this.penalties.push(evt);
@@ -556,7 +605,7 @@ export class ExamEngine{
     }
     get elapsedSeconds(){
         if (!this.scoringStarted) return 0;
-        return(performance.now()-this.startedAt)/1000;
+        return((this.finishedAt ?? performance.now())-this.startedAt)/1000;
     }
     get currentExerciseTitle(){
         if (this.disqualified) return 'Đình chỉ sát hạch';

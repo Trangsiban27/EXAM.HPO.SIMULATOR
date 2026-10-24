@@ -381,22 +381,6 @@ export class Exam05South {
         const stopped = Math.abs(input.speedKmh) < this.stopSpeedKmh;
         const onTheLine = this.stopLine.containsPoint(input.frontPosition);
 
-        // === E05-10: Chết máy (rising-edge) ===
-        // Engine vừa nổ lại → reset stall latch.
-        if (input.engineRunning && !this.engineWasRunning) {
-            this.stallLatched = false;
-        }
-        this.engineWasRunning = input.engineRunning;
-        if (
-            !input.engineRunning
-            && !this.stallLatched
-            && input.clutch < .5
-            && (this.state === 'APPROACHING' || this.state === 'STOP_EVALUATION')
-        ) {
-            this.stallLatched = true;
-            add(this.stallPenaltyPoints, 'Chết máy');
-        }
-
         // === APPROACHING state ===
         if (this.state === 'APPROACHING') {
             // Xe đã vượt sâu ≥ 1m quá vạch → buộc phải chấm NO_REQUIRED_STOP, chuyển state.

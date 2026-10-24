@@ -1071,3 +1071,11 @@ button:active {
     padding-top: 0;
   }
 }
+
+.graphics-quality { border: 0; padding: 0; margin: 16px 0; min-width: 0; }
+.graphics-quality legend { padding: 0; margin-bottom: 10px; }
+.graphics-quality-options { display: flex; gap: 6px; }
+.graphics-quality-options label { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 10px 4px; border: 1px solid #ffffff26; border-radius: 10px; background: #ffffff06; color: #cbd5e1; font-size: 12px; cursor: pointer; }
+.graphics-quality-options label:has(input:checked) { border-color: #22d3ee; background: #22d3ee18; color: #67e8f9; }
+.graphics-quality-options input { margin: 0; accent-color: #22d3ee; }
+.graphics-quality-options label:focus-within { outline: 2px solid #67e8f9; outline-offset: 2px; }

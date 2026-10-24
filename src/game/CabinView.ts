@@ -1,3 +1,4 @@
+import { GRAPHICS_PRESETS, loadGraphicsQuality, type GraphicsQuality } from './graphicsQuality';
 import * as THREE from 'three';
 import type { Vehicle } from './Vehicle';
 import { CabinInterior } from '../ui/CabinInterior';
@@ -14,6 +15,11 @@ interface CabinViewConfig {
 
 /** Live rear views and a driver-side shoulder reference, using the main renderer. */
 export class CabinView {
+    private quality: GraphicsQuality = loadGraphicsQuality();
+    setGraphicsQuality(quality: GraphicsQuality): void {
+        this.quality = quality;
+        this.lastViewUpdate.fill(-Infinity);
+    }
     private interior = new CabinInterior();
     private readonly views: CabinViewConfig[] = [
         { camera: new THREE.PerspectiveCamera(70, 1.6, .05, 500), eye: new THREE.Vector3(-1.32, 1.25, -.45), aim: new THREE.Vector3(-1.45, .15, 1.4), mirror: true },
@@ -54,8 +60,8 @@ export class CabinView {
         vehicle: Vehicle, cabinActive: boolean, steeringWheelAngle: number) {
         this.overlay.hidden = false;
         this.interior.root.hidden = !cabinActive;
-        this.frames[1].hidden = !cabinActive;
-        this.frames[3].hidden = !cabinActive;
+        this.frames[1].hidden = false;
+        this.frames[3].hidden = false;
         if (cabinActive) this.interior.update(vehicle, steeringWheelAngle);
         const w = this.host.clientWidth, h = this.host.clientHeight;
         renderer.setViewport(0, 0, w, h);
@@ -88,6 +94,8 @@ export class CabinView {
         renderer.autoClear = false;
         renderer.setScissorTest(true);
         const now = performance.now();
+        const preset = GRAPHICS_PRESETS[this.quality];
+        const interval = 1000 / preset.auxiliaryFps;
         for (let i = 0; i < this.views.length; i++) {
             const view = this.views[i], rect = rectangles[i];
             if (this.frames[i].hidden || rect.width <= 0 || rect.height <= 0) {
@@ -96,16 +104,17 @@ export class CabinView {
             }
             const target = this.viewTargets[i];
             // Preserve the existing mirror resolution and the shoulder view's pixel density.
-            const targetWidth = view.mirror ? 512 : Math.max(1, Math.round(rect.width * renderer.getPixelRatio()));
-            const targetHeight = view.mirror ? 320 : Math.max(1, Math.round(rect.height * renderer.getPixelRatio()));
+            const targetWidth = view.mirror ? preset.mirrorWidth : Math.max(1, Math.round(rect.width * renderer.getPixelRatio()));
+            const targetHeight = view.mirror ? preset.mirrorHeight : Math.max(1, Math.round(rect.height * renderer.getPixelRatio()));
             const resized = target.width !== targetWidth || target.height !== targetHeight;
             if (resized) target.setSize(targetWidth, targetHeight);
             const elapsed = now - this.lastViewUpdate[i];
-            if (resized || elapsed >= AUXILIARY_VIEW_INTERVAL_MS) {
+            if (resized || elapsed >= interval) {
                 view.camera.position.copy(frame.localToWorld(view.eye.clone()));
                 view.camera.up.set(0, 1, 0).applyQuaternion(frame.getWorldQuaternion(new THREE.Quaternion()));
                 view.camera.lookAt(frame.localToWorld(view.aim.clone()));
                 view.camera.aspect = rect.width / rect.height;
+                view.camera.far = preset.auxiliaryFarM;
                 view.camera.updateProjectionMatrix();
                 renderer.setScissorTest(false);
                 renderer.setRenderTarget(target);
@@ -114,8 +123,8 @@ export class CabinView {
                 renderer.setRenderTarget(null);
                 renderer.setScissorTest(true);
                 // Retain the cadence when animation frames arrive slightly late; never catch up in a loop.
-                this.lastViewUpdate[i] = resized || elapsed >= 2 * AUXILIARY_VIEW_INTERVAL_MS
-                    ? now : now - (elapsed % AUXILIARY_VIEW_INTERVAL_MS);
+                this.lastViewUpdate[i] = resized || elapsed >= 2 * interval
+                    ? now : now - (elapsed % interval);
             }
             const x = rect.left - bounds.left, y = h - (rect.bottom - bounds.top);
             renderer.setViewport(x, y, rect.width, rect.height);

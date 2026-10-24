@@ -2572,6 +2572,7 @@ export class TrackObjects {
             timerStartSensor,
             endYellowSensor,
             wheelTrackZone,
+            wheelTrackBoundarySensors: course.penaltyZones.map(zone => zone.clone().applyMatrix4(transform)),
             boundarySensors,
         };
     }

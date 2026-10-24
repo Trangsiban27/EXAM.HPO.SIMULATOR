@@ -257,37 +257,6 @@ export class Exam02Pedestrian {
             };
         }
 
-        // === E02-06: Chết máy (rising-edge) ===
-        if (input.engineRunning && !this.engineWasRunning) {
-            // engine vừa nổ lại → reset stall latch
-            this.stallLatched = false;
-        }
-        this.engineWasRunning = input.engineRunning;
-        if (!input.engineRunning && !this.stallLatched && input.clutch < .5 && this.state === 'APPROACHING') {
-            this.stallLatched = true;
-            this.stallEventCount += 1;
-            add(this.stallPenalty, 'Chết máy');
-        }
-
-        // === E02-07: RPM > 4000 (latch theo lần vi phạm) ===
-        if (input.rpm > this.maxRPM && !this.rpmViolationLatched) {
-            this.rpmViolationLatched = true;
-            add(this.rpmExceededPenalty, `Vòng tua máy vượt ${this.maxRPM} vòng/phút`);
-        } else if (input.rpm <= this.maxRPM * .95) {
-            this.rpmViolationLatched = false;
-        }
-
-        // === E02-08: Quá tốc độ (cứ 3s liên tục → -1 điểm) ===
-        if (input.speedKmh > this.maxSpeedKmh) {
-            this.speedingSec += input.dt;
-            if (this.speedingSec >= this.speedingIntervalSec) {
-                this.speedingSec = 0;
-                add(this.speedingPenaltyPerInterval, `Vượt tốc độ quy định (${this.maxSpeedKmh} km/h)`);
-            }
-        } else {
-            this.speedingSec = 0;
-        }
-
         // === E02-09: Thời gian đến bài vượt quá (allowedTimeSec = null = REQUIRED_INPUT) ===
         if (this.state === 'APPROACHING') {
             this.arrivalOvertimeSec += input.dt;
@@ -295,26 +264,27 @@ export class Exam02Pedestrian {
 
         // === APPROACHING state ===
         if (this.state === 'APPROACHING') {
-            if (this.hasCrossedStopLine(input.frontPosition)) {
-                // Xe vượt vạch mà chưa đánh giá stop position → NO_REQUIRED_STOP.
+            if (this.hasPassedExit(input.position)) {
+                // Wait until the exit to distinguish stopping over the line from not stopping.
                 if (!this.stopEvaluated) {
                     this.stopEvaluated = true;
                     this._stopClassification = 'NO_REQUIRED_STOP';
                     add(this.noRequiredStopPenalty, 'Không dừng xe ở vạch dừng quy định');
                 }
-                this.state = 'STOP_EVALUATION';
+                this.state = 'COMPLETED';
+                this.startLampOn = false;
                 return {
-                    toast: 'Đã qua vạch dừng',
+                    toast: 'Hoàn thành bài 2 — không dừng xe',
                     penalties,
-                    completed: false,
+                    completed: true,
                     disqualified: false,
                     stopClassification: this.stopClassification,
                 };
             }
 
-            // Xe gần vạch dừng (trong vùng 2m trước vạch) và đã dừng → chấm vị trí.
+            // Evaluate stops before or beyond the line, up to the exit sensor.
             const A = this.signedDistanceToStopLine(input.frontPosition);
-            const frontNearStopLine = A > -.15 && A < 2;
+            const frontNearStopLine = A < 2;
             if (frontNearStopLine && stopped) {
                 if (this.stoppedSince === 0) this.stoppedSince = now;
                 const dwell = (now - this.stoppedSince) / 1000;

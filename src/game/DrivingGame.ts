@@ -1,3 +1,4 @@
+import { GRAPHICS_PRESETS, loadGraphicsQuality, type GraphicsQuality } from './graphicsQuality';
 import * as THREE from 'three';
 import {CabinView} from './CabinView';
 import {InputManager} from './InputManager';
@@ -69,8 +70,8 @@ this.cameras=new CameraManager(this.develop);
 this.cabin=new CabinView(this.host);
 this.scene.background=new THREE.Color(0x9ec4e4);
 this.scene.fog=new THREE.Fog(0x9ec4e4,55,135);
-this.renderer=new THREE.WebGLRenderer({antialias:true});
-this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+this.renderer=new THREE.WebGLRenderer({antialias:GRAPHICS_PRESETS[loadGraphicsQuality()].antialias});
+this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));
 this.renderer.shadowMap.enabled=ENABLE_SHADOWS;
 this.host.appendChild(this.renderer.domElement);
 this.cameras.attach(this.renderer.domElement);
@@ -169,7 +170,7 @@ configureSunShadows(sun);
 this.scene.add(sun);
 window.addEventListener('resize',this.resize);
 this.resize();
-this.hud.bind({onRestart:()=>this.restart(),onCamera:()=>{if(!this.develop)this.cameras.next()},onAnalog:(name,value)=>this.input.setAnalog(name,value),onVirtual:(c,a)=>this.input.setVirtual(c,a),onSignalChange:(state)=>this.vehicle.setSignal(state),onSeatBelt:(on)=>this.vehicle.seatBeltFastened=on,onAutoDriveToggle:()=>this.toggleAutoDrive(),onLessonSelect:(lessonId)=>this.selectAutoDriveLesson(lessonId),onWaypointRecordingStart:()=>this.startWaypointRecording(),onWaypointRecordingFinish:()=>this.finishWaypointRecording()})
+this.hud.bind({onGraphicsQuality:(quality)=>this.setGraphicsQuality(quality),onRestart:()=>this.restart(),onCamera:()=>{if(!this.develop)this.cameras.next()},onAnalog:(name,value)=>this.input.setAnalog(name,value),onVirtual:(c,a)=>this.input.setVirtual(c,a),onSignalChange:(state)=>this.vehicle.setSignal(state),onSeatBelt:(on)=>this.vehicle.seatBeltFastened=on,onAutoDriveToggle:()=>this.toggleAutoDrive(),onLessonSelect:(lessonId)=>this.selectAutoDriveLesson(lessonId),onWaypointRecordingStart:()=>this.startWaypointRecording(),onWaypointRecordingFinish:()=>this.finishWaypointRecording()})
 }
 start(){
 this.stopped=false;
@@ -359,6 +360,29 @@ this.vehicle.setSpeedLimitKmh(inExam10
     :
     inParkingBayB?PARKING_BAY_B_SPEED_LIMIT_KMH:
     inExam04||inSCurve?EXAM_04_SPEED_LIMIT_KMH:undefined);
+}
+private setGraphicsQuality(quality: GraphicsQuality): void {
+const antialias = GRAPHICS_PRESETS[quality].antialias;
+if (this.renderer.getContext().getContextAttributes()?.antialias !== antialias) {
+    // MSAA is fixed when the WebGL context is created; replace only the renderer.
+    const previous = this.renderer;
+    const next = new THREE.WebGLRenderer({antialias});
+    next.shadowMap.enabled = ENABLE_SHADOWS;
+    next.outputColorSpace = previous.outputColorSpace;
+    next.toneMapping = previous.toneMapping;
+    next.toneMappingExposure = previous.toneMappingExposure;
+    this.probeCtrl?.dispose();
+    previous.domElement.replaceWith(next.domElement);
+    this.renderer = next;
+    previous.dispose();
+    previous.forceContextLoss();
+    if (this.develop) {
+        this.probeCtrl = new ProbeController(this.cameras.camera, this.track, next.domElement, this.devProbePanel, true);
+    }
+}
+this.renderer.setPixelRatio(Math.min(devicePixelRatio, GRAPHICS_PRESETS[quality].pixelRatio));
+this.cabin.setGraphicsQuality(quality);
+this.resize();
 }
 private resize=()=>{
 const w=this.host.clientWidth,h=this.host.clientHeight;

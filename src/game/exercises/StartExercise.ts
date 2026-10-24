@@ -200,7 +200,6 @@ export class StartExercise {
                 : { penalties, completed: false, disqualified: false };
         }
 
-        this.checkEngineAndSpeed(input, add);
 
         if (this.state === 'COMMAND_RECEIVED' || this.state === 'STARTING') {
             const elapsed = (now - this.commandAt) / 1000;
@@ -319,32 +318,7 @@ export class StartExercise {
         return undefined;
     }
 
-    private checkEngineAndSpeed(
-        input: Exam01Input,
-        add: (points: number, reason: string) => void
-    ): void {
-        if (input.stalled && !this.stallLatched) {
-            this.stallLatched = true;
-            add(this.rules.engine.stallPenalty, 'Chết máy');
-        }
-        if (!input.stalled) this.stallLatched = false;
 
-        if (input.rpm > this.rules.engine.maxRPM && !this.rpmLatched) {
-            this.rpmLatched = true;
-            add(this.rules.engine.rpmExceededPenalty, `Vượt ${this.rules.engine.maxRPM} vòng/phút`);
-        }
-        if (input.rpm <= this.rules.engine.maxRPM) this.rpmLatched = false;
-
-        if (input.speedKmh > this.rules.maxSpeedKmh) {
-            this.speedingSec += input.dt;
-            while (this.speedingSec >= this.rules.speeding.intervalSec) {
-                this.speedingSec -= this.rules.speeding.intervalSec;
-                add(this.rules.speeding.penaltyPerInterval, 'Vượt tốc độ quy định');
-            }
-        } else {
-            this.speedingSec = 0;
-        }
-    }
 }
 
 /**
