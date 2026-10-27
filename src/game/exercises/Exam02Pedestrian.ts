@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { PenaltyEvent } from '../types';
 import { EXAM_02_PEDESTRIAN_RULES_V2, EXAM_VEHICLE_CLASS } from '../exam/examRules';
+import { ReadyChime } from './ReadyChime';
 
 /**
  * Bài sát hạch số 2 — Dừng xe nhường đường cho người đi bộ (EXAM_02_PEDESTRIAN).
@@ -50,6 +51,8 @@ export interface Exam02Result {
     completed: boolean;
     disqualified: boolean;
     stopClassification?: 'VALID_STOP' | 'STOP_TOO_EARLY' | 'STOP_OVER_LINE' | 'NO_REQUIRED_STOP';
+    /** One-time confirmation after two continuous seconds stopped at the line. */
+    readyBeep?: boolean;
     /** Lý do bị đình chỉ (chỉ có khi disqualified = true). */
     disqualifyReason?: string;
 }
@@ -77,6 +80,7 @@ const DEFAULTS = {
     stopSpeedKmh: .6,
     minStopDwellSec: .3,
 };
+const READY_WAIT_SEC = 2;
 
 export class Exam02Pedestrian {
     readonly id = 'EXAM_02_PEDESTRIAN';
@@ -109,6 +113,9 @@ export class Exam02Pedestrian {
     private readonly minStopDwellSec: number;
 
     private stoppedSince = 0;
+    private readyStoppedSince?: number;
+    private readyBeepFired = false;
+    private readonly readyChime = new ReadyChime();
     private activatedAt = 0;
     private stopEvaluated = false;
     private rpmViolationLatched = false;
@@ -179,9 +186,12 @@ export class Exam02Pedestrian {
     }
 
     reset(): void {
+        this.readyChime.stop();
         this.state = 'INACTIVE';
         this.startLampOn = false;
         this.stoppedSince = 0;
+        this.readyStoppedSince = undefined;
+        this.readyBeepFired = false;
         this.activatedAt = 0;
         this.stopEvaluated = false;
         this.rpmViolationLatched = false;
@@ -261,6 +271,7 @@ export class Exam02Pedestrian {
         if (this.state === 'APPROACHING') {
             this.arrivalOvertimeSec += input.dt;
         }
+        const readyBeep = this.updateReadyChime(input, now);
 
         // === APPROACHING state ===
         if (this.state === 'APPROACHING') {
@@ -300,13 +311,14 @@ export class Exam02Pedestrian {
                         completed: false,
                         disqualified: false,
                         stopClassification: this.stopClassification,
+                        readyBeep,
                     };
                 }
             } else {
                 this.stoppedSince = 0;
             }
 
-            return { penalties, completed: false, disqualified: false };
+            return { penalties, completed: false, disqualified: false, readyBeep };
         }
 
         // === STOP_EVALUATION state ===
@@ -328,10 +340,30 @@ export class Exam02Pedestrian {
             if (!stopped && input.engineRunning) {
                 this.startLampOn = true;
             }
-            return { penalties, completed: false, disqualified: false, stopClassification: this.stopClassification };
+            return { penalties, completed: false, disqualified: false, stopClassification: this.stopClassification, readyBeep };
         }
 
         return { penalties, completed: false, disqualified: false };
+    }
+
+    private updateReadyChime(input: Exam02Input, now: number): boolean {
+        const distance = this.signedDistanceToStopLine(input.frontPosition);
+        // This Box3 encodes the road's world Z bounds in its X coordinates.
+        const withinRoad = input.frontPosition.z >= this.stopLine.min.x
+            && input.frontPosition.z <= this.stopLine.max.x;
+        if (Math.abs(input.speedKmh) >= this.stopSpeedKmh || distance < 0
+            || distance > this.maxDistanceBeforeLineM || !withinRoad) {
+            this.readyStoppedSince = undefined;
+            return false;
+        }
+        this.readyStoppedSince ??= now;
+        if (this.readyBeepFired || now - this.readyStoppedSince < READY_WAIT_SEC * 1000) return false;
+        this.readyBeepFired = true;
+        return true;
+    }
+
+    playReadyBeep(): void {
+        this.readyChime.play();
     }
 
     /** Đánh giá vị trí dừng theo spec §5.3 + §6. */

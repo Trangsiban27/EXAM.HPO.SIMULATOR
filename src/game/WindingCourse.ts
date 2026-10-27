@@ -295,6 +295,7 @@ export class SCurveTrack {
             segmentGeometry.translate(0, 0, -CURB_VISUAL_HEIGHT_M);
             segmentGeometry.rotateX(-Math.PI / 2);
             const segment = new THREE.Mesh(segmentGeometry, i % 2 ? red : white);
+            segment.userData.roadEdgeStrip = true;
             segment.position.y = .06 + CURB_VISUAL_HEIGHT_M;
             segment.castShadow = true;
             segment.receiveShadow = true;
@@ -361,6 +362,7 @@ export class SCurveTrack {
                     new THREE.BoxGeometry(length, CURB_VISUAL_HEIGHT_M, visualCurbDepth),
                     side === -1 ? white : red,
                 );
+                curb.userData.roadEdgeStrip = true;
                 curb.position.set(
                     0,
                     .055,

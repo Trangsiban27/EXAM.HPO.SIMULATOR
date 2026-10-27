@@ -12,7 +12,7 @@ const module = { exports: {} };
 new Function('module', 'exports', bundle.outputFiles[0].text)(module, module.exports);
 const { THREE, GLTFLoader, Vehicle3, configureSunShadows } = module.exports;
 globalThis.ProgressEvent = class { constructor(type, init) { Object.assign(this, init); } };
-const buffer = fs.readFileSync('public/models/toyota_vios_g.glb');
+const buffer = fs.readFileSync('public/models/hiepphat_toyota_vios_g_nowheels.glb');
 const jsonLength = buffer.readUInt32LE(12), source = JSON.parse(buffer.subarray(20,20+jsonLength));
 assert.equal(source.images?.length ?? 0, 0);
 assert.equal(source.textures?.length ?? 0, 0);

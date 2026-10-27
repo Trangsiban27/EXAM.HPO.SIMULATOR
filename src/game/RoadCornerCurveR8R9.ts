@@ -203,6 +203,18 @@ export class RoadCornerCurveR8R9 {
             [Math.min(fromX, toX), Math.max(fromX, toX)]);
     }
 
+    /** Keep junction-cut fragments owned by the original stripe so restoring an
+     * entrance also removes those fragments, rather than leaving a barrier. */
+    replaceInnerCurbMesh(original: THREE.Mesh, pieces: THREE.Mesh[]): void {
+        for (const meshes of this.innerCurbMeshes) {
+            const index = meshes.indexOf(original);
+            if (index >= 0) {
+                meshes.splice(index, 1, ...pieces);
+                return;
+            }
+        }
+    }
+
     restoreInnerCurbAfterJunctions(): void {
         // Chỉ dựng lại các khúc gần hai cửa nối. Các khúc xa hơn đã được cắt
         // riêng cho chuồng đỗ và đầu đường, cần giữ nguyên kết quả đó.

@@ -1,3 +1,5 @@
+import { loadContinuousAutoDrive } from './autoDrive/autoDriveSettings';
+import { addParkingDisplayCars } from './ParkingDisplayCars';
 import { GRAPHICS_PRESETS, loadGraphicsQuality, type GraphicsQuality } from './graphicsQuality';
 import * as THREE from 'three';
 import {CabinView} from './CabinView';
@@ -67,15 +69,16 @@ constructor(private host:HTMLDivElement,private hud:Hud,vehicle?:Vehicle,private
 const vehicleParam=new URLSearchParams(window.location.search).get('vehicle');
 this.vehicle=vehicle??(vehicleParam==='2'?new Vehicle2():vehicleParam==='1'?new Vehicle():new Vehicle3());
 this.cameras=new CameraManager(this.develop);
-this.cabin=new CabinView(this.host);
+this.cabin=new CabinView(this.host,!this.develop);
 this.scene.background=new THREE.Color(0x9ec4e4);
-this.scene.fog=new THREE.Fog(0x9ec4e4,55,135);
+this.scene.fog=this.develop ? null : new THREE.Fog(0x9ec4e4,55,135);
 this.renderer=new THREE.WebGLRenderer({antialias:GRAPHICS_PRESETS[loadGraphicsQuality()].antialias});
 this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));
 this.renderer.shadowMap.enabled=ENABLE_SHADOWS;
 this.host.appendChild(this.renderer.domElement);
 this.cameras.attach(this.renderer.domElement);
     this.scene.add(this.track.root,this.vehicle.root);
+    void addParkingDisplayCars(this.track.root).catch(error => console.warn('Không tải được xe trưng bày', error));
     this.scene.add(new THREE.HemisphereLight(0xddeeff,0x596347,2));
     // Wire up Exam04 sensors from the track (after buildExamGround ran in Track constructor)
     this.exam.wireExam04(this.track.wheelTrackCourseSensors);
@@ -149,6 +152,7 @@ this.cameras.attach(this.renderer.domElement);
         this.track.getTrafficLight('WEST'),
         this.track.getTrafficLight('SOUTH_EXIT'),
     );
+    this.autoDrive.setContinuous(loadContinuousAutoDrive());
     this.hud.setExam06Selectable(this.autoDrive.hasSavedExam06Approach);
     this.hud.setExam07Selectable(this.autoDrive.hasSavedExam07Approach);
     this.hud.setExam08Selectable(this.autoDrive.hasExam08PopupWaypoint);
@@ -170,7 +174,7 @@ configureSunShadows(sun);
 this.scene.add(sun);
 window.addEventListener('resize',this.resize);
 this.resize();
-this.hud.bind({onGraphicsQuality:(quality)=>this.setGraphicsQuality(quality),onRestart:()=>this.restart(),onCamera:()=>{if(!this.develop)this.cameras.next()},onAnalog:(name,value)=>this.input.setAnalog(name,value),onVirtual:(c,a)=>this.input.setVirtual(c,a),onSignalChange:(state)=>this.vehicle.setSignal(state),onSeatBelt:(on)=>this.vehicle.seatBeltFastened=on,onAutoDriveToggle:()=>this.toggleAutoDrive(),onLessonSelect:(lessonId)=>this.selectAutoDriveLesson(lessonId),onWaypointRecordingStart:()=>this.startWaypointRecording(),onWaypointRecordingFinish:()=>this.finishWaypointRecording()})
+this.hud.bind({onContinuousAutoDriveChange:(enabled)=>this.autoDrive.setContinuous(enabled),onGraphicsQuality:(quality)=>this.setGraphicsQuality(quality),onRestart:()=>this.restart(),onCamera:()=>{if(!this.develop)this.cameras.next()},onAnalog:(name,value)=>this.input.setAnalog(name,value),onVirtual:(c,a)=>this.input.setVirtual(c,a),onSignalChange:(state)=>this.vehicle.setSignal(state),onSeatBelt:(on)=>this.vehicle.seatBeltFastened=on,onAutoDriveToggle:()=>this.toggleAutoDrive(),onLessonSelect:(lessonId)=>this.selectAutoDriveLesson(lessonId),onWaypointRecordingStart:()=>this.startWaypointRecording(),onWaypointRecordingFinish:()=>this.finishWaypointRecording()})
 }
 start(){
 this.stopped=false;
@@ -206,6 +210,12 @@ const rearPosition=this.rearProbe.set(0,0,FRONT_PROBE_OFFSET_M).applyQuaternion(
 const wheelPositions = this.getWheelPositions();
 if(!this.develop&&!this.autoDrive.enabled&&!this.exam.isFinished&&this.exam.activeIndex===0){
 this.startApproachVoice.update(frontPosition,this.vehicle.signals.left&&!this.vehicle.signals.hazard);
+}
+if(!this.develop&&!this.autoDrive.enabled&&!this.exam.isFinished&&this.exam.activeIndex<=1){
+this.startApproachVoice.updatePedestrianApproach(frontPosition);
+}
+if(!this.develop&&!this.autoDrive.enabled&&!this.exam.isFinished&&this.exam.activeIndex<=2){
+this.startApproachVoice.updateHillApproach(frontPosition,rearPosition);
 }
 this.updateCourseSpeedLimits(frontPosition,rearPosition,Object.values(wheelPositions));
 if(this.autoDrive.enabled)this.redWhiteCurbContact.reset();
@@ -243,7 +253,7 @@ if(startToast){
 if(this.exam.scoringMode==='normal')this.hud.flash(startToast,startToast.startsWith('Chào mừng')?{kind:'exam',durationMs:7000}:'exam');
 }
 this.cabin.render(this.renderer,this.scene,this.cameras.camera,this.vehicle,
-    !this.develop&&this.cameras.mode===2,displaySteeringWheelAngle)
+    !this.develop&&this.cameras.mode===2,displaySteeringWheelAngle,!this.develop)
 };
 loop()
 }

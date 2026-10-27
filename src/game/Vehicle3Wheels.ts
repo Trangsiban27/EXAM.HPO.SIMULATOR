@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+/** Calibrated body placement; independent of the wheel-less body's bounding box. */
+export const VIOS_BODY_RIDE_LIFT_M = .07782500237226532;
 
 /**
  * Vehicle3WheelAssembly builds and manages the 4 procedural wheels for the Toyota Vios G GLB.
@@ -16,6 +20,7 @@ import * as THREE from 'three';
  */
 export class Vehicle3WheelAssembly {
     private _rolling: THREE.Group[] = [];
+    private parts?: ReturnType<Vehicle3WheelAssembly['createWheelParts']>;
     public readonly frontPivots: THREE.Group[] = [];
     /**
      * Mapping from wheel id to its steering-pivot Object3D, so callers can read
@@ -85,7 +90,7 @@ export class Vehicle3WheelAssembly {
             roll.name = `Vehicle3_${id}_RollingPivot`;
             pivot.add(roll);
 
-            this.buildTyre(roll);
+            this.buildTyre(roll, pivot, isLeft ? -1 : 1);
             parent.add(pivot);
 
             this._rolling.push(roll);
@@ -104,47 +109,119 @@ export class Vehicle3WheelAssembly {
         return pivot;
     }
 
-    private buildTyre(parent: THREE.Object3D): void {
-        const rubber = new THREE.MeshStandardMaterial({ color: 0x151719, roughness: .9 });
-        const trim  = new THREE.MeshStandardMaterial({ color: 0x101820, roughness: .4 });
-        const chrome = new THREE.MeshStandardMaterial({ color: 0xbac5cc, roughness: .24, metalness: .8 });
+    private buildTyre(roll: THREE.Group, pivot: THREE.Group, outerSign: number): void {
+        this.parts ??= this.createWheelParts();
+        const parts = this.parts;
+        const add = (parent: THREE.Object3D, name: string, geometry: THREE.BufferGeometry, material: THREE.Material) => {
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = name;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            parent.add(mesh);
+            return mesh;
+        };
+        add(roll, 'ProceduralTyre', parts.tyre, parts.rubber);
+        // Build the face in XY with +Z pointing outward, then orient it for
+        // each side. The rim sits at the outer sidewall, not inside the tyre.
+        const face = new THREE.Group();
+        face.name = 'ProceduralAlloyFace';
+        face.rotation.y = outerSign * Math.PI / 2;
+        face.position.x = outerSign * .088 * this.tireRadius / .297;
+        roll.add(face);
+        add(face, 'SplitFiveSpokeAlloy', parts.alloy, parts.silver);
+        add(face, 'RimBarrelAndHubRecesses', parts.darkFace, parts.graphite);
+        add(face, 'BrakeRotor', parts.rotor, parts.steel);
+        // Caliper follows steering but does not spin with the tyre.
+        const caliperFrame = new THREE.Group();
+        caliperFrame.rotation.copy(face.rotation);
+        caliperFrame.position.copy(face.position);
+        pivot.add(caliperFrame);
+        add(caliperFrame, 'BrakeCaliper', parts.caliper, parts.steel);
+    }
 
-        // Tyre: cylinder lying on its side (axis along X after rotateZ). The
-        // Match the 0.20 m tyre width measured in the GLB.
-        const tyreWidth = .20;
-        const tyreHalfWidth = tyreWidth / 2;
-        const wheelGeo = new THREE.CylinderGeometry(this.tireRadius, this.tireRadius, tyreWidth, 32);
-        wheelGeo.rotateZ(Math.PI / 2);
-        const wheel = new THREE.Mesh(wheelGeo, rubber);
-        wheel.castShadow = true;
-        wheel.receiveShadow = true;
-        parent.add(wheel);
-
-        // Rim disc on the outer face of the tyre. We pass `outerSign` so the rim
-        // appears on the camera-facing side of the wheel regardless of which side
-        // of the car this wheel sits on (+1 = right side of car, -1 = left side).
-        const rimInset = tyreHalfWidth + .006;
-        const rimGeo = new THREE.CylinderGeometry(.22, .22, .012, 24);
-        rimGeo.rotateZ(Math.PI / 2);
-        parent.add(new THREE.Mesh(rimGeo, trim));
-
-        // Rim ring.
-        const rim = new THREE.Mesh(new THREE.TorusGeometry(.205, .018, 8, 32), chrome);
-        rim.rotation.y = Math.PI / 2;
-        parent.add(rim);
-
-        // 8 spokes.
-        for (let i = 0; i < 8; i++) {
-            const angle = i * Math.PI / 4;
-            const spoke = new THREE.Mesh(new THREE.BoxGeometry(.018, .035, .33), chrome);
-            spoke.rotation.x = angle;
-            parent.add(spoke);
+    /** Shared geometry/materials for all four wheels; no wheel GLB is loaded. */
+    private createWheelParts() {
+        const scale = this.tireRadius / .297;
+        const rubber = new THREE.MeshStandardMaterial({ color: 0x232527, roughness: .94 });
+        const silver = new THREE.MeshStandardMaterial({ color: 0xc4c9ce, roughness: .3, metalness: .5 });
+        const graphite = new THREE.MeshStandardMaterial({ color: 0x20252a, roughness: .5, metalness: .35 });
+        const steel = new THREE.MeshStandardMaterial({ color: 0x62676a, roughness: .65, metalness: .5 });
+        const join = (geometries: THREE.BufferGeometry[]) => {
+            const nonIndexed = geometries.map(g => g.index ? g.toNonIndexed() : g);
+            const result = mergeGeometries(nonIndexed)!;
+            for (const geometry of new Set([...geometries, ...nonIndexed])) geometry.dispose();
+            result.scale(scale, scale, scale);
+            result.computeBoundingBox(); result.computeBoundingSphere();
+            return result;
+        };
+        const cylinder = (radius: number, depth: number, z: number, segments = 48) => {
+            const geometry = new THREE.CylinderGeometry(radius, radius, depth, segments);
+            geometry.rotateX(Math.PI / 2); geometry.translate(0, 0, z);
+            return geometry;
+        };
+        const ring = (radius: number, tube: number, z: number) => {
+            const geometry = new THREE.TorusGeometry(radius, tube, 6, 48);
+            geometry.translate(0, 0, z); return geometry;
+        };
+        // Closed annular tyre profile: rounded shoulders, an open rim centre
+        // and four real circumferential grooves across the tread.
+        const profile = [
+            [.19, -.078], [.212, -.098], [.254, -.102], [.278, -.094],
+            [.291, -.076], [.297, -.06], [.297, -.044], [.292, -.041],
+            [.292, -.035], [.297, -.032], [.297, -.014], [.292, -.011],
+            [.292, -.005], [.297, -.002], [.297, .014], [.292, .017],
+            [.292, .023], [.297, .026], [.297, .044], [.292, .047],
+            [.292, .053], [.297, .056], [.297, .06], [.291, .076],
+            [.278, .094], [.254, .102], [.212, .098], [.19, .078],
+            [.185, .078], [.185, -.078], [.19, -.078],
+        ].map(([r, x]) => new THREE.Vector2(r, x));
+        const tyreSurface = new THREE.LatheGeometry(profile, 64);
+        tyreSurface.rotateZ(Math.PI / 2);
+        const tyreParts: THREE.BufferGeometry[] = [tyreSurface];
+        for (const side of [-1, 1]) {
+            const bead = new THREE.TorusGeometry(.254, .0018, 4, 48);
+            bead.rotateY(Math.PI / 2); bead.translate(side * .102, 0, 0);
+            tyreParts.push(bead);
         }
-
-        // Hub.
-        const hubGeo = new THREE.CylinderGeometry(.06, .06, .025, 16);
-        hubGeo.rotateZ(Math.PI / 2);
-        parent.add(new THREE.Mesh(hubGeo, chrome));
+        const alloyParts: THREE.BufferGeometry[] = [ring(.187, .0055, .003), ring(.177, .002, -.004), cylinder(.052, .018, -.003)];
+        // Ten tapered, bevelled spokes arranged as five split pairs.
+        for (let spoke = 0; spoke < 5; spoke++) {
+            const angle = spoke * Math.PI * 2 / 5;
+            for (const branch of [-1, 1]) {
+                const shape = new THREE.Shape();
+                const vertices = [[.047, angle - .14], [.10, angle + branch * .04 - .075],
+                    [.183, angle + branch * .11 - .06], [.183, angle + branch * .11 + .06],
+                    [.10, angle + branch * .04 + .075], [.047, angle + .14]];
+                vertices.forEach(([r, a], i) => {
+                    const x = Math.cos(a) * r, y = Math.sin(a) * r;
+                    if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
+                });
+                shape.closePath();
+                const geometry = new THREE.ExtrudeGeometry(shape, { depth: .012, steps: 1,
+                    bevelEnabled: true, bevelSize: .0015, bevelThickness: .0015, bevelSegments: 1, curveSegments: 1 });
+                geometry.translate(0, 0, -.012);
+                alloyParts.push(geometry);
+            }
+        }
+        const barrel = new THREE.CylinderGeometry(.181, .181, .13, 64, 1, true);
+        barrel.rotateX(Math.PI / 2); barrel.translate(0, 0, -.064);
+        const darkParts: THREE.BufferGeometry[] = [barrel, cylinder(.026, .004, .009)];
+        for (let lug = 0; lug < 4; lug++) {
+            const angle = Math.PI / 4 + lug * Math.PI / 2;
+            const x = Math.cos(angle) * .038, y = Math.sin(angle) * .038;
+            const hole = cylinder(.008, .004, .008, 16); hole.translate(x, y, 0); darkParts.push(hole);
+            const bolt = cylinder(.005, .008, .012, 6); bolt.translate(x, y, 0); alloyParts.push(bolt);
+        }
+        // Small three-ellipse badge on the centre cap, drawn from geometry.
+        for (const [xScale, yScale, y] of [[1, .65, 0], [.35, .65, 0], [.85, .24, .004]]) {
+            const badge = new THREE.TorusGeometry(.016, .0011, 5, 32);
+            badge.scale(xScale, yScale, 1); badge.translate(0, y, .013); alloyParts.push(badge);
+        }
+        const rotorParts = [cylinder(.147, .009, -.045), ring(.139, .001, -.039), ring(.109, .001, -.039)];
+        const caliperGeometry = new THREE.BoxGeometry(.037, .082, .032);
+        caliperGeometry.translate(-.126, .008, -.032);
+        return { tyre: join(tyreParts), alloy: join(alloyParts), darkFace: join(darkParts),
+            rotor: join(rotorParts), caliper: join([caliperGeometry]), rubber, silver, graphite, steel };
     }
 
     /**

@@ -18,7 +18,6 @@ import { notify } from '../ui/Notify';
 export class ProbeController {
     private readonly raycaster = new THREE.Raycaster();
     private readonly ndc = new THREE.Vector2();
-    private readonly hoverLabel: HTMLDivElement;
     private enabled = false;
     private readonly cursorDefault: string;
 
@@ -30,14 +29,8 @@ export class ProbeController {
         private readonly develop: boolean
     ) {
         this.cursorDefault = this.dom.style.cursor || 'default';
-        this.hoverLabel = document.createElement('div');
-        this.hoverLabel.className = 'dev-object-hover-label';
-        this.hoverLabel.style.display = 'none';
-        document.body.appendChild(this.hoverLabel);
         if (!this.develop) return;
         this.dom.addEventListener('mousedown', this.onMouseDown);
-        this.dom.addEventListener('pointermove', this.onPointerMove);
-        this.dom.addEventListener('pointerleave', this.onPointerLeave);
         window.addEventListener('keydown', this.onKeyDown);
     }
 
@@ -65,54 +58,6 @@ export class ProbeController {
         e.preventDefault();
         this.sampleAt(e.clientX, e.clientY);
     };
-
-    private onPointerMove = (e: PointerEvent): void => {
-        const rect = this.dom.getBoundingClientRect();
-        this.ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        this.ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        this.raycaster.setFromCamera(this.ndc, this.camera);
-
-        const hit = this.raycaster.intersectObjects(this.track.root.children, true)[0];
-        const name = hit ? this.resolveObjectName(hit.object) : undefined;
-        if (!name) {
-            this.onPointerLeave();
-            return;
-        }
-
-        this.hoverLabel.textContent = name;
-        this.hoverLabel.style.left = `${e.clientX + 14}px`;
-        this.hoverLabel.style.top = `${e.clientY + 14}px`;
-        this.hoverLabel.style.display = 'block';
-    };
-
-    private onPointerLeave = (): void => {
-        this.hoverLabel.style.display = 'none';
-    };
-
-    private resolveObjectName(object: THREE.Object3D): string | undefined {
-        const genericNames = new Set([
-            'road-surface',
-            'AsphaltRoad',
-            'red-white-curb',
-            'Surface',
-            'Edges',
-            'Surroundings',
-            'Logic',
-            'Collision',
-            'Debug',
-        ]);
-        let current: THREE.Object3D | null = object;
-        let fallback: string | undefined;
-        while (current && current !== this.track.root) {
-            const displayName = current.userData.displayName ?? current.userData.placementLabel;
-            if (typeof displayName === 'string' && displayName.length > 0) return displayName;
-            if (!fallback && current.name && !genericNames.has(current.name)) {
-                fallback = current.name;
-            }
-            current = current.parent;
-        }
-        return fallback;
-    }
 
     private sampleAt(clientX: number, clientY: number): void {
         const rect = this.dom.getBoundingClientRect();
@@ -144,11 +89,8 @@ export class ProbeController {
     dispose(): void {
         if (!this.develop) return;
         this.dom.removeEventListener('mousedown', this.onMouseDown);
-        this.dom.removeEventListener('pointermove', this.onPointerMove);
-        this.dom.removeEventListener('pointerleave', this.onPointerLeave);
         window.removeEventListener('keydown', this.onKeyDown);
         this.dom.style.cursor = this.cursorDefault;
-        this.hoverLabel.remove();
     }
 }
 

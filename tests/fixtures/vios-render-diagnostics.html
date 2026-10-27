@@ -17,7 +17,7 @@ sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-60,righ
 scene.add(sun);
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(160,160),new THREE.MeshStandardMaterial({color:0x697c65}));
 ground.rotation.x=-Math.PI/2;ground.position.y=-.015;ground.receiveShadow=true;scene.add(ground);
-const car=await Vehicle3.create('/models/toyota_vios_g.glb');scene.add(car.root);car.root.updateWorldMatrix(true,true);
+const car=await Vehicle3.create('/models/hiepphat_toyota_vios_g_nowheels.glb');scene.add(car.root);car.root.updateWorldMatrix(true,true);
 const camera=new THREE.PerspectiveCamera(45,1024/768,.1,200);
 const meshState=[];
 car.root.traverse(object=>{if(object instanceof THREE.Mesh)meshState.push({object,material:object.material,visible:object.visible,castShadow:object.castShadow,receiveShadow:object.receiveShadow});});

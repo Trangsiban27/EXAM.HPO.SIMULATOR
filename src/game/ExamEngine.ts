@@ -372,6 +372,7 @@ export class ExamEngine{
             };
             const result = this.pedestrianExercise.update(input);
             for (const evt of result.penalties) this.applyPenaltyEvent({ ...evt, lessonId: 2 });
+            if (result.readyBeep) this.pedestrianExercise.playReadyBeep();
             if (result.disqualified) {
                 const reason = result.disqualifyReason
                     ?? result.toast?.replace(/^Đình chỉ sát hạch — /, '')
@@ -413,7 +414,7 @@ export class ExamEngine{
             if (result.completed) {
                 this.activeIndex = 3;
             }
-            // Phát tiếng "Tút" khi nhận được flag readyBeep
+            // Phát chuông báo khởi hành khi nhận được flag readyBeep.
             if (result.readyBeep) {
                 this.hillExercise.playReadyBeep();
             }
@@ -529,7 +530,7 @@ export class ExamEngine{
     /** A curb touch ends the current normal-mode attempt, once. */
     disqualifyForRedWhiteCurb(): boolean {
         if (!this.scoringStarted || this.scoringMode !== 'normal' || this.finished) return false;
-        this.handleDisqualification(this.activeIndex, 'Chạm vạch đỏ trắng');
+        this.handleDisqualification(this.activeIndex, 'Lái xe lên vỉa hè');
         return true;
     }
     applyLinePenalty(zoneIndex:number,now:number){

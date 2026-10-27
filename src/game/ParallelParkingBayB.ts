@@ -316,6 +316,11 @@ export class ParallelParkingBayB {
         this.buildExamBoundary();
         if (opts.yellowDashedEntrance) this.buildYellowDashedEntrance();
         this.buildPhysicalCurb();
+        if (this.curbPattern === 'red-white') {
+            this.physicalEdgeGroup.traverse(object => {
+                if (object instanceof THREE.Mesh) object.userData.roadEdgeStrip = true;
+            });
+        }
         this.buildLogic();
         this.buildDebug();
     }
@@ -561,6 +566,8 @@ export class ParallelParkingBayB {
             const xMid = topStraightStart + (i + 0.5) * topSegLen;
             segMesh.position.set(sideSign * xMid, 0, 0);
             segMesh.name = `TopCurbSeg_${i}`;
+            segMesh.userData.roadEdgeGrassPath = [[topSegLen / 2, H / 2, W / 2],
+                [-topSegLen / 2, H / 2, W / 2]];
             segMesh.castShadow = true;
             segMesh.receiveShadow = true;
             topCurbGroup.add(segMesh);
@@ -667,6 +674,8 @@ export class ParallelParkingBayB {
             const xMid = topStraightEnd - (i + 0.5) * botSegLen;
             segMesh.position.set(sideSign * xMid, 0, 0);
             segMesh.name = `BottomCurbSeg_${i}`;
+            segMesh.userData.roadEdgeGrassPath = [[-botSegLen / 2, H / 2, -W / 2],
+                [botSegLen / 2, H / 2, -W / 2]];
             segMesh.castShadow = true;
             segMesh.receiveShadow = true;
             bottomCurbGroup.add(segMesh);

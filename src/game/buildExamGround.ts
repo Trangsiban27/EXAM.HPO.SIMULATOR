@@ -1,4 +1,6 @@
 import { ROAD_SURFACE_COLOR } from './roadStyle';
+import { createBuilding } from './createBuilding';
+import { createStartCanopy } from './createStartCanopy';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
 import { ExerciseSign } from './signs/ExerciseSign';
@@ -42,13 +44,21 @@ import {
 /** Positions and dimensions of the examination ground. */
 export function buildExamGround(objects: TrackObjects) {
     const showRoadLaneNumbers = false;
-    objects.showRoadLaneNumbers = showRoadLaneNumbers;
+    objects.showRoadLaneNumbers = showRoadLaneNumbers; 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 500),
         new THREE.MeshStandardMaterial({ color: 0x63735a, roughness: 1 }));
 
     ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
 
     objects.root.add(ground);
+
+    // Office outside the start apron. Its entrance faces back towards the yard (-Z).
+    const officeBuilding = createBuilding({
+        position: [25, 0, 30],
+        rotation: Math.PI,
+        scale: 1,
+    });
+    objects.root.add(officeBuilding);
 
     const startRoad = objects.addRoad(7.2, 18.2, 2 * 3.7, 20, 'horizontal', 'straight', 'white-dashed', 2);
     // Đầu đường này nối trực tiếp với crossingRoad ở x ≈ 17,2.
@@ -211,6 +221,18 @@ export function buildExamGround(objects: TrackObjects) {
     const islandTipX = startRoadEastEdgeX - 11.17;
     const islandCenterX = islandTipX + islandRadiusM;
     const islandCenterZ = (islandLeftZ + islandRightZ) / 2;
+    // Join the office's front corner to the island beside the starting line.
+    // The outside supports sit inside the island, leaving both lanes clear.
+    officeBuilding.updateWorldMatrix(true, false);
+    const canopyWall = officeBuilding.localToWorld(new THREE.Vector3(0, 0, 6.04));
+    const canopyLeftX = islandCenterX + .8;
+    const canopyRightX = startRoadEastEdgeX - .30;
+    objects.root.add(createStartCanopy({
+        width: canopyRightX - canopyLeftX,
+        depth: canopyWall.z - islandCenterZ + .20,
+        position: new THREE.Vector3((canopyLeftX + canopyRightX) / 2, 0, canopyWall.z),
+        rotationY: Math.PI,
+    }));
     const startRoadInnerCurbJoinLengthM = .8;
     const startRoadInnerCurbJoinX = islandCenterX + startRoadInnerCurbJoinLengthM;
     // Vạch đứt và lề ngoài kết thúc ở mũi đảo; lề trong nối sang đường bo.

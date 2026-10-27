@@ -1,3 +1,4 @@
+import { loadContinuousAutoDrive, saveContinuousAutoDrive } from '../game/autoDrive/autoDriveSettings';
 import { loadGraphicsQuality, saveGraphicsQuality, type GraphicsQuality } from '../game/graphicsQuality';
 import type { GameTelemetry } from '../game/types';
 import './manual-controls.css';
@@ -29,7 +30,7 @@ function lessonPickerLabel(lesson: AutoDriveLesson): string {
 }
 import './auto-drive.css';
 
-type Bindings = { onGraphicsQuality: (quality: GraphicsQuality) => void; onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void; onAutoDriveToggle: () => void; onLessonSelect: (lessonId: number) => void; onWaypointRecordingStart: () => boolean; onWaypointRecordingFinish: () => string };
+type Bindings = { onContinuousAutoDriveChange: (enabled: boolean) => void; onGraphicsQuality: (quality: GraphicsQuality) => void; onAnalog: (name: string, value: number) => void; onRestart: () => void; onCamera: () => void; onVirtual: (code: string, active: boolean) => void; onSignalChange: (state: { left: boolean; right: boolean; hazard: boolean }) => void; onSeatBelt: (fastened: boolean) => void; onAutoDriveToggle: () => void; onLessonSelect: (lessonId: number) => void; onWaypointRecordingStart: () => boolean; onWaypointRecordingFinish: () => string };
 type AutoLessonView = 'steps' | 'requirements' | 'penalties';
 
 export class Hud {
@@ -87,6 +88,11 @@ export class Hud {
                         <button id="autoDriveBtn" class="settings-btn" type="button" aria-pressed="false">Bật tự chạy</button>
                         <button id="changeClassBtn" class="settings-btn" type="button">🚗 Đổi hạng xe</button>
                     </div>
+
+                    <label class="auto-drive-continuous-option">
+                        <input id="autoDriveContinuous" type="checkbox" ${loadContinuousAutoDrive() ? 'checked' : ''}>
+                        <span><strong>Tự chạy liên tục</strong><small>Bỏ qua popup hướng dẫn từng bài</small></span>
+                    </label>
 
                     <fieldset class="graphics-quality">
                         <legend class="settings-section-label">CHẤT LƯỢNG ĐỒ HỌA</legend>
@@ -156,7 +162,7 @@ export class Hud {
                         ${options.develop ? `
                         <div class="settings-dev-box">
                             <div class="settings-dev-title">Chế độ Develop</div>
-                            <p class="settings-dev-desc">Chuột phải kéo nhìn · WASD di chuyển · Q/E lên xuống · Shift nhanh · P probe toạ độ · K lưu camera · Shift+K xoá camera</p>
+                            <p class="settings-dev-desc">Chuột phải kéo nhìn · WASD di chuyển · Q/E lên xuống · Shift nhanh · Ctrl khóa/mở tốc độ 8 m/s · P probe toạ độ · K lưu camera · Shift+K xoá camera</p>
                         </div>` : ''}
                     </div>
                 </div>
@@ -223,7 +229,10 @@ export class Hud {
     }
     private el(id: string) { return this.elements.get(id)!; }
     bind(b: Bindings) {
-        this.restart = b.onRestart;
+        this.restart = () => {
+            b.onRestart();
+            this.showAutomaticOverviewVideo();
+        };
         const wheels = [this.el('wheel'), document.getElementById('cabinWheelControl')]
             .filter((wheel): wheel is HTMLElement => wheel !== null);
         for (const wheel of wheels) {
@@ -282,8 +291,13 @@ export class Hud {
             }
             window.addEventListener('blur', () => { el.value = '0'; b.onAnalog(el.dataset.analog!, 0); });
         });
-        this.el('restartBtn').addEventListener('click', b.onRestart);
+        this.el('restartBtn').addEventListener('click', this.restart);
         this.el('autoDriveBtn').addEventListener('click', b.onAutoDriveToggle);
+        const continuous = this.el('autoDriveContinuous') as HTMLInputElement;
+        continuous.addEventListener('change', () => {
+            saveContinuousAutoDrive(continuous.checked);
+            b.onContinuousAutoDriveChange(continuous.checked);
+        });
         this.el('lessonSelect').addEventListener('change', () => {
             const lessonId = Number((this.el('lessonSelect') as HTMLSelectElement).value);
             if (lessonId) b.onLessonSelect(lessonId);
@@ -721,6 +735,9 @@ export class Hud {
 
     private videoModal?: HTMLDivElement;
     private videoPlayer?: HTMLVideoElement;
+    // This preference lasts only until the page reloads; restarting keeps it.
+    private skipAutomaticOverview = false;
+    private overviewReturnFocus?: HTMLElement;
 
     private initVideoModal(): void {
         const modal = document.createElement('div');
@@ -742,6 +759,13 @@ export class Hud {
                 <div class="video-wrapper">
                     <video id="overviewVideoPlayer" src="/video/welcome.mp4" controls preload="metadata" playsinline></video>
                 </div>
+                <div class="video-modal-footer">
+                    <label class="video-modal-preference">
+                        <input id="overviewVideoSkipRestart" type="checkbox" />
+                        <span>Không hiển thị lại</span>
+                    </label>
+                    <small>Lựa chọn được đặt lại khi tải lại trang.</small>
+                </div>
             </div>
         `;
         document.body.appendChild(modal);
@@ -751,10 +775,19 @@ export class Hud {
 
         const closeBtn = modal.querySelector<HTMLButtonElement>('#overviewVideoCloseBtn');
         const closeVideo = () => this.hideOverviewVideo();
+        const skipRestart = modal.querySelector<HTMLInputElement>('#overviewVideoSkipRestart')!;
+        skipRestart.addEventListener('change', () => {
+            this.skipAutomaticOverview = skipRestart.checked;
+        });
 
         closeBtn?.addEventListener('click', closeVideo);
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeVideo();
+        });
+        // Video controls and the checkbox must not operate the car's controls.
+        modal.addEventListener('keydown', (event) => {
+            event.stopPropagation();
+            if (event.code === 'Escape') closeVideo();
         });
         window.addEventListener('keydown', (e) => {
             if (e.code === 'Escape' && this.videoModal?.style.display !== 'none') {
@@ -763,13 +796,22 @@ export class Hud {
         });
     }
 
+    public showAutomaticOverviewVideo(): void {
+        if (this.options.develop || this.skipAutomaticOverview) return;
+        this.showOverviewVideo();
+    }
+
     public showOverviewVideo(): void {
         if (!this.videoModal) {
             this.initVideoModal();
         }
         if (this.videoModal && this.videoPlayer) {
+            this.overviewReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
             this.videoModal.style.display = 'flex';
             this.videoPlayer.currentTime = 0;
+            const skipRestart = this.videoModal.querySelector<HTMLInputElement>('#overviewVideoSkipRestart')!;
+            skipRestart.checked = this.skipAutomaticOverview;
+            this.videoModal.querySelector<HTMLButtonElement>('#overviewVideoCloseBtn')?.focus();
             void this.videoPlayer.play().catch(() => {});
         }
     }
@@ -778,6 +820,9 @@ export class Hud {
         if (this.videoModal && this.videoPlayer) {
             this.videoPlayer.pause();
             this.videoModal.style.display = 'none';
+            if (this.overviewReturnFocus?.isConnected && this.overviewReturnFocus.getClientRects().length) {
+                this.overviewReturnFocus.focus();
+            }
         }
     }
 }

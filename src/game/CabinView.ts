@@ -2,6 +2,7 @@ import { GRAPHICS_PRESETS, loadGraphicsQuality, type GraphicsQuality } from './g
 import * as THREE from 'three';
 import type { Vehicle } from './Vehicle';
 import { CabinInterior } from '../ui/CabinInterior';
+import { VehicleViewOcclusion } from './VehicleViewOcclusion';
 
 export const AUXILIARY_VIEW_FPS = 30;
 const AUXILIARY_VIEW_INTERVAL_MS = 1000 / AUXILIARY_VIEW_FPS;
@@ -15,6 +16,7 @@ interface CabinViewConfig {
 
 /** Live rear views and a driver-side shoulder reference, using the main renderer. */
 export class CabinView {
+    private readonly vehicleViewOcclusion = new VehicleViewOcclusion();
     private quality: GraphicsQuality = loadGraphicsQuality();
     setGraphicsQuality(quality: GraphicsQuality): void {
         this.quality = quality;
@@ -39,7 +41,7 @@ export class CabinView {
     private readonly viewScreen: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
     private readonly host: HTMLElement;
 
-    constructor(host: HTMLElement) {
+    constructor(host: HTMLElement, private readonly auxiliaryViewsEnabled = true) {
         this.host = host;
         const uv = this.mirrorGeometry.getAttribute('uv');
         for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
@@ -57,11 +59,10 @@ export class CabinView {
     }
 
     render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera,
-        vehicle: Vehicle, cabinActive: boolean, steeringWheelAngle: number) {
-        this.overlay.hidden = false;
+        vehicle: Vehicle, cabinActive: boolean, steeringWheelAngle: number, fadeObstructions = true) {
+        this.overlay.hidden = !cabinActive && !this.auxiliaryViewsEnabled;
         this.interior.root.hidden = !cabinActive;
-        this.frames[1].hidden = false;
-        this.frames[3].hidden = false;
+        for (const frame of this.frames) frame.hidden = !this.auxiliaryViewsEnabled;
         if (cabinActive) this.interior.update(vehicle, steeringWheelAngle);
         const w = this.host.clientWidth, h = this.host.clientHeight;
         renderer.setViewport(0, 0, w, h);
@@ -70,10 +71,13 @@ export class CabinView {
         // driver's main view, then restore it so all four auxiliary views see it.
         try {
             if (cabinActive) vehicle.root.visible = false;
+            else if (fadeObstructions) this.vehicleViewOcclusion.fade(scene, camera, vehicle.root);
             renderer.render(scene, camera);
         } finally {
+            this.vehicleViewOcclusion.restore();
             vehicle.root.visible = visible;
         }
+        if (!this.auxiliaryViewsEnabled) return;
         vehicle.root.updateWorldMatrix(true, true);
         const frame = vehicle.root.children.find(child => child.type === 'Group') ?? vehicle.root;
         const bounds = this.host.getBoundingClientRect();

@@ -1,7 +1,7 @@
 import { ROAD_SURFACE_COLOR } from './roadStyle';
 import * as THREE from 'three';
 import { CURB_VISUAL_HEIGHT_M, CURB_VISUAL_WIDTH_M } from './curbStyle';
-import { EXAM_03_STOP_LINE_LOCAL_Z, EXAM_03_YELLOW_LINE_LOCAL_Z } from './exam/examCourseGeometry';
+import { EXAM_03_STOP_LINE_LOCAL_Z, EXAM_03_YELLOW_LINE_LOCAL_Z, EXAM_03_ENTRY_CHIME_LINE } from './exam/examCourseGeometry';
 import {
     createStraightRoadArrowTexture,
     STRAIGHT_ROAD_ARROW_LENGTH_M,
@@ -69,6 +69,7 @@ export class Bridge {
             const mesh = box(width, thickness, Math.hypot(to - from, y2 - y1),
                 x, (y1 + y2) / 2 + lift, (from + to) / 2, material);
             mesh.rotation.x = -Math.atan2(y2 - y1, to - from);
+            return mesh;
         };
 
         // Closely sampled slopes soften the transition at the foot and crest.
@@ -86,9 +87,10 @@ export class Bridge {
                 strip(0, .12, from, to, .012, .008, white);
             }
             for (const side of [-1, 1]) {
-                strip(side * (this.width / 2 - CURB_VISUAL_WIDTH_M / 2),
+                const edgeStrip = strip(side * (this.width / 2 - CURB_VISUAL_WIDTH_M / 2),
                     CURB_VISUAL_WIDTH_M, from, to, .025, CURB_VISUAL_HEIGHT_M,
                     Math.floor(i / 3) % 2 === 0 ? white : red);
+                edgeStrip.userData.roadEdgeStrip = true;
                 strip(side * (this.width / 2 + .1), .08, from, to, .9, .08, metal);
             }
         }
@@ -104,10 +106,12 @@ export class Bridge {
         const yellowDashCount = 4;
         const yellowGap = .45;
         const yellowDashWidth = (yellowLineWidth - (yellowDashCount - 1) * yellowGap) / yellowDashCount;
+        const yellowHalfThicknessM = EXAM_03_ENTRY_CHIME_LINE.thicknessM / 2;
         for (let i = 0; i < yellowDashCount; i++) {
             const dashX = -yellowLineWidth / 2 + yellowDashWidth / 2 + i * (yellowDashWidth + yellowGap);
-            strip(dashX, yellowDashWidth, EXAM_03_YELLOW_LINE_LOCAL_Z + .075,
-                EXAM_03_YELLOW_LINE_LOCAL_Z - .075, .02, .012, yellow);
+            const dash = strip(dashX, yellowDashWidth, EXAM_03_YELLOW_LINE_LOCAL_Z + yellowHalfThicknessM,
+                EXAM_03_YELLOW_LINE_LOCAL_Z - yellowHalfThicknessM, .02, .012, yellow);
+            dash.name = 'bridge-entry-yellow-dashed-line';
         }
         // Stop line across the two lanes on the uphill approach.
         // Xe đi +X; local Z dương = world X nhỏ hơn = phía trước đỉnh dốc (xe đang lên dốc).

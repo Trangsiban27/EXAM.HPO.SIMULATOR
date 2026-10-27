@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="UTF-8"><title>Building preview</title>
+<style>body{margin:0;background:#9ec4e4;font:14px system-ui}canvas{display:block}#stats{position:fixed;left:16px;top:16px;background:#10252bd9;color:white;padding:12px;border-radius:8px}</style></head>
+<body><div id="stats"></div><script type="module">
+import * as THREE from '/node_modules/three/build/three.module.js';
+import { createBuilding } from '/src/game/createBuilding.ts';
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(1200,800);document.body.append(renderer.domElement);
+const scene = new THREE.Scene();scene.background = new THREE.Color(0x9ec4e4);
+scene.add(new THREE.HemisphereLight(0xddeeff,0x596347,2));
+const sun = new THREE.DirectionalLight(0xffffff,2.3);sun.position.set(-20,35,18);scene.add(sun);
+const building = createBuilding();scene.add(building);
+const camera = new THREE.PerspectiveCamera(42,1.5,.1,300);
+camera.position.set(30,18,36);camera.lookAt(0,6,1);
+renderer.render(scene,camera);
+const stats={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};
+document.querySelector('#stats').textContent=`Tòa nhà: ${stats.calls} draw call · ${stats.triangles} tam giác · không texture`;
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(150,150),new THREE.MeshStandardMaterial({color:0x75866d,roughness:1}));
+ground.rotation.x=-Math.PI/2;ground.position.y=-.01;scene.add(ground);
+renderer.render(scene,camera);
+window.buildingPreview={renderer,scene,camera,building,stats};window.diagnosticsReady=true;
+</script></body></html>

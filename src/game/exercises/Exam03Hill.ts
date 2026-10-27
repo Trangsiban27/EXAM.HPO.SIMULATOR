@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { PenaltyEvent } from '../types';
 import { EXAM_03_HILL_RULES, EXAM_VEHICLE_CLASS } from '../exam/examRules';
+import { ReadyChime } from './ReadyChime';
 
 /**
  * Bài sát hạch số 3 — Dừng và khởi hành xe ngang dốc (EXAM_03_HILL_STOP_AND_START).
@@ -25,7 +26,7 @@ import { EXAM_03_HILL_RULES, EXAM_VEHICLE_CLASS } from '../exam/examRules';
  *   STOP_EVALUATION
  *     ↓ (chuyển ngay sang WAITING_TO_START)
  *   WAITING_TO_START (chờ 2s)
- *     ↓ (2s) + phát tiếng "Tút"
+ *     ↓ (2s) + phát chuông báo khởi hành
  *   HILL_STARTING (timer 30s bắt đầu)
  *     ├── rollback > 0.5m → DISQUALIFIED
  *     ├── qua vạch → START_COMPLETED
@@ -77,7 +78,7 @@ export interface Exam03Result {
     stopClassification?: 'VALID_STOP' | 'STOP_TOO_EARLY' | 'STOP_OVER_LINE' | 'NO_REQUIRED_STOP';
     /** Số giây còn lại để khởi hành. */
     timeRemainingSec?: number;
-    /** Báo hiệu cần phát tiếng "Tút" (chỉ true 1 lần duy nhất). */
+    /** Báo hiệu cần phát chuông khởi hành (chỉ true 1 lần duy nhất). */
     readyBeep?: boolean;
     /** Lý do bị đình chỉ (chỉ có khi disqualified = true). */
     disqualifyReason?: string;
@@ -149,8 +150,9 @@ export class Exam03Hill {
     private stallLatched = false;
     private stallEventCount = 0;
 
-    /** Đã phát tiếng "Tút" báo hiệu chưa. */
+    /** Đã phát chuông báo hiệu chưa. */
     private readyBeepFired = false;
+    private readonly readyChime = new ReadyChime();
     private waitingToastFired = false;
 
     /** Thời điểm bắt đầu timer 30s (sau khi phát beep). */
@@ -214,6 +216,7 @@ export class Exam03Hill {
     }
 
     reset(): void {
+        this.readyChime.stop();
         this.state = 'INACTIVE';
         this.stoppedSince = 0;
         this.activatedAt = 0;
@@ -386,7 +389,7 @@ export class Exam03Hill {
             // #region agent log — H1 fix verify
             fetch('http://127.0.0.1:7243/ingest/41ea114a-de22-43e0-a2f5-b772e9ee7100',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a36477'},body:JSON.stringify({sessionId:'a36477',location:'Exam03Hill.ts:410',message:'WAITING_TO_START frame',data:{elapsedSec,waitingToastFired:this.waitingToastFired,readyBeepFired:this.readyBeepFired},runId:'dbg-waitingToast',hypothesisId:'H1fix',timestamp:Date.now()})}).catch(()=>{});
             // #endregion
-            // Sau 2 giây → phát tiếng "Tút" và bắt đầu timer 30s
+            // Sau 2 giây → phát chuông và bắt đầu timer 30s
             if (elapsedSec >= READY_WAIT_SEC && !this.readyBeepFired) {
                 this.readyBeepFired = true;
                 this.startDeadlineAt = now;
@@ -565,36 +568,8 @@ export class Exam03Hill {
         }
     }
 
-    /**
-     * Phát tiếng "Tút" báo hiệu sẵn sàng khởi hành.
-     * Dùng Web Audio API để tạo âm thanh giống tiếng còi xe.
-     */
+    /** Phát bản ghi chuông báo hiệu sẵn sàng khởi hành. */
     playReadyBeep(): void {
-        try {
-            const ctx = new AudioContext();
-            const oscillator = ctx.createOscillator();
-            const gainNode = ctx.createGain();
-
-            oscillator.connect(gainNode);
-            gainNode.connect(ctx.destination);
-
-            // Tần số cao hơn cho tiếng còi ~880Hz
-            oscillator.frequency.setValueAtTime(880, ctx.currentTime);
-            // Giảm dần tần số để tạo hiệu ứng "tút"
-            oscillator.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
-
-            // Âm lượng envelope: fade in/out nhanh
-            gainNode.gain.setValueAtTime(0, ctx.currentTime);
-            gainNode.gain.linearRampToValueAtTime(0.4, ctx.currentTime + 0.02);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
-
-            oscillator.start(ctx.currentTime);
-            oscillator.stop(ctx.currentTime + 0.3);
-
-            // Đóng context sau khi phát xong
-            setTimeout(() => ctx.close(), 500);
-        } catch {
-            // Audio context có thể không khả dụng
-        }
+        this.readyChime.play();
     }
 }

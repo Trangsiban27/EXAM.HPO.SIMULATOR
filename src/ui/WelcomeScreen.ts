@@ -4,6 +4,7 @@ export type WelcomeClassOption = 'b-auto' | 'b-manual' | 'c1';
 
 export interface WelcomeScreenOptions {
     onStart?: (selectedClass: WelcomeClassOption) => void;
+    onBeginLesson?: () => void;
 }
 
 export class WelcomeScreen {
@@ -12,10 +13,13 @@ export class WelcomeScreen {
     private guideReturnFocus?: HTMLElement;
     private selectedClass: WelcomeClassOption = 'b-manual';
     private onStartCallback?: (selectedClass: WelcomeClassOption) => void;
+    private onBeginLessonCallback?: () => void;
+    private guideOpenedFromStart = false;
     private toastTimer = 0;
 
     constructor(container: HTMLElement, options: WelcomeScreenOptions = {}) {
         this.onStartCallback = options.onStart;
+        this.onBeginLessonCallback = options.onBeginLesson;
         this.root = document.createElement('div');
         this.root.className = 'welcome-overlay';
         this.root.id = 'welcomeOverlay';
@@ -523,7 +527,9 @@ export class WelcomeScreen {
         const guideControlsView = this.root.querySelector<HTMLDivElement>('#guideControlsView');
 
         guideCloseBtnBottom?.addEventListener('click', () => {
+            const beginsLesson = this.guideOpenedFromStart;
             this.hideGuide();
+            if (beginsLesson) this.onBeginLessonCallback?.();
         });
 
         const guideModalHeader = this.root.querySelector<HTMLDivElement>('#guideModalHeader');
@@ -568,6 +574,7 @@ export class WelcomeScreen {
     }
 
     public showGuide(fromStart: boolean = false): void {
+        this.guideOpenedFromStart = fromStart;
         this.guideReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
         this.updateGuideCloseButton(fromStart);
         this.guideModal.style.display = 'flex';
@@ -595,6 +602,7 @@ export class WelcomeScreen {
     }
 
     private hideGuide(): void {
+        this.guideOpenedFromStart = false;
         this.guideModal.style.display = 'none';
         this.updateGuideCloseButton(false);
         this.guideReturnFocus?.focus();

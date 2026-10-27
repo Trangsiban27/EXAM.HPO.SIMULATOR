@@ -330,7 +330,7 @@ export class PerpendicularParkingBayB {
             (this.parkingDepthM - parkingRadius) / 2,
             this.parkingDepthM - parkingRadius, 'vertical', y);
         this.addSegmentedCurb('ParkingBottomCurb', 0, this.parkingDepthM,
-            this.geometry.openingWidthM - 2 * parkingRadius + this.curbWidthM,
+            this.geometry.openingWidthM - 2 * parkingRadius,
             'horizontal', y);
         this.addSegmentedCurb('ParkingRightCurb', openingRightX,
             (this.parkingDepthM - parkingRadius) / 2,
@@ -460,6 +460,15 @@ export class PerpendicularParkingBayB {
             const mesh = new THREE.Mesh(geometry, materials[i % materials.length]);
             mesh.name = colors.length === 1 ? name : 'red-white-curb';
             mesh.position.y = baseY;
+            if (colors.length > 1) {
+                // All bay outline arcs have grass outside the radius. Supplying
+                // the actual edge avoids choosing the inside of short stripes.
+                mesh.userData.roadEdgeGrassPath = Array.from({ length: 9 }, (_, j) => {
+                    const angle = start + (end - start) * j / 8;
+                    return [centerX + outerRadius * Math.cos(angle), heightM,
+                        centerZ + outerRadius * Math.sin(angle)];
+                });
+            }
             mesh.castShadow = colors.length > 1;
             mesh.receiveShadow = true;
             group.add(mesh);
@@ -524,6 +533,32 @@ export class PerpendicularParkingBayB {
                 y,
                 direction === 'horizontal' ? z : z - lengthM / 2 + index * segmentLengthM + segmentM / 2,
             );
+            const width = Math.min(this.curbWidthM, CURB_VISUAL_WIDTH_M);
+            const grassSide = name === 'ParkingLeftCurb' || name === 'MainRoadStartCap'
+                || name === 'MainRoadOuterCurb' ? -1 : 1;
+            // Explicit local paths keep every short end stripe on the same side.
+            curb.userData.roadEdgeGrassPath = direction === 'horizontal'
+                ? [[grassSide * segmentM / 2, this.curbHeightM / 2, grassSide * width / 2],
+                    [-grassSide * segmentM / 2, this.curbHeightM / 2, grassSide * width / 2]]
+                : [[grassSide * width / 2, this.curbHeightM / 2, -grassSide * segmentM / 2],
+                    [grassSide * width / 2, this.curbHeightM / 2, grassSide * segmentM / 2]];
+            // Meet the perpendicular grass-facing paths at one shared corner.
+            // Their centre lines meet at z=0, but their outer edges are offset
+            // by half the paint width; leaving those endpoints apart creates
+            // two square curb caps protruding through each other.
+            if (name === 'MainRoadInnerLeftCurb' || name === 'MainRoadInnerRightCurb'
+                || name === 'ParkingLeftCurb' || name === 'ParkingRightCurb') {
+                const left = name === 'MainRoadInnerLeftCurb' || name === 'ParkingLeftCurb';
+                const cornerX = left ? this.geometry.openingLeftX : this.geometry.openingRightX;
+                for (const point of curb.userData.roadEdgeGrassPath as number[][]) {
+                    const px = point[0] + curb.position.x, pz = point[2] + curb.position.z;
+                    if (Math.abs(px - cornerX) <= width / 2 + 1e-6
+                        && Math.abs(pz) <= width / 2 + 1e-6) {
+                        point[0] = cornerX + (left ? -1 : 1) * width / 2 - curb.position.x;
+                        point[2] = width / 2 - curb.position.z;
+                    }
+                }
+            }
             curb.castShadow = true;
             curb.receiveShadow = true;
             group.add(curb);

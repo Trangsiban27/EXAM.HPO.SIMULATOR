@@ -27,6 +27,7 @@ const AUTO_DRIVE_SPEED_MPS = 2.6;
 const AUTO_DRIVE_REVERSE_SPEED_MPS = 5 / 3.6;
 const AUTO_DRIVE_BRAKING_MPS2 = 3.5;
 const GEAR_CHANGE_PAUSE_SEC = 1.5;
+const CONTINUOUS_LESSON_PAUSE_SEC = 2;
 const RAILWAY_STOP_FRONT_GAP_M = .5;
 const TRAFFIC_STOP_FRONT_GAP_M = .5;
 const TRAFFIC_GREEN_COMMIT_SEC = 2;
@@ -39,6 +40,9 @@ type Exam04GateWaypoint = { beforeIndex: number; point: AutoDriveWaypoint };
 /** Drives a slow route and pauses at each lesson checkpoint. */
 export class AutoDriveController {
     enabled = false;
+    private continuous = false;
+    private continuousPauseRemaining = 0;
+    private pausedLesson: AutoDriveLesson | null = null;
     private stops: Stop[];
     private routes: THREE.Vector3[][];
     private stopIndex = 0;
@@ -91,9 +95,9 @@ export class AutoDriveController {
 
     constructor(
         lessons: readonly AutoDriveLesson[],
-        private readonly publishLesson: (lesson: AutoDriveLesson | null) => void,
+        private readonly onLesson: (lesson: AutoDriveLesson | null) => void,
         private readonly onComplete: () => void,
-        private readonly onWaypointStop: (kind: WaypointStopKind) => void,
+        private readonly publishWaypointStop: (kind: WaypointStopKind) => void,
         private readonly vehicleClass: ExamVehicleClass,
         private readonly exam04StartYellowSensor: THREE.Box3,
         private readonly southTrafficLight?: TrafficLight,
@@ -134,6 +138,52 @@ export class AutoDriveController {
         if (this.trafficStopWaypointIndex !== undefined) {
             this.stops[4].position.copy(this.routes[3][this.trafficStopWaypointIndex]);
         }
+    }
+
+    setContinuous(enabled: boolean): void {
+        this.continuous = enabled;
+        if (!enabled) {
+            const pending = this.continuousPauseRemaining > 0;
+            this.continuousPauseRemaining = 0;
+            if (pending && this.waitingForLesson) this.onLesson(this.pausedLesson);
+            else if (pending && this.waypointStopReady) this.publishWaypointStop(this.waypointStopKind);
+            this.pausedLesson = null;
+            return;
+        }
+        if (!this.enabled || this.isWaypointRecording) return;
+        if (this.waitingForLesson) {
+            this.pausedLesson ??= this.stops[this.stopIndex]?.lesson ?? null;
+            this.continuousPauseRemaining = CONTINUOUS_LESSON_PAUSE_SEC;
+            this.onLesson(null);
+        } else if (this.waypointStopReady && this.canContinueCheckpoint()) {
+            this.continuousPauseRemaining = CONTINUOUS_LESSON_PAUSE_SEC;
+            this.onLesson(null);
+        }
+    }
+
+    private canContinueCheckpoint(): boolean {
+        return (this.waypointStopKind === 'exam05' && !!this.exam06ApproachRoute?.length)
+            || (this.waypointStopKind === 'exam07' && !!this.exam08ApproachRoute?.length)
+            || (this.waypointStopKind === 'exam08' && !!this.exam09ApproachRoute?.length)
+            || this.waypointStopKind === 'exam09' || this.waypointStopKind === 'exam10';
+    }
+
+    private publishLesson(lesson: AutoDriveLesson | null): void {
+        if (lesson && this.continuous && !this.isWaypointRecording) {
+            this.pausedLesson = lesson;
+            this.continuousPauseRemaining = CONTINUOUS_LESSON_PAUSE_SEC;
+            return;
+        }
+        this.onLesson(lesson);
+    }
+
+    private onWaypointStop(kind: WaypointStopKind): void {
+        if (this.continuous && !this.isWaypointRecording && this.canContinueCheckpoint()) {
+            this.continuousPauseRemaining = CONTINUOUS_LESSON_PAUSE_SEC;
+            return;
+        }
+        // A checkpoint without a saved continuation still needs manual intervention.
+        this.publishWaypointStop(kind);
     }
 
     get currentExamNumber(): number {
@@ -204,6 +254,8 @@ export class AutoDriveController {
     }
 
     start(vehicle: Vehicle): void {
+        this.continuousPauseRemaining = 0;
+        this.pausedLesson = null;
         this.enabled = true;
         vehicle.transmission.car.engine.start();
         vehicle.transmission.status = 'Máy đang chạy';
@@ -440,6 +492,8 @@ export class AutoDriveController {
     }
 
     stop(): void {
+        this.continuousPauseRemaining = 0;
+        this.pausedLesson = null;
         this.finishRightSignalOn = false;
         this.southExitLeftSignalOn = false;
         this.enabled = false;
@@ -460,6 +514,8 @@ export class AutoDriveController {
 
     /** Resume driving after the learner has read the current lesson. */
     continueLesson(): void {
+        this.continuousPauseRemaining = 0;
+        this.pausedLesson = null;
         if (this.enabled && this.waypointStopReady
             && (this.waypointStopKind === 'exam09' || this.waypointStopKind === 'exam10')) {
             this.waypointStopReady = false;
@@ -549,6 +605,16 @@ export class AutoDriveController {
             if (vehicle.signals.left !== left || vehicle.signals.right || vehicle.signals.hazard) {
                 vehicle.setSignal({ left, right: false, hazard: false });
             }
+        }
+
+        if (this.continuousPauseRemaining > 0) {
+            this.currentSpeed = this.approach(this.currentSpeed, 0, AUTO_DRIVE_BRAKING_MPS2 * dt);
+            vehicle.updateAutomatic(dt, 0, this.currentSpeed);
+            if (this.currentSpeed === 0) {
+                this.continuousPauseRemaining = Math.max(0, this.continuousPauseRemaining - dt);
+                if (this.continuousPauseRemaining <= 1e-6) this.continueLesson();
+            }
+            return;
         }
 
         if (this.waypointStopReady) {

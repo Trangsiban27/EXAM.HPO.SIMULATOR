@@ -28,6 +28,7 @@ hud.setVisible(develop);
 let gameInstance: DrivingGame | null = null;
 
 const welcomeScreen = new WelcomeScreen(document.body, {
+    onBeginLesson: () => hud.showAutomaticOverviewVideo(),
     onStart: (selectedClass: WelcomeClassOption) => {
         hud.setVisible(true);
         if (gameInstance) {

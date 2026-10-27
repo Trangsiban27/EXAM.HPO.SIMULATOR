@@ -1,0 +1,27 @@
+<!doctype html><html><head><base href="/"><meta charset="utf-8"><title>Parking display diagnostics</title><style>body{margin:0}canvas{display:block}</style></head><body><script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { Track } from '/src/game/Track.ts';
+import { addParkingDisplayCars, DISPLAY_CAR_LAYER, PARKING_DISPLAY_POSITIONS } from '/src/game/ParkingDisplayCars.ts';
+const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.setSize(1280,900);document.body.append(renderer.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x9ec4e4);scene.add(new THREE.HemisphereLight(0xddeeff,0x596347,2));const sun=new THREE.DirectionalLight(0xffffff,2.3);sun.position.set(-20,35,18);scene.add(sun);
+const signNames=['StopSign','StackedPedestrianStopSign','StackedRailwayStopSign','UphillWarningSign','DownhillWarningSign','WindingCourseClassSign','Exam05JunctionSigns','Exam05TurnJunctionSigns','SpeedLimit20EndAccelerationSign','MinimumSpeed20StartDecelerationSign'];
+await Promise.all(signNames.map(async name=>{const module=await import(/* @vite-ignore */ `/src/game/signs/${name}.ts`);await module[name].preload();}));
+const {RailwayCrossingRoad}=await import('/src/game/RailwayCrossingRoad.ts');await RailwayCrossingRoad.preload();
+const track=new Track();scene.add(track.root);const cars=await addParkingDisplayCars(track.root);
+const camera=new THREE.PerspectiveCamera(48,1280/900,.1,200);camera.layers.enable(DISPLAY_CAR_LAYER);camera.position.set(-35,36,20);camera.lookAt(-3,0,-1);renderer.render(scene,camera);
+const isolated=new THREE.Scene();isolated.add(cars.clone(true),new THREE.HemisphereLight(0xddeeff,0x596347,2));renderer.render(isolated,camera);const main={...renderer.info.render};camera.layers.set(0);renderer.render(isolated,camera);const auxiliary={...renderer.info.render};camera.layers.enable(DISPLAY_CAR_LAYER);
+track.root.updateWorldMatrix(true,true);const ray=new THREE.Raycaster();const surfaces=PARKING_DISPLAY_POSITIONS.map(p=>{ray.set(new THREE.Vector3(p.x,3,p.z),new THREE.Vector3(0,-1,0));return ray.intersectObject(track.root,true).filter(h=>h.point.y<.1).slice(0,3).map(h=>({name:h.object.name,y:h.point.y}));});
+renderer.render(scene,camera);
+async function renderOriginal() {
+ const {scene:reference}=await new GLTFLoader().loadAsync('/models/toyota_vios_parking.glb');
+ reference.rotation.y=Math.PI;reference.updateMatrixWorld(true);
+ const bounds=new THREE.Box3().setFromObject(reference),center=bounds.getCenter(new THREE.Vector3());
+ reference.position.set(-center.x,-bounds.min.y,-center.z);
+ const originalCars=new THREE.Group();
+ for(const p of PARKING_DISPLAY_POSITIONS){const slot=new THREE.Group();slot.position.set(p.x,.065,p.z);slot.rotation.y=p.heading;slot.add(reference.clone(true));originalCars.add(slot);}
+ scene.add(originalCars);cars.visible=false;renderer.render(scene,camera);
+ return ()=>{scene.remove(originalCars);cars.visible=true;renderer.render(scene,camera);};
+}
+window.parkingDiagnostics={renderer,scene,camera,cars,main,auxiliary,surfaces,renderOriginal};window.diagnosticsReady=true;
+</script></body></html>

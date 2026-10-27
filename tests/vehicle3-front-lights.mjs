@@ -5,7 +5,7 @@ const b=await build({stdin:{contents:`export * as THREE from 'three';export {GLT
 const m={exports:{}};new Function('module','exports',b.outputFiles[0].text)(m,m.exports);
 const {THREE,GLTFLoader,Vehicle3}=m.exports;
 globalThis.ProgressEvent=class{constructor(type,init){Object.assign(this,init)}};
-const glb=fs.readFileSync('public/models/toyota_vios_g.glb');
+const glb=fs.readFileSync('public/models/hiepphat_toyota_vios_g_nowheels.glb');
 const jsonLength=glb.readUInt32LE(12),json=JSON.parse(glb.subarray(20,20+jsonLength));
 const bin=glb.subarray(28+jsonLength);
 json.buffers=[{byteLength:bin.length,uri:'data:application/octet-stream;base64,'+bin.toString('base64')}];

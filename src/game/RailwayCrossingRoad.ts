@@ -156,6 +156,7 @@ export class RailwayCrossingRoad {
             );
 
             const offsetX = side * (this.roadWidthM / 2 - curbWidth / 2);
+            curb.userData.roadEdgeStrip = true;
             curb.position.set(
                 offsetX,
                 0.08 / 2 + curbHeight / 2 + 0.02,

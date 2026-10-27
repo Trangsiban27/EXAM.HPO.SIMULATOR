@@ -1,3 +1,4 @@
+import { DISPLAY_CAR_LAYER } from './ParkingDisplayCars';
 import * as THREE from 'three';
 import {Vehicle} from './Vehicle';
 import {notify} from '../ui/Notify';
@@ -27,15 +28,20 @@ export class CameraManager {
     private freeYaw = 0;
     private freePitch = Math.PI * .15; // slight downward angle initially
     private freePosition = new THREE.Vector3(0, 10, 20);
+    private freeCameraSpeedLocked = false;
     private dragging = false;
     private lastMouseX = 0;
     private lastMouseY = 0;
 
     constructor(_develop?: boolean) {
+        this.camera.layers.enable(DISPLAY_CAR_LAYER);
         this.developMode = _develop ?? false;
 
         // Bind mouse event handlers for free camera
         if (this.developMode) {
+            // Keep the entire yard visible from distant aerial viewpoints.
+            this.camera.far = 1500;
+            this.camera.updateProjectionMatrix();
             this.restoreFreeCamera();
             document.addEventListener('mousedown', this.onMouseDown);
             document.addEventListener('mousemove', this.onMouseMove);
@@ -72,11 +78,21 @@ export class CameraManager {
     };
 
     private onKeyDown = (e: KeyboardEvent): void => {
-        if (e.code !== 'KeyK') return;
         const target = e.target as HTMLElement | null;
         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
             return;
         }
+
+        if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
+            if (e.repeat) return;
+            e.preventDefault();
+            this.freeCameraSpeedLocked = !this.freeCameraSpeedLocked;
+            notify.show(this.freeCameraSpeedLocked
+                ? 'Đã khóa tốc độ camera ở 8 m/s'
+                : 'Đã mở khóa tốc độ camera', {kind: 'info', durationMs: 1400});
+            return;
+        }
+        if (e.code !== 'KeyK') return;
 
         e.preventDefault();
         if (e.shiftKey) {
@@ -182,8 +198,8 @@ export class CameraManager {
 
         // Get speed multiplier from Shift key
         const shift = input?.isDown?.('ShiftLeft') || input?.isDown?.('ShiftRight');
-        const speed = shift ? SPEED * FAST_MULTIPLIER : SPEED;
-        const vSpeed = shift ? VERTICAL_SPEED * FAST_MULTIPLIER : VERTICAL_SPEED;
+        const speed = this.freeCameraSpeedLocked ? 4 : shift ? SPEED * FAST_MULTIPLIER : SPEED;
+        const vSpeed = this.freeCameraSpeedLocked ?4 : shift ? VERTICAL_SPEED * FAST_MULTIPLIER : VERTICAL_SPEED;
 
         // Compute camera basis vectors from yaw/pitch
         const cosPitch = Math.cos(this.freePitch);

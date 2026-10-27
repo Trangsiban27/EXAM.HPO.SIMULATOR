@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Read GLB file
-const glbPath = path.join(__dirname, 'public/models/toyota_vios_g.glb');
+const glbPath = path.join(__dirname, 'public/models/hiepphat_toyota_vios_g_nowheels.glb');
 const buffer = fs.readFileSync(glbPath);
 
 // GLB is GLTF binary format

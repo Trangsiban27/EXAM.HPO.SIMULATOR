@@ -1,15 +1,14 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Vehicle } from './Vehicle';
-import { Vehicle3WheelAssembly } from './Vehicle3Wheels';
+import { Vehicle3WheelAssembly, VIOS_BODY_RIDE_LIFT_M } from './Vehicle3Wheels';
 import { SteeringSystem, steeringConfig, advanceVehicle } from './drivetrain/SteeringSystem';
 import type { InputManager } from './InputManager';
 
 /**
  * Vehicle3 renders the Toyota Vios G GLB bodywork.
- * The source asset is a Sketchfab-cleaned, material-merged mesh: wheels and turn
- * signals are not separated, so we overlay procedural wheels and inherit all
- * physics/input/steering from Vehicle.
+ * The wheel-less GLB supplies the body only; all four wheels are procedural.
+ * Physics, scoring probes and steering pivots retain their existing dimensions.
  */
 export class Vehicle3 extends Vehicle {
     private wheelAssy!: Vehicle3WheelAssembly;
@@ -24,7 +23,7 @@ export class Vehicle3 extends Vehicle {
         this.root.name = 'vehicle3-glb';
     }
 
-    static async create(url = new URL('models/toyota_vios_g.glb', document.baseURI).href) {
+    static async create(url = new URL('models/hiepphat_toyota_vios_g_nowheels.glb', document.baseURI).href) {
         const gltf = await new GLTFLoader().loadAsync(url);
         const vehicle = new Vehicle3();
         vehicle.attachModel(gltf.scene);
@@ -50,19 +49,9 @@ export class Vehicle3 extends Vehicle {
         // the same direction the car drives (towards the start line).
         model.rotation.y = Math.PI;
         this.visual.add(model);
-        // Compute the world-space bounding box of every inner mesh (the GLB has
-        // nested group rotations, so the top-level box is not enough) and lift
-        // the whole body so the lowest vertex sits on the road plane (Y=0).
-        model.updateMatrixWorld(true);
-        const bodyBox = new THREE.Box3();
-        model.traverse(object => {
-            if (!(object instanceof THREE.Mesh)) return;
-            object.geometry.computeBoundingBox();
-            const localBox = object.geometry.boundingBox!.clone();
-            localBox.applyMatrix4(object.matrixWorld);
-            bodyBox.union(localBox);
-        });
-        const rideLift = -bodyBox.min.y;
+        // A wheel-less body must keep its calibrated wheel-contact reference.
+        // Grounding the underbody itself incorrectly lowers the car by 18.6 cm.
+        const rideLift = VIOS_BODY_RIDE_LIFT_M;
         model.position.set(0, rideLift, 0);
         this.root.updateWorldMatrix(true, true);
 
