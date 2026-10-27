@@ -33,6 +33,7 @@ import {
     EXAM_02_ROAD_LENGTH_M,
     EXAM_02_APPROACH_LENGTH_M,
     EXAM_02_STOP_LINE_X,
+    EXAM_02_APPROACH_VOICE_LINE,
     EXAM_03_BRIDGE_CENTER_X,
     EXAM_03_STOP_LINE_X,
     EXAM_05_FINISH_CROSSWALK_X,
@@ -520,6 +521,27 @@ export function buildExamGround(objects: TrackObjects) {
         }
     }
     objects.addLine(separatorX, crossingRoadZ, .18, crossingRoadWidthM - .4, 0xffffff);
+    // Dùng cùng tọa độ với cảm biến phát hướng dẫn bài 2.
+    const approachVoiceLine = EXAM_02_APPROACH_VOICE_LINE;
+    const approachDashCount = 7;
+    const approachDashGapM = .35;
+    const approachDashLengthM = (approachVoiceLine.widthM
+        - approachDashGapM * (approachDashCount - 1)) / approachDashCount;
+    const approachDashes = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(approachVoiceLine.thicknessM, .012, approachDashLengthM),
+        new THREE.MeshBasicMaterial({ color: 0xffd700 }),
+        approachDashCount,
+    );
+    approachDashes.name = 'EX02_APPROACH_YELLOW_DASHED_LINE';
+    approachDashes.position.set(approachVoiceLine.x, .083, approachVoiceLine.z);
+    const approachDashMatrix = new THREE.Matrix4();
+    for (let i = 0; i < approachDashCount; i++) {
+        approachDashMatrix.makeTranslation(0, 0, -approachVoiceLine.widthM / 2
+            + approachDashLengthM / 2 + i * (approachDashLengthM + approachDashGapM));
+        approachDashes.setMatrixAt(i, approachDashMatrix);
+    }
+    approachDashes.instanceMatrix.needsUpdate = true;
+    objects.root.add(approachDashes);
     objects.addPedestrianCrossing(
         separatorX + crossingLengthM / 2, crossingRoadZ,
         'horizontal', crossingRoadWidthM, 5,
